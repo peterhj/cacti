@@ -1,0 +1,7 @@
+[package]
+name = "cacti_cuffi"
+version = "0.1.0-devel"
+edition = "2018"
+
+[dependencies]
+libloading = { path = "../dep/libloading" }

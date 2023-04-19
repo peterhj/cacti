@@ -2,3 +2,17 @@
 name = "cacti"
 version = "0.1.0-devel"
 edition = "2018"
+
+[profile.release]
+overflow-checks = true
+panic = "abort"
+codegen-units = 1
+incremental = false
+
+[features]
+default = ["gpu"]
+gpu = ["cacti_cuffi"]
+
+[dependencies]
+cacti_cuffi = { path = "cacti_cuffi", optional = true }
+repugnant_pickle = { path = "dep/repugnant_pickle" }
