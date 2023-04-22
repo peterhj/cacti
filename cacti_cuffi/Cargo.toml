@@ -2,6 +2,13 @@
 name = "cacti_cuffi"
 version = "0.1.0-devel"
 edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = []
+experimental = []
 
 [dependencies]
+libc = { path = "../dep/libc" }
 libloading = { path = "../dep/libloading" }
+once_cell = { path = "../dep/once_cell" }
