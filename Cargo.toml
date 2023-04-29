@@ -11,8 +11,14 @@ incremental = false
 
 [features]
 default = ["gpu"]
-gpu = ["cacti_cuffi"]
+gpu = ["cacti_cuffi", "futhark_ffi"]
 
 [dependencies]
 cacti_cuffi = { path = "cacti_cuffi", optional = true }
+futhark_ffi = { path = "dep/futhark_ffi", optional = true }
+msgpack_serialize = { path = "dep/msgpack_serialize" }
 repugnant_pickle = { path = "dep/repugnant_pickle" }
+
+[[bin]]
+name = "inspect_pth"
+path = "tools/inspect_pth.rs"

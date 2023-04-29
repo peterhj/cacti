@@ -29,9 +29,7 @@ pub type CudartResult<T=()> = Result<T, i32>;
 
 pub fn cudart_get_dev_count() -> CudartResult<i32> {
   let mut c = 0;
-  let e = unsafe {
-    (LIBCUDART.cudaGetDeviceCount.as_ref().unwrap())(&mut c as *mut _)
-  };
+  let e = (LIBCUDART.cudaGetDeviceCount.as_ref().unwrap())(&mut c as *mut _);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -40,9 +38,7 @@ pub fn cudart_get_dev_count() -> CudartResult<i32> {
 
 pub fn cudart_get_cur_dev() -> CudartResult<i32> {
   let mut dev: c_int = -1;
-  let e = unsafe {
-    (LIBCUDART.cudaGetDevice.as_ref().unwrap())(&mut dev as *mut _)
-  };
+  let e = (LIBCUDART.cudaGetDevice.as_ref().unwrap())(&mut dev as *mut _);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -50,9 +46,7 @@ pub fn cudart_get_cur_dev() -> CudartResult<i32> {
 }
 
 pub fn cudart_set_cur_dev(dev: i32) -> CudartResult {
-  let e = unsafe {
-    (LIBCUDART.cudaSetDevice.as_ref().unwrap())(dev)
-  };
+  let e = (LIBCUDART.cudaSetDevice.as_ref().unwrap())(dev);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -62,9 +56,7 @@ pub fn cudart_set_cur_dev(dev: i32) -> CudartResult {
 pub fn cudart_get_mem_info() -> CudartResult<(usize, usize)> {
   let mut free = 0;
   let mut total = 0;
-  let e = unsafe {
-    (LIBCUDART.cudaMemGetInfo.as_ref().unwrap())(&mut free as *mut _, &mut total as *mut _)
-  };
+  let e = (LIBCUDART.cudaMemGetInfo.as_ref().unwrap())(&mut free as *mut _, &mut total as *mut _);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -72,9 +64,7 @@ pub fn cudart_get_mem_info() -> CudartResult<(usize, usize)> {
 }
 
 pub fn cudart_sync() -> CudartResult {
-  let e = unsafe {
-    (LIBCUDART.cudaDeviceSynchronize.as_ref().unwrap())()
-  };
+  let e = (LIBCUDART.cudaDeviceSynchronize.as_ref().unwrap())();
   if e != cudaSuccess {
     return Err(e);
   }
@@ -83,9 +73,7 @@ pub fn cudart_sync() -> CudartResult {
 
 pub fn cudart_malloc(sz: usize) -> CudartResult<*mut c_void> {
   let mut ptr = null_mut();
-  let e = unsafe {
-    (LIBCUDART.cudaMalloc.as_ref().unwrap())(&mut ptr as *mut _, sz)
-  };
+  let e = (LIBCUDART.cudaMalloc.as_ref().unwrap())(&mut ptr as *mut _, sz);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -93,9 +81,7 @@ pub fn cudart_malloc(sz: usize) -> CudartResult<*mut c_void> {
 }
 
 pub fn cudart_free(ptr: *mut c_void) -> CudartResult {
-  let e = unsafe {
-    (LIBCUDART.cudaFree.as_ref().unwrap())(ptr)
-  };
+  let e = (LIBCUDART.cudaFree.as_ref().unwrap())(ptr);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -103,9 +89,7 @@ pub fn cudart_free(ptr: *mut c_void) -> CudartResult {
 }
 
 pub fn cudart_memcpy(dst: *mut c_void, src: *const c_void, sz: usize, stream: &CudartStream) -> CudartResult {
-  let e = unsafe {
-    (LIBCUDART.cudaMemcpyAsync.as_ref().unwrap())(dst, src, sz, cudaMemcpyDefault, stream.raw)
-  };
+  let e = (LIBCUDART.cudaMemcpyAsync.as_ref().unwrap())(dst, src, sz, cudaMemcpyDefault, stream.raw);
   if e != cudaSuccess {
     return Err(e);
   }
@@ -124,9 +108,7 @@ impl Drop for CudartEvent {
       Ok(_) | Err(cudaCudartUnloading) => {}
       _ => panic!("bug")
     }
-    let e = unsafe {
-      (LIBCUDART.cudaEventDestroy.as_ref().unwrap())(self.raw)
-    };
+    let e = (LIBCUDART.cudaEventDestroy.as_ref().unwrap())(self.raw);
     match e {
       cudaSuccess | cudaCudartUnloading => {}
       _ => panic!("bug")
@@ -138,9 +120,7 @@ impl CudartEvent {
   pub fn create_fastest() -> CudartResult<CudartEvent> {
     let dev = cudart_get_cur_dev()?;
     let mut raw: cudaEvent_t = null_mut();
-    let e = unsafe {
-      (LIBCUDART.cudaEventCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaEventDisableTiming)
-    };
+    let e = (LIBCUDART.cudaEventCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaEventDisableTiming);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -152,9 +132,7 @@ impl CudartEvent {
     if stream.dev >= 0 {
       assert_eq!(self.dev, stream.dev);
     }
-    let e = unsafe {
-      (LIBCUDART.cudaEventRecordWithFlags.as_ref().unwrap())(self.raw, stream.raw, 0)
-    };
+    let e = (LIBCUDART.cudaEventRecordWithFlags.as_ref().unwrap())(self.raw, stream.raw, 0);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -162,9 +140,7 @@ impl CudartEvent {
   }
 
   pub fn sync(&self) -> CudartResult {
-    let e = unsafe {
-      (LIBCUDART.cudaEventSynchronize.as_ref().unwrap())(self.raw)
-    };
+    let e = (LIBCUDART.cudaEventSynchronize.as_ref().unwrap())(self.raw);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -187,9 +163,7 @@ impl Drop for CudartStream {
       Ok(_) | Err(cudaCudartUnloading) => {}
       _ => panic!("bug")
     }
-    let e = unsafe {
-      (LIBCUDART.cudaStreamDestroy.as_ref().unwrap())(self.raw)
-    };
+    let e = (LIBCUDART.cudaStreamDestroy.as_ref().unwrap())(self.raw);
     match e {
       cudaSuccess | cudaCudartUnloading => {}
       _ => panic!("bug")
@@ -207,9 +181,7 @@ impl CudartStream {
   pub fn create() -> CudartResult<CudartStream> {
     let dev = cudart_get_cur_dev()?;
     let mut raw: cudaStream_t = null_mut();
-    let e = unsafe {
-      (LIBCUDART.cudaStreamCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaStreamDefault)
-    };
+    let e = (LIBCUDART.cudaStreamCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaStreamDefault);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -220,9 +192,7 @@ impl CudartStream {
   pub fn create_nonblocking() -> CudartResult<CudartStream> {
     let dev = cudart_get_cur_dev()?;
     let mut raw: cudaStream_t = null_mut();
-    let e = unsafe {
-      (LIBCUDART.cudaStreamCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaStreamNonblocking)
-    };
+    let e = (LIBCUDART.cudaStreamCreateWithFlags.as_ref().unwrap())(&mut raw as *mut _, cudaStreamNonblocking);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -231,9 +201,7 @@ impl CudartStream {
   }
 
   pub fn sync(&self) -> CudartResult {
-    let e = unsafe {
-      (LIBCUDART.cudaStreamSynchronize.as_ref().unwrap())(self.raw)
-    };
+    let e = (LIBCUDART.cudaStreamSynchronize.as_ref().unwrap())(self.raw);
     if e != cudaSuccess {
       return Err(e);
     }
@@ -241,9 +209,7 @@ impl CudartStream {
   }
 
   pub fn wait_event(&self, event: &CudartEvent) -> CudartResult {
-    let e = unsafe {
-      (LIBCUDART.cudaStreamWaitEvent.as_ref().unwrap())(self.raw, event.raw, 0)
-    };
+    let e = (LIBCUDART.cudaStreamWaitEvent.as_ref().unwrap())(self.raw, event.raw, 0);
     if e != cudaSuccess {
       return Err(e);
     }

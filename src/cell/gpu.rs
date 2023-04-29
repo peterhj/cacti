@@ -1,4 +1,5 @@
 use super::*;
+use crate::clock::*;
 
 use cacti_cuffi::*;
 
@@ -30,6 +31,12 @@ impl Default for GpuPCell {
 }
 */
 
+#[derive(Clone)]
+pub struct GpuInnerClock {
+  // TODO
+  raw:      Rc<CudartEvent>,
+}
+
 #[derive(Clone, Copy)]
 pub struct GpuInnerCellDesc {
   offset:   usize,
@@ -37,13 +44,17 @@ pub struct GpuInnerCellDesc {
 }
 
 pub struct GpuInnerCell {
+  pub clk:      Cell<Clock>,
   //stableptr:  StablePtr,
-  ptr:      *mut u8,
-  offset:   usize,
-  sz:       usize,
-  write:    CudartEvent,
-  read_:    CudartEvent,
-  copy_:    CudartEvent,
+  pub ref_:     GpuInnerRef,
+  pub dptr:     *mut u8,
+  pub offset:   usize,
+  pub sz:       usize,
+  pub dev:      i32,
+  pub write:    CudartEvent,
+  pub read_:    CudartEvent,
+  pub copy_:    CudartEvent,
+  //pub lastuse:  CudartEvent,
   // FIXME
   //cpu_dep:  Option<Rc<CpuInnerCell>>,
   // TODO
@@ -63,16 +74,18 @@ pub struct GpuOuterCell {
 pub struct GpuInnerRef(u32);
 
 thread_local! {
-  static TL_GPU_CTX: TlsGpuCtx = TlsGpuCtx::new();
+  static TL_GPU_CTX: GpuCtx = GpuCtx::new();
 }
 
-pub struct TlsGpuCtx {
+pub struct GpuCtx {
   main:         CudartStream,
   copy_to:      CudartStream,
   copy_from:    CudartStream,
   reserve_ptr:  *mut u8,
   reserve_sz:   usize,
   iref_ctr:     Cell<u32>,
+  // FIXME: also want to reserve a few MB before the front,
+  // for things like scalars.
   //front_sz:     Cell<usize>,
   front_end:    Cell<usize>,
   //front:        RefCell<Vec<(GpuInnerRef, GpuInnerCellDesc)>>,
@@ -86,35 +99,35 @@ pub struct TlsGpuCtx {
   // TODO
 }
 
-impl TlsGpuCtx {
-  pub fn new() -> TlsGpuCtx {
+impl GpuCtx {
+  pub fn new() -> GpuCtx {
     let dev = 0;
     cudart_set_cur_dev(dev).unwrap();
     let (free_sz, total_sz) = cudart_get_mem_info().unwrap();
     assert!(free_sz <= total_sz);
-    let reserve_bp = tl_get_gpu_reserve_mem_per_10k();
+    let reserve_bp = tl_ctx_get_gpu_reserve_mem_per_10k();
     let unrounded_reserve_sz = (total_sz * reserve_bp as usize + 10000 - 1) / 10000;
     // NB: assuming page size is 64 KiB.
     let reserve_sz = ((unrounded_reserve_sz + (1 << 16) - 1) >> 16) << 16;
     assert!(reserve_sz >= unrounded_reserve_sz);
     if reserve_sz > free_sz {
-      panic!("FAIL: TlsGpuCtx::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
+      panic!("FAIL: GpuCtx::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
           reserve_sz, dev, free_sz, total_sz);
     }
     let reserve_ptr = cudart_malloc(reserve_sz).unwrap() as *mut u8;
     CudartStream::null().sync().unwrap();
     let reserve_warp_offset = reserve_ptr.align_offset(128);
     if reserve_warp_offset != 0 {
-      panic!("FAIL: TlsGpuCtx::new: gpu bug: misaligned alloc, offset by {} bytes (expected alignment {} bytes)",
+      panic!("FAIL: GpuCtx::new: gpu bug: misaligned alloc, offset by {} bytes (expected alignment {} bytes)",
           reserve_warp_offset, 128);
     }
-    TlsGpuCtx{
-      /*main:         CudartStream::null(),
+    GpuCtx{
+      main:         CudartStream::null(),
       copy_to:      CudartStream::create_nonblocking().unwrap(),
-      copy_from:    CudartStream::create_nonblocking().unwrap(),*/
-      main:         CudartStream::create().unwrap(),
+      copy_from:    CudartStream::create_nonblocking().unwrap(),
+      /*main:         CudartStream::create().unwrap(),
       copy_to:      CudartStream::create().unwrap(),
-      copy_from:    CudartStream::create().unwrap(),
+      copy_from:    CudartStream::create().unwrap(),*/
       reserve_ptr,
       reserve_sz,
       iref_ctr:     Cell::new(0),
@@ -149,17 +162,21 @@ impl TlsGpuCtx {
     let r = self._fresh_inner_ref();
     self.front_end.set(next_offset);
     self.front_set.borrow_mut().insert(r, GpuInnerCellDesc{offset, sz: req_sz});
-    let ptr = unsafe { self.reserve_ptr.offset(offset as isize) };
+    let dptr = unsafe { self.reserve_ptr.offset(offset as isize) };
     let dev = 0;
     cudart_set_cur_dev(dev).unwrap();
     let write = CudartEvent::create_fastest().unwrap();
     let read_ = CudartEvent::create_fastest().unwrap();
     let copy_ = CudartEvent::create_fastest().unwrap();
     let cel = Rc::new(GpuInnerCell{
+      // FIXME
+      clk: Cell::new(Clock::default()),
       //stableptr,
-      ptr,
+      ref_: r,
+      dptr,
       offset,
       sz: req_sz,
+      dev,
       write,
       read_,
       copy_,
@@ -197,8 +214,8 @@ impl TlsGpuCtx {
         if c > 1 {
           return None;
         }
-        cel.read_.sync();
-        cel.copy_.sync();
+        cel.read_.sync().unwrap();
+        cel.copy_.sync().unwrap();
         // FIXME FIXME: remove from front.
         self.front_set.borrow_mut().remove(&r);
         self.cel_map.borrow_mut().remove(&r);
@@ -225,14 +242,14 @@ impl TlsGpuCtx {
 
   pub fn copy_mem_to_gpu(&self, cel: &GpuInnerCell, src_mem: *const u8, mem_sz: usize) {
     // FIXME
-    cudart_memcpy(cel.ptr as _, src_mem as _, mem_sz, &self.copy_to);
-    cel.write.record(&self.copy_to);
+    cudart_memcpy(cel.dptr as _, src_mem as _, mem_sz, &self.copy_to).unwrap();
+    cel.write.record(&self.copy_to).unwrap();
   }
 
   pub fn copy_mem_from_gpu(&self, cel: &GpuInnerCell, dst_mem: *mut u8, mem_sz: usize) {
     // FIXME
-    self.copy_from.wait_event(&cel.write);
-    cudart_memcpy(dst_mem as _, cel.ptr as _, mem_sz, &self.copy_from);
+    self.copy_from.wait_event(&cel.write).unwrap();
+    cudart_memcpy(dst_mem as _, cel.dptr as _, mem_sz, &self.copy_from).unwrap();
   }
 
   pub fn copy_swap_to_gpu(&self, cel: &GpuInnerCell, src: (), mem_sz: usize) {
@@ -242,4 +259,8 @@ impl TlsGpuCtx {
   pub fn copy_swap_from_gpu(&self, cel: &GpuInnerCell, src: (), mem_sz: usize) {
     unimplemented!();
   }
+}
+
+pub struct GpuDryCtx {
+  // FIXME
 }
