@@ -3,7 +3,10 @@ use crate::clock::*;
 use crate::ptr::*;
 
 use std::any::{Any, TypeId};
+use std::hash::{Hash};
+use std::mem::{size_of};
 use std::rc::{Rc};
+use std::slice::{from_raw_parts};
 
 pub mod ops;
 
@@ -11,11 +14,11 @@ pub mod ops;
 #[repr(transparent)]
 pub struct ThunkPtr(i32);
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ThunkKey {
   // FIXME
   //tyid: TypeId,
-}
+}*/
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -34,8 +37,29 @@ pub struct ThunkArg {
   // TODO
 }
 
-pub trait ThunkSpec: Any + Copy {
-  // FIXME FIXME
+pub trait ThunkSpec {}
+
+pub trait Thunk {
+  fn as_any(&self) -> &dyn Any;
+  fn as_bytes_repr(&self) -> &[u8];
+  fn thunk_eq(&self, other: &dyn Thunk) -> Option<bool>;
+}
+
+impl<T: Any + Copy + Eq + ThunkSpec> Thunk for T {
+  fn as_any(&self) -> &dyn Any {
+    self
+  }
+
+  fn as_bytes_repr(&self) -> &[u8] {
+    // SAFETY: This should be safe as the type is `Copy`.
+    let ptr = (self as *const T) as *const u8;
+    let len = size_of::<T>();
+    unsafe { from_raw_parts(ptr, len) }
+  }
+
+  fn thunk_eq(&self, other: &dyn Thunk) -> Option<bool> {
+    other.as_any().downcast_ref::<T>().map(|other| self == other)
+  }
 }
 
 pub struct PThunk {

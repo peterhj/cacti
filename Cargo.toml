@@ -3,6 +3,9 @@ name = "cacti"
 version = "0.1.0-devel"
 edition = "2018"
 
+[workspace]
+members = ["cacti_cuffi"]
+
 [profile.release]
 overflow-checks = true
 panic = "abort"
@@ -11,13 +14,17 @@ incremental = false
 
 [features]
 default = ["gpu"]
-gpu = ["cacti_cuffi", "futhark_ffi"]
+gpu = ["cacti_cuffi"]
 
 [dependencies]
 cacti_cuffi = { path = "cacti_cuffi", optional = true }
-futhark_ffi = { path = "dep/futhark_ffi", optional = true }
-msgpack_serialize = { path = "dep/msgpack_serialize" }
-repugnant_pickle = { path = "dep/repugnant_pickle" }
+futhark_ffi = { path = "../futhark_ffi" }
+libc = { path = "../libc" }
+#msgpack_serialize = { path = "../msgpack_serialize" }
+repugnant_pickle = { path = "../repugnant_pickle" }
+
+[dev-dependencies]
+dessert = { path = "../dessert" }
 
 [[bin]]
 name = "inspect_pth"

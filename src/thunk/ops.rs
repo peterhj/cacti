@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::algo::fp::{NonNan};
+
 //use std::io::{Write};
 
 #[derive(Clone, Copy, Default)] pub struct DowncastF32F16ThunkOp {}
@@ -26,7 +28,9 @@ use super::*;
   }
 }*/
 
-#[derive(Clone, Copy)] pub struct AddScalarF32ThunkOp { pub scalar: f32 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct AddScalarF32ThunkOp { pub scalar: NonNan<f32> }
+impl ThunkSpec for AddScalarF32ThunkOp {}
 
 /*impl FutharkThunk_ for AddScalarF32ThunkOp {
   fn _arg_count(&self) -> u8 {

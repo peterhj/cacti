@@ -6,7 +6,7 @@ CARGO_TARGET := --target $(TARGET)
 .PHONY: all clean
 
 all:
-	$(CARGO) build $(CARGO_TARGET) --release
+	$(CARGO) build $(CARGO_TARGET) --release --lib --bins --examples
 
 clean:
 	rm -r target

@@ -105,12 +105,12 @@ impl Drop for CudartEvent {
   fn drop(&mut self) {
     assert!(!self.raw.is_null());
     match cudart_set_cur_dev(self.dev) {
-      Ok(_) | Err(cudaCudartUnloading) => {}
+      Ok(_) | Err(cudaErrorCudartUnloading) => {}
       _ => panic!("bug")
     }
     let e = (LIBCUDART.cudaEventDestroy.as_ref().unwrap())(self.raw);
     match e {
-      cudaSuccess | cudaCudartUnloading => {}
+      cudaSuccess | cudaErrorCudartUnloading => {}
       _ => panic!("bug")
     }
   }
@@ -139,6 +139,14 @@ impl CudartEvent {
     Ok(())
   }
 
+  pub fn query(&self) -> CudartResult {
+    let e = (LIBCUDART.cudaEventQuery.as_ref().unwrap())(self.raw);
+    if e != cudaSuccess {
+      return Err(e);
+    }
+    Ok(())
+  }
+
   pub fn sync(&self) -> CudartResult {
     let e = (LIBCUDART.cudaEventSynchronize.as_ref().unwrap())(self.raw);
     if e != cudaSuccess {
@@ -160,12 +168,12 @@ impl Drop for CudartStream {
     }
     assert!(self.dev >= 0);
     match cudart_set_cur_dev(self.dev) {
-      Ok(_) | Err(cudaCudartUnloading) => {}
+      Ok(_) | Err(cudaErrorCudartUnloading) => {}
       _ => panic!("bug")
     }
     let e = (LIBCUDART.cudaStreamDestroy.as_ref().unwrap())(self.raw);
     match e {
-      cudaSuccess | cudaCudartUnloading => {}
+      cudaSuccess | cudaErrorCudartUnloading => {}
       _ => panic!("bug")
     }
   }
