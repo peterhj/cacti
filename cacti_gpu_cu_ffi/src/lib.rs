@@ -20,8 +20,11 @@ pub mod types;
 pub static LIBCUDA: Lazy<Libcuda> = Lazy::new(|| {
   let mut lib = Libcuda::default();
   unsafe {
-    if let Err(code) = lib.load_default() {
-      panic!("bug: failed to dynamically link libcuda.so: {}", code);
+    if let Err(_) = lib.open_default() {
+      panic!("bug: failed to dynamically link libcuda.so");
+    }
+    if let Err(code) = lib.load_symbols() {
+      panic!("bug: failed to load symbols from libcuda.so: {}", code);
     }
     if let Err(e) = lib.try_init() {
       panic!("bug: cuda: init failed: {:?}", e);
@@ -33,8 +36,11 @@ pub static LIBCUDA: Lazy<Libcuda> = Lazy::new(|| {
 pub static LIBCUDART: Lazy<Libcudart> = Lazy::new(|| {
   let mut lib = Libcudart::default();
   unsafe {
-    if let Err(code) = lib.load_default() {
-      panic!("bug: failed to dynamically link libcudart.so: {}", code);
+    if let Err(_) = lib.open_default() {
+      panic!("bug: failed to dynamically link libcudart.so");
+    }
+    if let Err(code) = lib.load_symbols() {
+      panic!("bug: failed to load symbols from libcudart.so: {}", code);
     }
   }
   lib
@@ -43,8 +49,11 @@ pub static LIBCUDART: Lazy<Libcudart> = Lazy::new(|| {
 pub static LIBNVRTC: Lazy<Libnvrtc> = Lazy::new(|| {
   let mut lib = Libnvrtc::default();
   unsafe {
-    if let Err(code) = lib.load_default() {
-      panic!("bug: failed to dynamically link libnvrtc.so: {}", code);
+    if let Err(_) = lib.open_default() {
+      panic!("bug: failed to dynamically link libnvrtc.so");
+    }
+    if let Err(code) = lib.load_symbols() {
+      panic!("bug: failed to load symbols from libnvrtc.so: {}", code);
     }
   }
   lib
@@ -53,8 +62,11 @@ pub static LIBNVRTC: Lazy<Libnvrtc> = Lazy::new(|| {
 /*pub static LIBCUBLAS: Lazy<Libcublas> = Lazy::new(|| {
   let mut lib = Libcublas::default();
   unsafe {
-    if let Err(code) = lib.load_default() {
-      panic!("bug: failed to dynamically link libcublas.so: {}", code);
+    if let Err(_) = lib.open_default() {
+      panic!("bug: failed to dynamically link libcublas.so");
+    }
+    if let Err(code) = lib.load_symbols() {
+      panic!("bug: failed to load symbols from libcublas.so: {}", code);
     }
   }
   lib

@@ -69,13 +69,13 @@ impl Drop for Libcuda {
 }
 
 impl Libcuda {
-  /*pub unsafe fn open_default() -> Result<Libcuda, ()> {
-    // FIXME FIXME
-    //let library = Library::new("cuda").map_err(|_| 1)?;
-  }*/
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("cuda")?);
+    Ok(())
+  }
 
-  pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = open_default("cuda").map_err(|_| 1)?;
+  pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
+    let library = self._inner.as_ref().unwrap();
     self.cuGetErrorString = library.get(b"cuGetErrorString").ok();
     self.cuGetErrorName = library.get(b"cuGetErrorName").ok();
     self.cuInit = library.get(b"cuInit").ok();
@@ -103,7 +103,6 @@ impl Libcuda {
     self.cuFuncGetAttribute = library.get(b"cuFuncGetAttribute").ok();
     self.cuLaunchKernel = library.get(b"cuLaunchKernel").ok();
     // TODO
-    self._inner = library.into();
     //self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -132,8 +131,8 @@ pub struct Libcudart {
   pub cudaDeviceCanAccessPeer:  Option<Symbol<extern "C" fn (*mut c_int, c_int, c_int) -> cudaError_t>>,
   pub cudaGetDevice:            Option<Symbol<extern "C" fn (*mut c_int) -> cudaError_t>>,
   pub cudaSetDevice:            Option<Symbol<extern "C" fn (c_int) -> cudaError_t>>,
-  pub cudaDeviceDisablePeerAccess:      Option<Symbol<extern "C" fn (c_int, c_uint) -> cudaError_t>>,
-  pub cudaDeviceEnablePeerAccess:       Option<Symbol<extern "C" fn (c_int, c_uint) -> cudaError_t>>,
+  pub cudaDeviceDisablePeerAccess: Option<Symbol<extern "C" fn (c_int, c_uint) -> cudaError_t>>,
+  pub cudaDeviceEnablePeerAccess: Option<Symbol<extern "C" fn (c_int, c_uint) -> cudaError_t>>,
   pub cudaDeviceReset:          Option<Symbol<extern "C" fn () -> cudaError_t>>,
   pub cudaDeviceSynchronize:    Option<Symbol<extern "C" fn () -> cudaError_t>>,
   pub cudaMemGetInfo:           Option<Symbol<extern "C" fn (*mut usize, *mut usize) -> cudaError_t>>,
@@ -152,7 +151,7 @@ pub struct Libcudart {
   pub cudaEventRecordWithFlags: Option<Symbol<extern "C" fn (cudaEvent_t, cudaStream_t, c_uint) -> cudaError_t>>,
   pub cudaEventSynchronize:     Option<Symbol<extern "C" fn (cudaEvent_t) -> cudaError_t>>,
   pub cudaStreamCreate:         Option<Symbol<extern "C" fn (*mut cudaStream_t) -> cudaError_t>>,
-  pub cudaStreamCreateWithFlags:        Option<Symbol<extern "C" fn (*mut cudaStream_t, c_uint) -> cudaError_t>>,
+  pub cudaStreamCreateWithFlags: Option<Symbol<extern "C" fn (*mut cudaStream_t, c_uint) -> cudaError_t>>,
   pub cudaStreamDestroy:        Option<Symbol<extern "C" fn (cudaStream_t) -> cudaError_t>>,
   pub cudaStreamSynchronize:    Option<Symbol<extern "C" fn (cudaStream_t) -> cudaError_t>>,
   pub cudaStreamWaitEvent:      Option<Symbol<extern "C" fn (cudaStream_t, cudaEvent_t, c_uint) -> cudaError_t>>,
@@ -170,13 +169,13 @@ impl Drop for Libcudart {
 }
 
 impl Libcudart {
-  /*pub unsafe fn open_default() -> Result<Libcudart, ()> {
-    // FIXME FIXME
-    //let library = Library::new("cudart").map_err(|_| 1)?;
-  }*/
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("cudart")?);
+    Ok(())
+  }
 
-  pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = open_default("cudart").map_err(|_| 1)?;
+  pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
+    let library = self._inner.as_ref().unwrap();
     self.cudaGetErrorString = library.get(b"cudaGetErrorString").ok();
     self.cudaDriverGetVersion = library.get(b"cudaDriverGetVersion").ok();
     self.cudaRuntimeGetVersion = library.get(b"cudaRuntimeGetVersion").ok();
@@ -209,7 +208,6 @@ impl Libcudart {
     self.cudaStreamSynchronize = library.get(b"cudaStreamSynchronize").ok();
     self.cudaStreamWaitEvent = library.get(b"cudaStreamWaitEvent").ok();
     // TODO
-    self._inner = library.into();
     self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -269,13 +267,13 @@ impl Drop for Libnvrtc {
 }
 
 impl Libnvrtc {
-  /*pub unsafe fn open_default() -> Result<Libnvrtc, ()> {
-    // FIXME FIXME
-    //let library = Library::new("nvrtc").map_err(|_| 1)?;
-  }*/
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("nvrtc")?);
+    Ok(())
+  }
 
-  pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = open_default("nvrtc").map_err(|_| 1)?;
+  pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
+    let library = self._inner.as_ref().unwrap();
     self.nvrtcGetErrorString = library.get(b"nvrtcGetErrorString").ok();
     self.nvrtcCreateProgram = library.get(b"nvrtcCreateProgram").ok();
     self.nvrtcDestroyProgram = library.get(b"nvrtcDestroyProgram").ok();
@@ -285,7 +283,6 @@ impl Libnvrtc {
     self.nvrtcGetPTXSize = library.get(b"nvrtcGetPTXSize").ok();
     self.nvrtcGetPTX = library.get(b"nvrtcGetPTX").ok();
     // TODO
-    self._inner = library.into();
     //self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -294,45 +291,45 @@ impl Libnvrtc {
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libcublas {
-  inner_library:            Option<Library>,
-  pub cublasCreate_v2:      Option<Symbol<extern "C" fn (*mut cublasHandle_t) -> cublasStatus_t>>,
-  pub cublasDestroy_v2:     Option<Symbol<extern "C" fn (cublasHandle_t) -> cublasStatus_t>>,
-  pub cublasGetVersion_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, *mut c_int) -> cublasStatus_t>>,
-  pub cublasGetStream_v2:   Option<Symbol<extern "C" fn (cublasHandle_t, *mut cudaStream_t) -> cublasStatus_t>>,
-  pub cublasSetStream_v2:   Option<Symbol<extern "C" fn (cublasHandle_t, cudaStream_t) -> cublasStatus_t>>,
-  pub cublasSetPointerMode_v2:      Option<Symbol<extern "C" fn (cublasHandle_t, cublasPointerMode_t) -> cublasStatus_t>>,
-  pub cublasSetAtomicsMode_v2:      Option<Symbol<extern "C" fn (cublasHandle_t, cublasAtomicsMode_t) -> cublasStatus_t>>,
-  pub cublasSetMathMode:    Option<Symbol<extern "C" fn (cublasHandle_t, cublasMath_t) -> cublasStatus_t>>,
-  pub cublasGemmEx:         Option<Symbol<extern "C" fn (
-                                cublasHandle_t,
-                                cublasOperation_t,
-                                cublasOperation_t,
-                                c_int, c_int, c_int,
-                                *const c_void,
-                                *const c_void, cudaDataType_t, c_int,
-                                *const c_void, cudaDataType_t, c_int,
-                                *const c_void,
-                                *mut c_void, cudaDataType_t, c_int,
-                                cublasComputeType_t,
-                                cublasGemmAlgo_t,
-                            ) -> cublasStatus_t>>,
-  pub cublasSgemmEx:        Option<Symbol<extern "C" fn (
-                                cublasHandle_t,
-                                cublasOperation_t,
-                                cublasOperation_t,
-                                c_int, c_int, c_int,
-                                *const c_void,
-                                *const c_void, cudaDataType_t, c_int,
-                                *const c_void, cudaDataType_t, c_int,
-                                *const c_void,
-                                *mut c_void, cudaDataType_t, c_int,
-                            ) -> cublasStatus_t>>,
+  pub _inner:                   Option<Library>,
+  pub cublasCreate_v2:          Option<Symbol<extern "C" fn (*mut cublasHandle_t) -> cublasStatus_t>>,
+  pub cublasDestroy_v2:         Option<Symbol<extern "C" fn (cublasHandle_t) -> cublasStatus_t>>,
+  pub cublasGetVersion_v2:      Option<Symbol<extern "C" fn (cublasHandle_t, *mut c_int) -> cublasStatus_t>>,
+  pub cublasGetStream_v2:       Option<Symbol<extern "C" fn (cublasHandle_t, *mut cudaStream_t) -> cublasStatus_t>>,
+  pub cublasSetStream_v2:       Option<Symbol<extern "C" fn (cublasHandle_t, cudaStream_t) -> cublasStatus_t>>,
+  pub cublasSetPointerMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasPointerMode_t) -> cublasStatus_t>>,
+  pub cublasSetAtomicsMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasAtomicsMode_t) -> cublasStatus_t>>,
+  pub cublasSetMathMode:        Option<Symbol<extern "C" fn (cublasHandle_t, cublasMath_t) -> cublasStatus_t>>,
+  pub cublasGemmEx:             Option<Symbol<extern "C" fn (
+                                    cublasHandle_t,
+                                    cublasOperation_t,
+                                    cublasOperation_t,
+                                    c_int, c_int, c_int,
+                                    *const c_void,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const c_void,
+                                    *mut c_void, cudaDataType_t, c_int,
+                                    cublasComputeType_t,
+                                    cublasGemmAlgo_t,
+                                ) -> cublasStatus_t>>,
+  pub cublasSgemmEx:            Option<Symbol<extern "C" fn (
+                                    cublasHandle_t,
+                                    cublasOperation_t,
+                                    cublasOperation_t,
+                                    c_int, c_int, c_int,
+                                    *const c_void,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const c_void,
+                                    *mut c_void, cudaDataType_t, c_int,
+                                ) -> cublasStatus_t>>,
   // TODO
 }
 
 impl Drop for Libcublas {
   fn drop(&mut self) {
-    let inner_library = self.inner_library.take();
+    let inner_library = self._inner.take();
     *self = Default::default();
     if let Some(inner) = inner_library {
       drop(inner);
@@ -341,12 +338,13 @@ impl Drop for Libcublas {
 }
 
 impl Libcublas {
-  /*pub unsafe fn open_default() -> Result<Libcublas, ()> {
-    // FIXME FIXME
-  }*/
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("cublas")?);
+    Ok(())
+  }
 
-  pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = open_default("cublas")?;
+  pub unsafe fn load_symbols(&mut self) -> Result<(), ()> {
+    let library = self._inner.as_ref().unwrap();
     self.cublasCreate_v2 = library.get(b"cublasCreate_v2").ok();
     self.cublasDestroy_v2 = library.get(b"cublasDestroy_v2").ok();
     self.cublasGetVersion_v2 = library.get(b"cublasGetVersion_v2").ok();
@@ -357,7 +355,6 @@ impl Libcublas {
     self.cublasSgemmEx = library.get(b"cublasSgemmEx").ok();
     self.cublasGemmEx = library.get(b"cublasGemmEx").ok();
     // TODO
-    self.inner_library = library.into();
     self._check_required()?;
     Ok(())
   }
@@ -371,70 +368,70 @@ impl Libcublas {
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libcusolver {
-  inner_library:            Option<Library>,
-  pub cusolverDnCreate:     Option<Symbol<extern "C" fn (*mut cusolverDnHandle_t) -> cusolverStatus_t>>,
-  pub cusolverDnDestroy:    Option<Symbol<extern "C" fn (cusolverDnHandle_t) -> cusolverStatus_t>>,
-  pub cusolverDnGetStream:  Option<Symbol<extern "C" fn (cusolverDnHandle_t, *mut cudaStream_t) -> cusolverStatus_t>>,
-  pub cusolverDnSetStream:  Option<Symbol<extern "C" fn (cusolverDnHandle_t, cudaStream_t) -> cusolverStatus_t>>,
-  pub cusolverDnSSgels_bufferSize:  Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                    ) -> cusolverStatus_t>>,
-  pub cusolverDnSSgels:             Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                        *mut c_int,
-                                        *mut c_int,
-                                    ) -> cusolverStatus_t>>,
-  pub cusolverDnSHgels_bufferSize:  Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                    ) -> cusolverStatus_t>>,
-  pub cusolverDnSHgels:             Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                        *mut c_int,
-                                        *mut c_int,
-                                    ) -> cusolverStatus_t>>,
-  pub cusolverDnSXgels_bufferSize:  Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                    ) -> cusolverStatus_t>>,
-  pub cusolverDnSXgels:             Option<Symbol<extern "C" fn (
-                                        cusolverDnHandle_t,
-                                        c_int, c_int, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut f32, c_int,
-                                        *mut c_void, usize,
-                                        *mut c_int,
-                                        *mut c_int,
-                                    ) -> cusolverStatus_t>>,
+  pub _inner:                   Option<Library>,
+  pub cusolverDnCreate:         Option<Symbol<extern "C" fn (*mut cusolverDnHandle_t) -> cusolverStatus_t>>,
+  pub cusolverDnDestroy:        Option<Symbol<extern "C" fn (cusolverDnHandle_t) -> cusolverStatus_t>>,
+  pub cusolverDnGetStream:      Option<Symbol<extern "C" fn (cusolverDnHandle_t, *mut cudaStream_t) -> cusolverStatus_t>>,
+  pub cusolverDnSetStream:      Option<Symbol<extern "C" fn (cusolverDnHandle_t, cudaStream_t) -> cusolverStatus_t>>,
+  pub cusolverDnSSgels_bufferSize:      Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                        ) -> cusolverStatus_t>>,
+  pub cusolverDnSSgels:                 Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                            *mut c_int,
+                                            *mut c_int,
+                                        ) -> cusolverStatus_t>>,
+  pub cusolverDnSHgels_bufferSize:      Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                        ) -> cusolverStatus_t>>,
+  pub cusolverDnSHgels:                 Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                            *mut c_int,
+                                            *mut c_int,
+                                        ) -> cusolverStatus_t>>,
+  pub cusolverDnSXgels_bufferSize:      Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                        ) -> cusolverStatus_t>>,
+  pub cusolverDnSXgels:                 Option<Symbol<extern "C" fn (
+                                            cusolverDnHandle_t,
+                                            c_int, c_int, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut f32, c_int,
+                                            *mut c_void, usize,
+                                            *mut c_int,
+                                            *mut c_int,
+                                        ) -> cusolverStatus_t>>,
 }
 
 impl Drop for Libcusolver {
   fn drop(&mut self) {
-    let inner_library = self.inner_library.take();
+    let inner_library = self._inner.take();
     *self = Default::default();
     if let Some(inner) = inner_library {
       drop(inner);
@@ -443,8 +440,13 @@ impl Drop for Libcusolver {
 }
 
 impl Libcusolver {
-  pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = open_default("cusolver")?;
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("cusolver")?);
+    Ok(())
+  }
+
+  pub unsafe fn load_symbols(&mut self) -> Result<(), ()> {
+    let library = self._inner.as_ref().unwrap();
     self.cusolverDnCreate = library.get(b"cusolverDnCreate").ok();
     self.cusolverDnDestroy = library.get(b"cusolverDnDestroy").ok();
     self.cusolverDnGetStream = library.get(b"cusolverDnGetStream").ok();
@@ -455,7 +457,6 @@ impl Libcusolver {
     self.cusolverDnSHgels = library.get(b"cusolverDnSHgels").ok();
     self.cusolverDnSXgels_bufferSize = library.get(b"cusolverDnSXgels_bufferSize").ok();
     self.cusolverDnSXgels = library.get(b"cusolverDnSXgels").ok();
-    self.inner_library = library.into();
     self._check_required()?;
     Ok(())
   }
