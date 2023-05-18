@@ -5,6 +5,26 @@ use libloading::nonsafe::{Library, Symbol};
 
 use std::env;
 
+#[cfg(not(unix))]
+pub unsafe fn open_default<S: AsRef<str>>(_lib_name: S) -> Result<Library, ()> {
+  unimplemented!();
+}
+
+#[cfg(unix)]
+pub unsafe fn open_default<S: AsRef<str>>(lib_name: S) -> Result<Library, ()> {
+  match env::var("CUDA_HOME") {
+    Ok(prefix) => {
+      if !prefix.is_empty() {
+        // FIXME FIXME
+        Library::new(&format!("{}/lib64/lib{}.so", prefix, lib_name.as_ref()))
+      } else {
+        Library::new(&format!("lib{}.so", lib_name.as_ref()))
+      }
+    }
+    _ => Library::new(&format!("lib{}.so", lib_name.as_ref()))
+  }.map_err(|_| ())
+}
+
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libcuda {
@@ -55,16 +75,7 @@ impl Libcuda {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = match env::var("CUDA_HOME") {
-      Ok(prefix) => {
-        if !prefix.is_empty() {
-          Library::new(&format!("{}/libcuda.so", prefix)),
-        } else {
-          Library::new("libcuda.so")
-        }
-      }
-      _ => Library::new("libcuda.so")
-    }.map_err(|_| 1)?;
+    let library = open_default("cuda").map_err(|_| 1)?;
     self.cuGetErrorString = library.get(b"cuGetErrorString").ok();
     self.cuGetErrorName = library.get(b"cuGetErrorName").ok();
     self.cuInit = library.get(b"cuInit").ok();
@@ -165,16 +176,7 @@ impl Libcudart {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = match env::var("CUDA_HOME") {
-      Ok(prefix) => {
-        if !prefix.is_empty() {
-          Library::new(&format!("{}/libcudart.so", prefix)),
-        } else {
-          Library::new("libcudart.so")
-        }
-      }
-      _ => Library::new("libcudart.so")
-    }.map_err(|_| 1)?;
+    let library = open_default("cudart").map_err(|_| 1)?;
     self.cudaGetErrorString = library.get(b"cudaGetErrorString").ok();
     self.cudaDriverGetVersion = library.get(b"cudaDriverGetVersion").ok();
     self.cudaRuntimeGetVersion = library.get(b"cudaRuntimeGetVersion").ok();
@@ -273,16 +275,7 @@ impl Libnvrtc {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = match env::var("CUDA_HOME") {
-      Ok(prefix) => {
-        if !prefix.is_empty() {
-          Library::new(&format!("{}/libnvrtc.so", prefix)),
-        } else {
-          Library::new("libnvrtc.so")
-        }
-      }
-      _ => Library::new("libnvrtc.so")
-    }.map_err(|_| 1)?;
+    let library = open_default("nvrtc").map_err(|_| 1)?;
     self.nvrtcGetErrorString = library.get(b"nvrtcGetErrorString").ok();
     self.nvrtcCreateProgram = library.get(b"nvrtcCreateProgram").ok();
     self.nvrtcDestroyProgram = library.get(b"nvrtcDestroyProgram").ok();
@@ -353,16 +346,7 @@ impl Libcublas {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = match env::var("CUDA_HOME") {
-      Ok(prefix) => {
-        if !prefix.is_empty() {
-          Library::new(&format!("{}/libcublas.so", prefix)),
-        } else {
-          Library::new("libcublas.so")
-        }
-      }
-      _ => Library::new("libcublas.so")
-    }.map_err(|_| ())?;
+    let library = open_default("cublas")?;
     self.cublasCreate_v2 = library.get(b"cublasCreate_v2").ok();
     self.cublasDestroy_v2 = library.get(b"cublasDestroy_v2").ok();
     self.cublasGetVersion_v2 = library.get(b"cublasGetVersion_v2").ok();
@@ -460,16 +444,7 @@ impl Drop for Libcusolver {
 
 impl Libcusolver {
   pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = match env::var("CUDA_HOME") {
-      Ok(prefix) => {
-        if !prefix.is_empty() {
-          Library::new(&format!("{}/libcusolver.so", prefix)),
-        } else {
-          Library::new("libcusolver.so")
-        }
-      }
-      _ => Library::new("libcusolver.so")
-    }.map_err(|_| ())?;
+    let library = open_default("cusolver")?;
     self.cusolverDnCreate = library.get(b"cusolverDnCreate").ok();
     self.cusolverDnDestroy = library.get(b"cusolverDnDestroy").ok();
     self.cusolverDnGetStream = library.get(b"cusolverDnGetStream").ok();
