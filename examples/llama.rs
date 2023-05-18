@@ -13,6 +13,8 @@ fn main() {
   // Sequence capacity (i.e. maximum length).
   let seq_cap = 2048;
 
+  let codec = SentencePieceStrCodec::open("tokenizer.model").unwrap();
+
   let llm = Llama::new_3b();
   //let llm = Llama::new_7b();
   //... etc.
@@ -21,22 +23,21 @@ fn main() {
   let mut opt = AdamW::new(Llama::default_adamw());
   opt.push_param(llm.param());
 
-  let codec = SentencePieceStrCodec::open("tokenizer.model").unwrap();
-
-  let x = StableCell::new_array([ubat_sz, seq_cap], Dtype::UInt16);
-  let y = StableCell::new_array([ubat_sz, seq_cap], Dtype::UInt16);
+  //let x = StableCell::new_array([ubat_sz, seq_cap], Dtype::UInt16);
+  let x = StableCell::new_array([ubat_sz, seq_cap], u16::dtype());
+  let y = StableCell::new_array([ubat_sz, seq_cap], "u16");
 
   // TODO
 
   {
-    ctx_reset();
+    reset();
     // FIXME: init.
-    ctx_compile();
-    ctx_resume();
+    compile();
+    resume();
   }
 
   loop {
-    ctx_reset();
+    reset();
     for w in llm.param().iter() {
       // FIXME FIXME: think about this (w.cache()? w.cache_init()? ...).
       w.cache();
@@ -48,8 +49,8 @@ fn main() {
     for w in llm.param().iter().rev() {
       w.gradl(loss).eval();
     }
-    opt.apply_update();
-    ctx_compile();
-    ctx_resume();
+    opt.apply_update(loss);
+    compile();
+    resume();
   }
 }

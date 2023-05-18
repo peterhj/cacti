@@ -1,7 +1,6 @@
-pub use crate::cell::{CellPtr};
-use crate::cell::{CellType, Dtype};
+use crate::cell::{CellPtr, StableCell, CellType, Dtype};
 use crate::ctx::*;
-use crate::thunk::ops::*;
+use crate::thunk::op::*;
 
 use std::convert::{TryInto};
 use std::ops::{Deref, Add, Sub, Mul, Div};
@@ -40,11 +39,19 @@ impl<'p> Add<f32> for &'p CellPtr {
   type Output = CellPtr;
 
   fn add(self, rhs: f32) -> CellPtr {
-    let op = AddScalarF32ThunkOp{scalar: rhs.try_into().unwrap()};
+    let op = AddScalarF32ThunkSpec{scalar: rhs.try_into().unwrap()};
     assert!(ctx_clean_arg());
     ctx_push_cell_arg(self.into());
     /*ctx_push_cell_tmp_out();*/
-    ctx_pop_thunk_(op)
+    ctx_pop_thunk(op)
+  }
+}
+
+impl Add<f32> for CellPtr {
+  type Output = CellPtr;
+
+  fn add(self, rhs: f32) -> CellPtr {
+    (&self).add(rhs)
   }
 }
 
@@ -66,7 +73,7 @@ impl<'p> Add<f32> for &'p CellPtr {
   }
 }*/
 
-impl<'p, Q: Into<CellPtr> + Sized> Add<Q> for &'p CellPtr {
+impl<'p, Q: Into<CellPtr>> Add<Q> for &'p CellPtr {
   type Output = CellPtr;
 
   fn add(self, rhs: Q) -> CellPtr {
@@ -129,6 +136,46 @@ impl<'p> Mul<f32> for &'p CellPtr {
   }
 }
 
+impl Mul<f32> for CellPtr {
+  type Output = CellPtr;
+
+  fn mul(self, rhs: f32) -> CellPtr {
+    (&self).mul(rhs)
+  }
+}
+
+impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p CellPtr {
+  type Output = CellPtr;
+
+  fn mul(self, rhs: Q) -> CellPtr {
+    unimplemented!();
+  }
+}
+
+impl<Q: AsRef<CellPtr>> Mul<Q> for CellPtr {
+  type Output = CellPtr;
+
+  fn mul(self, rhs: Q) -> CellPtr {
+    (&self).mul(rhs)
+  }
+}
+
+impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p StableCell {
+  type Output = CellPtr;
+
+  fn mul(self, rhs: Q) -> CellPtr {
+    self.as_ptr_ref().mul(rhs)
+  }
+}
+
+impl<Q: AsRef<CellPtr>> Mul<Q> for StableCell {
+  type Output = CellPtr;
+
+  fn mul(self, rhs: Q) -> CellPtr {
+    self.as_ptr_ref().mul(rhs)
+  }
+}
+
 /*impl<P: Into<CellPtr> + Sized> Div<f32> for P {
   type Output = CellPtr;
 
@@ -159,6 +206,14 @@ impl<'p> Div<f32> for &'p CellPtr {
   }
 }
 
+impl Div<f32> for CellPtr {
+  type Output = CellPtr;
+
+  fn div(self, rhs: f32) -> CellPtr {
+    (&self).div(rhs)
+  }
+}
+
 /*impl<P: Into<CellPtr> + Sized, Q: Into<CellPtr> + Sized> Div<Q> for P {
   type Output = CellPtr;
 
@@ -177,7 +232,7 @@ impl<'p> Div<f32> for &'p CellPtr {
   }
 }*/
 
-impl<'p, Q: Into<CellPtr> + Sized> Div<Q> for &'p CellPtr {
+impl<'p, Q: Into<CellPtr>> Div<Q> for &'p CellPtr {
   type Output = CellPtr;
 
   fn div(self, rhs: Q) -> CellPtr {
@@ -195,19 +250,15 @@ impl<'p, Q: Into<CellPtr> + Sized> Div<Q> for &'p CellPtr {
   }
 }
 
-pub trait MathOps: Into<CellPtr> + Sized {
-  fn cast(self, dtype: Dtype) -> CellPtr {
+pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
+  fn pow(self, rhs: Q) -> CellPtr {
     unimplemented!();
   }
+}
 
-  /*fn upcast_f32(self) -> CellPtr {
-    unimplemented!();
-  }
+impl<P: Into<CellPtr>, Q: Into<CellPtr>> MathBinaryOps<Q> for P {}
 
-  fn downcast_f16(self) -> CellPtr {
-    unimplemented!();
-  }*/
-
+pub trait MathUnaryOps: Into<CellPtr> {
   fn sqrt(self) -> CellPtr {
     unimplemented!();
     /*
@@ -317,7 +368,7 @@ pub trait MathOps: Into<CellPtr> + Sized {
     */
   }*/
 
-  fn dot<Q: Into<CellPtr> + Sized>(self, rhs: Q) -> CellPtr {
+  fn dot<Q: Into<CellPtr>>(self, rhs: Q) -> CellPtr {
     unimplemented!();
     /*
     let p = self.into();
@@ -332,31 +383,53 @@ pub trait MathOps: Into<CellPtr> + Sized {
   }
 }
 
-impl<P: Into<CellPtr> + Sized> MathOps for P {}
+impl<P: Into<CellPtr>> MathUnaryOps for P {}
 
-pub trait GradOps<Q: Into<CellPtr> + Sized>: Into<CellPtr> + Sized {
-  fn gradl(self, tg: Q) -> CellPtr {
-    ctx_lookup_gradl(self.into(), tg.into())
+pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+  unimplemented!();
+}
+
+pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+  unimplemented!();
+}
+
+pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
+  #[track_caller]
+  fn cast(self, new_dtype: Dtype) -> CellPtr {
+    let ty = ctx_lookup_type(*self.as_ref());
+    if ty.dtype == new_dtype {
+      return self.into();
+    }
+    // TODO
+    unimplemented!();
   }
 
+  /*fn upcast_f32(self) -> CellPtr {
+    unimplemented!();
+  }
+
+  fn downcast_f16(self) -> CellPtr {
+    unimplemented!();
+  }*/
+}
+
+impl<P: AsRef<CellPtr> + Into<CellPtr>> CastOps for P {}
+
+pub trait GradOps<Q: Into<CellPtr>>: Into<CellPtr> {
+  #[track_caller]
+  fn gradl(self, tg: Q) -> CellPtr {
+    ctx_lookup_or_insert_gradl(self.into(), tg.into())
+  }
+
+  #[track_caller]
   fn gradr(self, x: Q) -> CellPtr {
-    ctx_lookup_gradr(self.into(), x.into())
+    ctx_lookup_or_insert_gradr(self.into(), x.into())
   }
 }
 
-/*impl<P: Into<CellPtr> + Sized, Q: Into<CellPtr> + Sized> GradOps<Q> for P {
-  fn gradl(self, tg: Q) -> CellPtr {
-    ctx_lookup_gradl(self.into(), tg.into())
-  }
+impl<P: Into<CellPtr>, Q: Into<CellPtr>> GradOps<Q> for P {}
 
-  fn gradr(self, x: Q) -> CellPtr {
-    ctx_lookup_gradr(self.into(), x.into())
-  }
-}*/
-
-impl<P: Into<CellPtr> + Sized, Q: Into<CellPtr> + Sized> GradOps<Q> for P {}
-
-pub trait ArrayOps: Into<CellPtr> + Sized {
+pub trait ArrayOps: AsRef<CellPtr> + Sized {
   /*
   fn dtype(&self) -> Dtype;
   fn shape(&self) -> Vec<i64>;
@@ -365,55 +438,74 @@ pub trait ArrayOps: Into<CellPtr> + Sized {
   fn reshape(self, new_shape: Vec<i64>) -> Self { self.new_shape(new_shape) }
   */
 
+  #[track_caller]
   fn type_(self) -> CellType {
-    ctx_lookup_type(self.into())
+    ctx_lookup_type(*self.as_ref())
   }
 
-  /*fn dtype(self) -> Dtype {
-    unimplemented!();
+  #[track_caller]
+  fn dtype(self) -> Dtype {
+    self.type_().dtype
   }
 
+  #[track_caller]
   fn shape(self) -> Vec<i64> {
-    unimplemented!();
-  }*/
+    self.type_().shape
+  }
 
+  #[track_caller]
   fn bit_alias(self, new_dtype: Dtype) -> CellPtr {
-    ctx_alias_bits(self.into(), new_dtype)
+    ctx_alias_bits(*self.as_ref(), new_dtype)
   }
 
+  #[track_caller]
   fn new_shape(self, new_shape: Vec<i64>) -> CellPtr {
-    ctx_alias_new_shape(self.into(), new_shape)
+    ctx_alias_new_shape(*self.as_ref(), new_shape)
   }
 
+  #[track_caller]
   fn reshape(self, new_shape: Vec<i64>) -> CellPtr { self.new_shape(new_shape) }
 }
 
-impl<P: Into<CellPtr> + Sized> ArrayOps for P {}
+impl<P: AsRef<CellPtr> + Sized> ArrayOps for P {}
 
-pub trait Ops: Into<CellPtr> + Sized {
+pub trait CtlOps: AsRef<CellPtr> + Sized {
+  #[track_caller]
+  fn profile(self) -> CellPtr {
+    ctx_profile(*self.as_ref())
+  }
+
+  #[track_caller]
+  fn trace(self) -> CellPtr {
+    ctx_trace(*self.as_ref())
+  }
+
+  #[track_caller]
+  fn break_(self) -> CellPtr {
+    ctx_break(*self.as_ref())
+  }
+
+  #[track_caller]
+  fn opaque(self) -> CellPtr {
+    ctx_opaque(*self.as_ref())
+  }
+}
+
+impl<P: AsRef<CellPtr> + Sized> CtlOps for P {}
+
+pub trait Ops: AsRef<CellPtr> + Sized {
+  #[track_caller]
   fn tag(self, /*_: ???*/) -> Self {
-    unimplemented!();
-  }
-
-  fn profile(self) -> Self {
-    unimplemented!();
-  }
-
-  fn trace(self) -> Self {
-    unimplemented!();
-  }
-
-  fn break_(self) -> Self {
-    unimplemented!();
-  }
-
-  fn opaque(self) -> Self {
     unimplemented!();
   }
 
   fn bar(self) -> Self {
     unimplemented!();
   }
+
+  /*fn set_mem(self, ) -> Self {
+    unimplemented!();
+  }*/
 
   fn set_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
@@ -422,26 +514,33 @@ pub trait Ops: Into<CellPtr> + Sized {
   //fn set(self, set_f: Box<FnOnce() -> _>) -> Self;
   //fn set_in_place(self, set_f: Box<FnOnce(_)>) -> Self;
 
+  #[track_caller]
   fn init_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
   }
 
   //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
 
+  #[track_caller]
   fn apply_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
   }
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
+  #[track_caller]
   fn cache(self) -> Self {
-    unimplemented!();
+    ctx_set_cache(*self.as_ref());
+    self
   }
 
+  #[track_caller]
   fn init_cache(self) -> Self {
-    unimplemented!();
+    ctx_init_cache(*self.as_ref());
+    self
   }
 
+  #[track_caller]
   fn cache_init(self) -> Self { self.init_cache() }
 
   /*fn cache_init_futhark(self, fut_str: &str) -> Self {
@@ -449,248 +548,16 @@ pub trait Ops: Into<CellPtr> + Sized {
     unimplemented!();
   }*/
 
+  #[track_caller]
   fn unseal_init(self) -> Self {
     unimplemented!();
   }
 
+  #[track_caller]
   fn eval(self) -> Self {
-    unimplemented!();
-  }
-}
-
-impl<P: Into<CellPtr> + Sized> Ops for P {}
-
-/*pub trait MaybeStableOps: Sized {
-  // FIXME FIXME
-  fn is_stable(self) -> bool;
-  fn maybe_eval(self) -> Option<StablePtr>;
-  fn eval(self) -> StablePtr;
-}
-
-pub trait StableOps: Sized {
-  // FIXME FIXME
-  fn cache(self) -> Self;
-  fn cache_init_futhark(self, fut_str: &str) -> Self;
-}*/
-
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct UnstablePtr(i32);
-
-impl Deref for UnstablePtr {
-  type Target = CellPtr;
-
-  #[inline(always)]
-  fn deref<'a>(&'a self) -> &'a CellPtr {
-    unsafe { &*((self as *const UnstablePtr) as *const CellPtr) as &CellPtr }
-  }
-}
-
-impl UnstablePtr {
-  pub fn from_cell_unchecked(x: CellPtr) -> UnstablePtr {
-    UnstablePtr(x.to_unchecked())
-  }
-
-  pub fn from_unchecked(p: i32) -> UnstablePtr {
-    UnstablePtr(p)
-  }
-
-  pub fn to_unchecked(&self) -> i32 {
-    self.0
-  }
-}*/
-
-/*impl Ops for UnstablePtr {
-  fn dtype(&self) -> Dtype {
-    unimplemented!();
-  }
-
-  fn shape(&self) -> Vec<i64> {
-    unimplemented!();
-  }
-
-  fn bit_alias(self, new_dtype: Dtype) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn new_shape(self, new_shape: Vec<i64>) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn tag(self, /*_: ???*/) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn profile(self) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn trace(self) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn break_(self) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn opaque(self) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn bar(self) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn set_futhark(self, fut_str: &str) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn init_futhark(self, fut_str: &str) -> UnstablePtr {
-    unimplemented!();
-  }
-
-  fn apply_futhark(self, fut_str: &str) -> UnstablePtr {
-    unimplemented!();
-  }
-}*/
-
-/*impl MaybeStableOps for UnstablePtr {
-  fn is_stable(self) -> bool {
-    ctx_lookup_flag((*self).into()).eval()
-  }
-
-  fn maybe_eval(self) -> Option<StablePtr> {
-    let p = self.into();
-    if ctx_lookup_flag(p).eval() {
-      Some(StablePtr::from_cell_unchecked(p))
-    } else {
-      None
-    }
-  }
-
-  fn eval(self) -> StablePtr {
-    let p = self.into();
-    ctx_set_eval(p);
-    StablePtr::from_cell_unchecked(p)
-  }
-}*/
-
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(transparent)]
-pub struct StablePtr(i32);
-
-impl Deref for StablePtr {
-  type Target = CellPtr;
-
-  #[inline(always)]
-  fn deref<'a>(&'a self) -> &'a CellPtr {
-    unsafe { &*((self as *const StablePtr) as *const CellPtr) as &CellPtr }
-  }
-}
-
-impl StablePtr {
-  pub fn from_cell_unchecked(x: CellPtr) -> StablePtr {
-    StablePtr(x.to_unchecked())
-  }
-
-  pub fn from_unchecked(p: i32) -> StablePtr {
-    StablePtr(p)
-  }
-
-  pub fn to_unchecked(&self) -> i32 {
-    self.0
-  }
-}*/
-
-/*impl Ops for StablePtr {
-  fn dtype(&self) -> Dtype {
-    unimplemented!();
-  }
-
-  fn shape(&self) -> Vec<i64> {
-    unimplemented!();
-  }
-
-  fn bit_alias(self, new_dtype: Dtype) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn new_shape(self, new_shape: Vec<i64>) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn tag(self, /*_: ???*/) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn profile(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn trace(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn break_(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn opaque(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn bar(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn set_futhark(self, fut_str: &str) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn init_futhark(self, fut_str: &str) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn apply_futhark(self, fut_str: &str) -> StablePtr {
-    unimplemented!();
-  }
-}*/
-
-/*impl MaybeStableOps for StablePtr {
-  fn is_stable(self) -> bool {
-    if !ctx_lookup_flag((*self).into()).eval() {
-      panic!("bug");
-    }
-    true
-  }
-
-  fn maybe_eval(self) -> Option<StablePtr> {
-    if !ctx_lookup_flag(self.into()).eval() {
-      panic!("bug");
-    }
-    Some(self)
-  }
-
-  fn eval(self) -> StablePtr {
-    if !ctx_lookup_flag(self.into()).eval() {
-      panic!("bug");
-    }
+    ctx_set_eval(*self.as_ref());
     self
   }
 }
 
-impl StableOps for StablePtr {
-  fn cache(self) -> StablePtr {
-    unimplemented!();
-  }
-
-  fn cache_init_futhark(self, fut_str: &str) -> StablePtr {
-    unimplemented!();
-  }
-}
-
-impl StablePtr {
-  pub fn retain(self) -> StablePtr {
-    unimplemented!();
-  }
-}*/
+impl<P: AsRef<CellPtr> + Sized> Ops for P {}

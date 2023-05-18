@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+use std::fmt::{Debug, Formatter, Result as FmtResult};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Counter {
   pub rst:  u16,
@@ -7,6 +9,19 @@ pub struct Counter {
 impl Default for Counter {
   fn default() -> Counter {
     Counter{rst: 0}
+  }
+}
+
+impl From<Clock> for Counter {
+  #[inline(always)]
+  fn from(clk: Clock) -> Counter {
+    Counter{rst: clk.rst}
+  }
+}
+
+impl Debug for Counter {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "Counter(rst={})", self.rst)
   }
 }
 
@@ -21,6 +36,17 @@ impl Counter {
       next_rst = next_rst.wrapping_add(1);
     }
     Counter{rst: next_rst}
+  }
+
+  pub fn succeeds<Ctr: Into<Counter>>(&self, r_ctr: Ctr) -> bool {
+    let r_ctr = r_ctr.into();
+    if self.rst > 1 {
+      r_ctr.rst.wrapping_add(1) == self.rst
+    } else if self.rst == 1 {
+      r_ctr.rst == u16::max_value()
+    } else {
+      false
+    }
   }
 }
 
@@ -39,7 +65,13 @@ impl Default for Clock {
 impl From<Counter> for Clock {
   #[inline(always)]
   fn from(ctr: Counter) -> Clock {
-    Clock{rst: ctr.rst, tup:  0}
+    Clock{rst: ctr.rst, tup: 0}
+  }
+}
+
+impl Debug for Clock {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "Clock(rst={}, tup={})", self.rst, self.tup)
   }
 }
 
@@ -76,6 +108,7 @@ impl Clock {
       } else {
         return Some(false);
       }
+    // FIXME FIXME: these conditions are wrong; use intervals.
     } else if diff < 0x4000 {
       return Some(true);
     } else if diff > 0xc000 {
@@ -93,6 +126,7 @@ impl Clock {
       } else {
         return Some(false);
       }
+    // FIXME FIXME: these conditions are wrong; use intervals.
     } else if diff < 0x4000 {
       return Some(true);
     } else if diff > 0xc000 {

@@ -1,10 +1,10 @@
 use super::*;
-use crate::algo::{Bitvec64};
+use crate::algo::{Bitvec64, MergeVecDeque};
 use crate::algo::sync::{SpinWait};
 use crate::clock::*;
 
-use cacti_cuffi::*;
-use cacti_cuffi::types::{cudaErrorCudartUnloading, cudaErrorNotReady};
+use cacti_gpu_cu_ffi::*;
+use cacti_gpu_cu_ffi::types::{cudaErrorCudartUnloading, cudaErrorNotReady};
 
 //use std::alloc::{Layout};
 use std::cell::{Cell, RefCell};
@@ -33,6 +33,7 @@ impl GpuSnapshot {
     self.record.set(true);
   }
 
+  #[allow(non_upper_case_globals)]
   pub fn wait(&self, sw: &mut SpinWait) {
     if !self.record.get() {
       return;
@@ -81,24 +82,35 @@ pub struct GpuInnerCell {
 #[repr(transparent)]
 pub struct GpuInnerRef(u32);
 
-thread_local! {
-  static TL_GPU_CTX: GpuCtx = GpuCtx::new();
+impl GpuInnerRef {
+  pub fn free() -> GpuInnerRef {
+    GpuInnerRef(0)
+  }
+
+  pub fn is_free(&self) -> bool {
+    self.0 == 0
+  }
 }
+
+/*thread_local! {
+  static TL_GPU_CTX: GpuCtx = GpuCtx::new();
+}*/
 
 pub struct GpuCtx {
   // FIXME FIXME: work threads for copying.
-  dev:          i32,
-  main:         CudartStream,
-  copy_to:      CudartStream,
-  copy_from:    CudartStream,
-  iref_ctr:     Cell<u32>,
-  mem_pool:     GpuMemPool,
-  cel_map:      RefCell<HashMap<GpuInnerRef, Rc<GpuInnerCell>>>,
+  pub iref_ctr:     Cell<u32>,
+  pub dev:          Cell<i32>,
+  pub main:         CudartStream,
+  pub copy_to:      CudartStream,
+  pub copy_from:    CudartStream,
+  pub mem_pool:     GpuMemPool,
+  pub cel_map:      RefCell<HashMap<GpuInnerRef, Rc<GpuInnerCell>>>,
   // TODO
 }
 
 impl GpuCtx {
   pub fn new() -> GpuCtx {
+    println!("DEBUG: GpuCtx::new");
     let dev = 0;
     cudart_set_cur_dev(dev).unwrap();
     let main = CudartStream::null();
@@ -109,11 +121,11 @@ impl GpuCtx {
     let copy_from = CudartStream::create().unwrap();*/
     let mem_pool = GpuMemPool::new(dev);
     GpuCtx{
-      dev,
+      iref_ctr:     Cell::new(0),
+      dev:          Cell::new(dev),
       main,
       copy_to,
       copy_from,
-      iref_ctr:     Cell::new(0),
       mem_pool,
       cel_map:      RefCell::new(HashMap::default()),
       // TODO
@@ -157,25 +169,25 @@ impl GpuCtx {
     unimplemented!();
   }
 
-  pub fn try_front_alloc(&self, query_sz: usize) -> Option<(usize, usize, usize)> {
-    self.mem_pool.try_front_alloc(query_sz)
+  pub fn try_front_pre_alloc(&self, query_sz: usize) -> Option<(usize, usize, usize)> {
+    self.mem_pool.try_front_pre_alloc(query_sz)
   }
 
-  pub fn front_alloc(&self, ptr: CellPtr, offset: usize, req_sz: usize, next_offset: usize) -> Option<Weak<GpuInnerCell>> {
+  pub fn front_alloc(&self, ptr: CellPtr, offset: usize, req_sz: usize, next_offset: usize) -> Weak<GpuInnerCell> {
     let r = self._fresh_inner_ref();
-    self.mem_pool.front_set.borrow_mut().insert(r, GpuInnerCellMemDesc{off: offset, sz: req_sz});
+    self.mem_pool.front_set.borrow_mut().insert(r, GpuInnerMemDesc{off: offset, sz: req_sz});
     self.mem_pool.front_cursor.set(next_offset);
     let dptr = unsafe { self.mem_pool.reserve_base.offset(offset as isize) };
     /*cudart_set_cur_dev(self.dev).unwrap();
     let write = Rc::new(CudartEvent::create_fastest().unwrap());
     let lastuse = Rc::new(CudartEvent::create_fastest().unwrap());*/
-    let write = GpuSnapshot::fresh(self.dev);
-    let lastuse = GpuSnapshot::fresh(self.dev);
+    let write = GpuSnapshot::fresh(self.dev.get());
+    let lastuse = GpuSnapshot::fresh(self.dev.get());
     let cel = Rc::new(GpuInnerCell{
       ptr: Cell::new(ptr),
       clk: Cell::new(Clock::default()),
       ref_: r,
-      dev: self.dev,
+      dev: self.dev.get(),
       dptr,
       off: offset,
       sz: req_sz,
@@ -185,7 +197,7 @@ impl GpuCtx {
     });
     let xcel = Rc::downgrade(&cel);
     self.cel_map.borrow_mut().insert(r, cel);
-    Some(xcel)
+    xcel
   }
 
   pub fn try_front_free(&self, r: GpuInnerRef) -> Option<()> {
@@ -197,9 +209,9 @@ impl GpuCtx {
         if c > 1 {
           return None;
         }
-        let mut spin = SpinWait::default();
-        cel.write.wait(&mut spin);
-        cel.lastuse.wait(&mut spin);
+        let mut sw = SpinWait::default();
+        cel.write.wait(&mut sw);
+        cel.lastuse.wait(&mut sw);
         // FIXME FIXME: remove from front.
         drop(cel);
         self.mem_pool.front_set.borrow_mut().remove(&r);
@@ -210,31 +222,52 @@ impl GpuCtx {
   }
 }
 
+#[derive(Clone)]
+pub struct GpuInnerMemCell {
+  pub off:  usize,
+  pub sz:   usize,
+  pub prevfree: Cell<usize>,
+  pub nextfree: Cell<usize>,
+}
+
+impl GpuInnerMemCell {
+  pub fn new(off: usize, sz: usize) -> GpuInnerMemCell {
+    GpuInnerMemCell{
+      off,
+      sz,
+      prevfree: Cell::new(usize::max_value()),
+      nextfree: Cell::new(usize::max_value()),
+    }
+  }
+}
+
 #[derive(Clone, Copy)]
-pub struct GpuInnerCellMemDesc {
-  off:  usize,
-  sz:   usize,
+pub struct GpuInnerMemDesc {
+  pub off:  usize,
+  pub sz:   usize,
 }
 
 pub struct GpuMemPool {
-  dev:          i32,
-  reserve_base: *mut u8,
-  reserve_sz:   usize,
-  front_pad:    usize,
-  front_sz:     usize,
-  boundary_pad: usize,
-  back_sz:      usize,
-  back_pad:     usize,
-  front_set:    RefCell<BTreeMap<GpuInnerRef, GpuInnerCellMemDesc>>,
-  front_cursor: Cell<usize>,
-  back_bitmap:  RefCell<Bitvec64>,
-  back_cursor:  Cell<usize>,
+  pub dev:          i32,
+  pub reserve_base: *mut u8,
+  pub reserve_sz:   usize,
+  pub front_pad:    usize,
+  pub front_sz:     usize,
+  pub boundary_pad: usize,
+  pub back_sz:      usize,
+  pub back_pad:     usize,
+  pub front_list:   RefCell<MergeVecDeque<(GpuInnerRef, GpuInnerMemCell)>>,
+  pub front_set:    RefCell<BTreeMap<GpuInnerRef, GpuInnerMemDesc>>,
+  pub front_cursor: Cell<usize>,
+  pub back_bitmap:  RefCell<Bitvec64>,
+  pub back_cursor:  Cell<usize>,
   // TODO
 }
 
 impl Drop for GpuMemPool {
+  #[allow(non_upper_case_globals)]
   fn drop(&mut self) {
-    // FIXME
+    // FIXME FIXME: wait for nonblocking transfers.
     match CudartStream::null().sync() {
       Ok(_) | Err(cudaErrorCudartUnloading) => {}
       Err(_) => panic!("bug")
@@ -247,11 +280,13 @@ impl Drop for GpuMemPool {
 }
 
 impl GpuMemPool {
+  #[allow(unused_parens)]
   pub fn new(dev: i32) -> GpuMemPool {
+    println!("DEBUG: GpuMemPool::new");
     cudart_set_cur_dev(dev).unwrap();
     let (free_sz, total_sz) = cudart_get_mem_info().unwrap();
     assert!(free_sz <= total_sz);
-    let reserve_bp = ctx_get_gpu_reserve_mem_per_10k();
+    let reserve_bp = ctx_cfg_get_gpu_reserve_mem_per_10k();
     let unrounded_reserve_sz = (total_sz * reserve_bp as usize + 10000 - 1) / 10000;
     // NB: assuming page size is 64 KiB.
     let reserve_sz = ((unrounded_reserve_sz + (1 << 16) - 1) >> 16) << 16;
@@ -260,6 +295,7 @@ impl GpuMemPool {
       panic!("FAIL: GpuCtx::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
           reserve_sz, dev, free_sz, total_sz);
     }
+    println!("DEBUG: GpuMemPool::new: reserve sz={}", reserve_sz);
     let reserve_base = cudart_malloc(reserve_sz).unwrap() as *mut u8;
     CudartStream::null().sync().unwrap();
     let reserve_warp_offset = reserve_base.align_offset(128);
@@ -273,6 +309,8 @@ impl GpuMemPool {
     let back_sz = (1 << 24);
     let front_sz = reserve_sz - (front_pad + boundary_pad + back_sz + back_pad);
     assert!(front_sz >= (1 << 24));
+    println!("DEBUG: GpuMemPool::new: front sz={}", front_sz);
+    println!("DEBUG: GpuMemPool::new: back sz={}", back_sz);
     GpuMemPool{
       dev,
       reserve_base,
@@ -282,6 +320,7 @@ impl GpuMemPool {
       boundary_pad,
       back_sz,
       back_pad,
+      front_list:   RefCell::new(MergeVecDeque::new()),
       front_set:    RefCell::new(BTreeMap::new()),
       front_cursor: Cell::new(0),
       back_bitmap:  RefCell::new(Bitvec64::new()),
@@ -290,7 +329,7 @@ impl GpuMemPool {
     }
   }
 
-  pub fn try_front_alloc(&self, query_sz: usize) -> Option<(usize, usize, usize)> {
+  pub fn try_front_pre_alloc(&self, query_sz: usize) -> Option<(usize, usize, usize)> {
     let req_sz = ((query_sz + 128 - 1) / 128) * 128;
     assert!(query_sz <= req_sz);
     let offset = self.front_cursor.get();

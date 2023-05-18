@@ -1,0 +1,15 @@
+[package]
+name = "cacti_smp_c_ffi"
+version = "0.1.0-devel"
+license = "MIT OR Apache-2.0"
+edition = "2018"
+workspace = ".."
+
+#[features]
+#default = []
+#experimental = []
+
+[dependencies]
+libc = { path = "../../libc" }
+libloading = { path = "../../libloading" }
+once_cell = { path = "../../once_cell" }

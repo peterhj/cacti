@@ -1,3 +1,5 @@
+#![allow(non_upper_case_globals)]
+
 extern crate libc;
 extern crate libloading;
 extern crate once_cell;
@@ -15,15 +17,48 @@ pub mod bindings;
 pub mod experimental;
 pub mod types;
 
-static LIBCUDART: Lazy<Libcudart> = Lazy::new(|| {
-  let mut lib = Libcudart::default();
+pub static LIBCUDA: Lazy<Libcuda> = Lazy::new(|| {
+  let mut lib = Libcuda::default();
   unsafe {
-    if lib.load_default().is_err() {
-      panic!("bug: failed to dynamically link cudart");
+    if let Err(code) = lib.load_default() {
+      panic!("bug: failed to dynamically link libcuda.so: {}", code);
+    }
+    if let Err(e) = lib.try_init() {
+      panic!("bug: cuda: init failed: {:?}", e);
     }
   }
   lib
 });
+
+pub static LIBCUDART: Lazy<Libcudart> = Lazy::new(|| {
+  let mut lib = Libcudart::default();
+  unsafe {
+    if let Err(code) = lib.load_default() {
+      panic!("bug: failed to dynamically link libcudart.so: {}", code);
+    }
+  }
+  lib
+});
+
+pub static LIBNVRTC: Lazy<Libnvrtc> = Lazy::new(|| {
+  let mut lib = Libnvrtc::default();
+  unsafe {
+    if let Err(code) = lib.load_default() {
+      panic!("bug: failed to dynamically link libnvrtc.so: {}", code);
+    }
+  }
+  lib
+});
+
+/*pub static LIBCUBLAS: Lazy<Libcublas> = Lazy::new(|| {
+  let mut lib = Libcublas::default();
+  unsafe {
+    if let Err(code) = lib.load_default() {
+      panic!("bug: failed to dynamically link libcublas.so: {}", code);
+    }
+  }
+  lib
+});*/
 
 pub type CudartResult<T=()> = Result<T, i32>;
 

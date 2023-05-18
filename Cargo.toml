@@ -4,7 +4,10 @@ version = "0.1.0-devel"
 edition = "2018"
 
 [workspace]
-members = ["cacti_cuffi"]
+members = [
+    "cacti_gpu_cu_ffi",
+    "cacti_smp_c_ffi",
+]
 
 [profile.release]
 overflow-checks = true
@@ -14,14 +17,20 @@ incremental = false
 
 [features]
 default = ["gpu"]
-gpu = ["cacti_cuffi"]
+gpu = ["cacti_gpu_cu_ffi"]
 
 [dependencies]
-cacti_cuffi = { path = "cacti_cuffi", optional = true }
+cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
+cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 futhark_ffi = { path = "../futhark_ffi" }
+half = { path = "../half" }
 libc = { path = "../libc" }
 #msgpack_serialize = { path = "../msgpack_serialize" }
+once_cell = { path = "../once_cell" }
 repugnant_pickle = { path = "../repugnant_pickle" }
+rustc_serialize = { path = "../rustc_serialize" }
+#ryu = { path = "../ryu" }
+safetensor_serialize = { path = "../safetensor_serialize" }
 
 [dev-dependencies]
 dessert = { path = "../dessert" }
@@ -29,3 +38,7 @@ dessert = { path = "../dessert" }
 [[bin]]
 name = "inspect_pth"
 path = "tools/inspect_pth.rs"
+
+[[bin]]
+name = "boot"
+path = "tools/boot.rs"

@@ -1,17 +1,22 @@
+use crate::algo::fp::*;
 #[cfg(feature = "gpu")]
 use crate::cell::gpu::*;
 use crate::cell::smp::*;
 use crate::cell::swap::*;
 use crate::clock::*;
 use crate::ctx::*;
-use crate::ptr::*;
+//use crate::ptr::*;
 use crate::thunk::*;
+use crate::util::torch::{TorchDtype};
 
 //use std::alloc::{Layout};
-use std::cell::{Cell, RefCell};
+use std::any::{Any};
+//use std::cell::{Cell, RefCell};
+use std::convert::{TryFrom, TryInto};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of};
 use std::ops::{Deref};
-use std::rc::{Rc, Weak};
+use std::rc::{Weak};
 use std::slice::{from_raw_parts};
 use std::str::{FromStr};
 
@@ -20,13 +25,13 @@ pub mod gpu;
 pub mod smp;
 pub mod swap;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct CellPtr(i32);
 
-impl<'a> From<&'a CellPtr> for CellPtr {
-  fn from(x: &'a CellPtr) -> CellPtr {
-    *x
+impl From<StableCell> for CellPtr {
+  fn from(x: StableCell) -> CellPtr {
+    x.into_ptr()
   }
 }
 
@@ -36,9 +41,21 @@ impl<'a> From<&'a StableCell> for CellPtr {
   }
 }
 
-impl From<StableCell> for CellPtr {
-  fn from(x: StableCell) -> CellPtr {
-    x.into_ptr()
+impl<'a> From<&'a CellPtr> for CellPtr {
+  fn from(x: &'a CellPtr) -> CellPtr {
+    *x
+  }
+}
+
+impl AsRef<CellPtr> for CellPtr {
+  fn as_ref(&self) -> &CellPtr {
+    self
+  }
+}
+
+impl Debug for CellPtr {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "CellPtr({})", self.0)
   }
 }
 
@@ -65,25 +82,29 @@ pub struct StableCell {
   ptr:  CellPtr,
 }
 
-impl Drop for StableCell {
-  fn drop(&mut self) {
-    ctx_release(self.ptr);
+impl Deref for StableCell {
+  type Target = CellPtr;
+
+  fn deref(&self) -> &CellPtr {
+    self.as_ptr_ref()
+  }
+}
+
+impl AsRef<CellPtr> for StableCell {
+  fn as_ref(&self) -> &CellPtr {
+    self.as_ptr_ref()
+  }
+}
+
+impl Debug for StableCell {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "StableCell({})", self.ptr.0)
   }
 }
 
 impl Clone for StableCell {
   fn clone(&self) -> StableCell {
     StableCell::from(self.ptr)
-  }
-}
-
-impl Deref for StableCell {
-  type Target = CellPtr;
-
-  fn deref(&self) -> &CellPtr {
-    // SAFETY: The following should be safe as `StableCell` has the same
-    // (transparent) repr as `CellPtr`.
-    unsafe { &*((self as *const StableCell) as *const CellPtr) as &CellPtr }
   }
 }
 
@@ -94,18 +115,49 @@ impl From<CellPtr> for StableCell {
   }
 }
 
+impl Drop for StableCell {
+  fn drop(&mut self) {
+    ctx_release(self.ptr);
+  }
+}
+
 impl StableCell {
-  pub fn new_array<S: Into<Vec<i64>>>(shape: S, dtype: Dtype) -> StableCell {
-    let shape: Vec<i64> = shape.into();
-    unimplemented!();
+  pub fn new_scalar<T: ThunkValExt>(value: T) -> StableCell {
+    let shape = [].into();
+    let dtype = T::dtype();
+    let ty = CellType{shape, dtype};
+    let x = ctx_insert_pmach(ty, Some(PMachSpec::Smp), None);
+    // FIXME FIXME
+    //ctx_set_mem(x, &[value]);
+    ctx_set_copy_scalar_value(x, value);
+    x.into()
   }
 
+  pub fn new_array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
+    let shape: Vec<i64> = shape.into();
+    let dtype: Dtype = match dtype.try_into() {
+      Ok(d) => d,
+      Err(_) => panic!("bug: StableCell::new_array: invalid dtype")
+    };
+    let ty = CellType{shape, dtype};
+    ctx_insert(ty).into()
+  }
+
+  #[inline]
   pub fn into_ptr(self) -> CellPtr {
     self.ptr
   }
 
+  #[inline]
   pub fn as_ptr(&self) -> CellPtr {
     self.ptr
+  }
+
+  #[inline]
+  pub fn as_ptr_ref(&self) -> &CellPtr {
+    // SAFETY: The following should be safe as `StableCell` has the same
+    // (transparent) repr as `CellPtr`.
+    unsafe { &*((self as *const StableCell) as *const CellPtr) as &CellPtr }
   }
 }
 
@@ -195,23 +247,63 @@ pub enum Dtype {
   UInt8,
 }
 
+impl TryFrom<TorchDtype> for Dtype {
+  type Error = String;
+
+  fn try_from(t: TorchDtype) -> Result<Dtype, String> {
+    Ok(match t {
+      TorchDtype::Float64 => Dtype::Float64,
+      TorchDtype::Float32 => Dtype::Float32,
+      TorchDtype::Float16 => Dtype::Float16,
+      TorchDtype::BFloat16 => Dtype::BFloat16,
+      TorchDtype::Int64 => Dtype::Int64,
+      TorchDtype::Int32 => Dtype::Int32,
+      TorchDtype::Int16 => Dtype::Int16,
+      TorchDtype::Int8 => Dtype::Int8,
+      TorchDtype::UInt64 => Dtype::UInt64,
+      TorchDtype::UInt32 => Dtype::UInt32,
+      TorchDtype::UInt16 => Dtype::UInt16,
+      TorchDtype::UInt8 => Dtype::UInt8,
+    })
+  }
+}
+
+impl<'a> TryFrom<&'a str> for Dtype {
+  type Error = String;
+
+  fn try_from(s: &str) -> Result<Dtype, String> {
+    Dtype::from_str(s)
+  }
+}
+
 impl FromStr for Dtype {
   type Err = String;
 
   fn from_str(s: &str) -> Result<Dtype, String> {
     Ok(match s {
+      "f64"     |
       "float64" => Dtype::Float64,
+      "f32"     |
       "float32" => Dtype::Float32,
+      "f16"     |
       "float16" => Dtype::Float16,
       "bfloat16" => Dtype::BFloat16,
-      "int64" => Dtype::Int64,
-      "int32" => Dtype::Int32,
-      "int16" => Dtype::Int16,
-      "int8" => Dtype::Int8,
-      "uint64" => Dtype::UInt64,
-      "uint32" => Dtype::UInt32,
-      "uint16" => Dtype::UInt16,
-      "uint8" => Dtype::UInt8,
+      "i64"     |
+      "int64"   => Dtype::Int64,
+      "i32"     |
+      "int32"   => Dtype::Int32,
+      "i16"     |
+      "int16"   => Dtype::Int16,
+      "i8"      |
+      "int8"    => Dtype::Int8,
+      "u64"     |
+      "uint64"  => Dtype::UInt64,
+      "u32"     |
+      "uint32"  => Dtype::UInt32,
+      "u16"     |
+      "uint16"  => Dtype::UInt16,
+      "u8"      |
+      "uint8"   => Dtype::UInt8,
       _ => return Err(s.to_owned())
     })
   }
@@ -235,6 +327,35 @@ impl Dtype {
       Dtype::UInt8      => 1,
     }
   }
+}
+
+/*pub trait DtypeExt: Any {
+  fn as_any(&self) -> &dyn Any { &self }
+  fn _dtype(&self) -> Dtype where Self: Sized { <Self as DtypeExt>::dtype() }
+  fn dtype() -> Dtype where Self: Sized;
+}*/
+
+pub trait DtypeExt: Copy {
+  fn dtype() -> Dtype;
+}
+
+impl DtypeExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Float32 } }
+impl DtypeExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Float32 } }
+
+impl DtypeExt for f64 { fn dtype() -> Dtype { Dtype::Float64 } }
+impl DtypeExt for f32 { fn dtype() -> Dtype { Dtype::Float32 } }
+impl DtypeExt for f16 { fn dtype() -> Dtype { Dtype::Float16 } }
+impl DtypeExt for i64 { fn dtype() -> Dtype { Dtype::Int64 } }
+impl DtypeExt for i32 { fn dtype() -> Dtype { Dtype::Int32 } }
+impl DtypeExt for i16 { fn dtype() -> Dtype { Dtype::Int16 } }
+impl DtypeExt for i8  { fn dtype() -> Dtype { Dtype::Int8 } }
+impl DtypeExt for u64 { fn dtype() -> Dtype { Dtype::UInt64 } }
+impl DtypeExt for u32 { fn dtype() -> Dtype { Dtype::UInt32 } }
+impl DtypeExt for u16 { fn dtype() -> Dtype { Dtype::UInt16 } }
+impl DtypeExt for u8  { fn dtype() -> Dtype { Dtype::UInt8 } }
+
+pub fn dtype<T: DtypeExt>() -> Dtype {
+  T::dtype()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -336,7 +457,7 @@ impl CellLayout {
     for d in 1 .. nd {
       let ds = ty.shape[nd - d];
       assert!(ds >= 0);
-      p *= ds as u64;;
+      p *= ds as u64;
       if self.pitch[(np - 1) - d] != p {
         return false;
       }
@@ -360,6 +481,38 @@ impl Default for CellMode {
   }
 }
 
+impl CellMode {
+  pub fn set_aff(&mut self) -> Result<bool, ()> {
+    match *self {
+      CellMode::Top => {
+        *self = CellMode::Aff;
+        Ok(false)
+      }
+      CellMode::Aff => {
+        Ok(true)
+      }
+      _ => {
+        return Err(());
+      }
+    }
+  }
+
+  pub fn set_mux(&mut self) -> Result<bool, ()> {
+    match *self {
+      CellMode::Top => {
+        *self = CellMode::Mux;
+        Ok(false)
+      }
+      CellMode::Mux => {
+        Ok(true)
+      }
+      _ => {
+        return Err(());
+      }
+    }
+  }
+}
+
 #[derive(Clone, Copy, Default)]
 pub struct CellFlag {
   bits: u8,
@@ -367,46 +520,62 @@ pub struct CellFlag {
 
 impl CellFlag {
   pub fn reset(&mut self) {
-    self.bits &= 0xf0;
-  }
-
-  pub fn set_intro(&mut self) {
-    self.bits |= 1;
+    // FIXME FIXME
+    /*self.bits &= 0xf0;*/
+    self.bits = 0;
   }
 
   pub fn intro(&self) -> bool {
     (self.bits & 1) != 0
   }
 
-  pub fn set_seal(&mut self) {
-    self.bits |= 2;
+  pub fn set_intro(&mut self) -> bool {
+    let prev = self.intro();
+    self.bits |= 1;
+    prev
   }
 
   pub fn seal(&self) -> bool {
     (self.bits & 2) != 0
   }
 
-  pub fn set_cache(&mut self) {
-    self.bits |= 4;
+  pub fn set_seal(&mut self) -> bool {
+    let prev = self.seal();
+    self.bits |= 2;
+    prev
+  }
+
+  pub fn unset_seal(&mut self) -> bool {
+    let prev = self.seal();
+    self.bits &= !2;
+    prev
   }
 
   pub fn cache(&self) -> bool {
     (self.bits & 4) != 0
   }
 
-  pub fn set_eval(&mut self) {
-    self.bits |= 8;
+  pub fn set_cache(&mut self) -> bool {
+    let prev = self.cache();
+    self.bits |= 4;
+    prev
   }
 
   pub fn eval(&self) -> bool {
     (self.bits & 8) != 0
+  }
+
+  pub fn set_eval(&mut self) -> bool {
+    let prev = self.eval();
+    self.bits |= 8;
+    prev
   }
 }
 
 pub struct PCell {
   // FIXME FIXME: to implement fusion w/ unique cells, simply change
   // the PCell's owning ptr; the original ptr then becomes dangling.
-  pub ptr:  CellPtr,
+  pub optr: CellPtr,
   //pub ptr:  Cell<CellPtr>,
   pub ogty: CellType,
   pub lay:  CellLayout,
@@ -420,19 +589,23 @@ pub struct PCell {
 }
 
 impl PCell {
-  pub fn fresh(ptr: CellPtr, shape: Vec<i64>, dtype: Dtype) -> PCell {
+  pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
+    PCell::new_pmach(ptr, ty, None, None)
+  }
+
+  pub fn new_pmach(ptr: CellPtr, ty: CellType, primary: Option<PMachSpec>, compute: Option<PMachSpec>) -> PCell {
     //let ptr = Cell::new(ptr);
-    let ogty = CellType{shape, dtype};
-    let lay = CellLayout::new_packed(&ogty);
+    //let ogty = CellType{shape, dtype};
+    let lay = CellLayout::new_packed(&ty);
     let mode = CellMode::default();
       // FIXME FIXME
     let flag = CellFlag::default();
     let clk = Clock::default();
-    let primary = InnerCell::empty(CellSpec::Primary, ctx_get_default_primary());
-    let compute = InnerCell::empty(CellSpec::Compute, ctx_get_default_compute());
+    let primary = InnerCell::empty(CellSpec::Primary, primary.unwrap_or_else(|| ctx_cfg_get_default_primary()));
+    let compute = InnerCell::empty(CellSpec::Compute, compute.unwrap_or_else(|| ctx_cfg_get_default_compute()));
     PCell{
-      ptr,
-      ogty,
+      optr: ptr,
+      ogty: ty,
       lay,
       mode,
       flag,
@@ -521,11 +694,12 @@ impl InnerCell {
         unimplemented!();
       }
       &InnerCell::Gpu(ref cel) => {
+        if Weak::strong_count(cel) <= 0 {
+          return false;
+        }
         match Weak::upgrade(cel) {
+          None => panic!("bug"),
           Some(cel) => {
-            unimplemented!();
-          }
-          None => {
             unimplemented!();
           }
         }
@@ -534,59 +708,100 @@ impl InnerCell {
     }
   }
 
-  pub fn sync_cell(&self, ty: &CellType, cel: &InnerCell, clk: Clock) {
+  pub fn sync_cell(&mut self, x: CellPtr, ty: &CellType, src_cel: &InnerCell, clk: Clock) {
     if self.synced(ty, clk) {
       return;
     }
     match self {
-      &InnerCell::Uninit => {}
-      &InnerCell::Smp(ref cel) => {
+      &mut InnerCell::Uninit => {
+        panic!("bug");
+      }
+      &mut InnerCell::Smp(ref cel) => {
         unimplemented!();
       }
-      &InnerCell::Gpu(ref cel) => {
+      &mut InnerCell::Gpu(ref cel) => {
+        if Weak::strong_count(cel) <= 0 {
+          // FIXME FIXME: alloc a new cel.
+          unimplemented!();
+        }
         match Weak::upgrade(cel) {
+          None => panic!("bug"),
           Some(cel) => {
-            unimplemented!();
-          }
-          None => {
             unimplemented!();
           }
         }
       }
-      &InnerCell::Primary => {
+      &mut InnerCell::Primary => {
         panic!("bug");
       }
       _ => unimplemented!()
     }
   }
 
-  pub fn sync_thunk(&self, ty: &CellType, thunk: &PThunk, clk: Clock) {
+  pub fn sync_thunk(&mut self, x: CellPtr, ty: &CellType, pthunk: &PThunk, clk: Clock) {
     if self.synced(ty, clk) {
       return;
     }
-    match self {
-      &InnerCell::Uninit => {}
-      &InnerCell::Smp(ref cel) => {
-        unimplemented!();
+    let ret = match self {
+      &mut InnerCell::Uninit => {
+        panic!("bug");
       }
-      &InnerCell::Gpu(ref cel) => {
+      &mut InnerCell::Smp(ref mut cel) => {
+        unimplemented!();
+        /*
+        if Weak::strong_count(cel) <= 0 {
+          // FIXME FIXME: alloc a new cel.
+          *cel = TL_CTX.with(|ctx| {
+            unimplemented!();
+            match ctx.smp.alloc(_) {
+            }
+          });
+        }
         match Weak::upgrade(cel) {
+          None => panic!("bug"),
           Some(cel) => {
-            unimplemented!();
+            pthunk.apply_smp(&*cel)
           }
-          None => {
-            unimplemented!();
+        }
+        */
+      }
+      &mut InnerCell::Gpu(ref mut cel) => {
+        if Weak::strong_count(cel) <= 0 {
+          // FIXME FIXME: alloc a new cel.
+          *cel = TL_CTX.with(|ctx| {
+            match ctx.gpu.try_front_pre_alloc(1) {
+              None => panic!("bug: gpu oom"),
+              Some((off, sz, next_off)) => {
+                ctx.gpu.front_alloc(x, off, sz, next_off)
+              }
+            }
+          });
+        }
+        match Weak::upgrade(cel) {
+          None => panic!("bug"),
+          Some(cel) => {
+            pthunk.apply_gpu(&*cel)
           }
         }
       }
-      &InnerCell::Primary => {
+      &mut InnerCell::Primary => {
         panic!("bug");
       }
       _ => unimplemented!()
+    };
+    match ret {
+      ThunkRet::Success => {}
+      ThunkRet::Failure => {
+        // FIXME
+        panic!("bug");
+      }
+      ThunkRet::NotImpl => {
+        panic!("bug: InnerCell::sync_thunk: thunk not implemented");
+      }
     }
   }
 
-  pub fn unsync(&self, clk: Clock) {
+  pub fn unsync(&mut self, clk: Clock) {
     unimplemented!();
   }
 }

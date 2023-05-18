@@ -28,6 +28,7 @@ impl Bitmask64 {
     self.bits = 0;
   }
 
+  #[allow(unused_parens)]
   pub fn insert(&mut self, p: usize) -> bool {
     let (w, o) = (p / 64, p % 64);
     if w >= 1 {
@@ -78,6 +79,7 @@ impl Bitvec64 {
     self.card = 0;
   }
 
+  #[allow(unused_parens)]
   pub fn insert(&mut self, p: usize) -> bool {
     let (w, o) = (p / 64, p % 64);
     if w >= self.bits.len() {
@@ -96,5 +98,88 @@ impl Bitvec64 {
     let prev_bit = ((self.bits[w] >> o) & 1) != 0;
     self.bits[w] &= !(1 << o);
     prev_bit
+  }
+}
+
+#[derive(Clone)]
+pub struct MergeVecDeque<T> {
+  buf:      Vec<T>,
+  front:    usize,
+}
+
+impl<T> Default for MergeVecDeque<T> {
+  fn default() -> MergeVecDeque<T> {
+    MergeVecDeque::new()
+  }
+}
+
+impl<T> MergeVecDeque<T> {
+  pub fn new() -> MergeVecDeque<T> {
+    MergeVecDeque{
+      buf:      Vec::new(),
+      front:    0,
+    }
+  }
+
+  pub fn len(&self) -> usize {
+    self.buf.len() - self.front
+  }
+
+  pub fn front_offset(&self) -> usize {
+    self.front
+  }
+
+  pub fn last(&self) -> Option<&T> {
+    if self.buf.len() <= self.front {
+      return None;
+    }
+    self.buf.last()
+  }
+
+  pub fn at_offset_unchecked(&self, off: usize) -> &T {
+    &self.buf[off]
+  }
+
+  pub fn compact(&mut self) {
+    if self.front <= 0 {
+      return;
+    }
+    let len = self.len();
+    let front = self.front;
+    for i in 0 .. len {
+      self.buf.swap(i, front + i);
+    }
+    self.buf.resize_with(len, || unreachable!());
+    self.front = 0;
+  }
+
+  pub fn push_front(&mut self, val: T) {
+    if self.front <= 0 {
+      panic!("bug");
+    }
+    self.front -= 1;
+    self.buf[self.front] = val;
+  }
+
+  pub fn push_back(&mut self, val: T) {
+    self.buf.push(val);
+  }
+
+  pub fn pop_back(&mut self) -> Option<T> {
+    if self.buf.len() <= self.front {
+      return None;
+    }
+    self.buf.pop()
+  }
+}
+
+impl<T: Clone> MergeVecDeque<T> {
+  pub fn pop_front(&mut self) -> Option<T> {
+    if self.buf.len() <= self.front {
+      return None;
+    }
+    let val = self.buf[self.front].clone();
+    self.front += 1;
+    Some(val)
   }
 }
