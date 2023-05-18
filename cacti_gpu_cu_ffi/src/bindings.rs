@@ -3,10 +3,12 @@ use crate::types::*;
 use libc::{c_void, c_char, c_int, c_uint};
 use libloading::nonsafe::{Library, Symbol};
 
+use std::env;
+
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libcuda {
-  inner_library:                Option<Library>,
+  pub _inner:                   Option<Library>,
   pub cuGetErrorString:         Option<Symbol<extern "C" fn (CUresult, *mut *const c_char) -> CUresult>>,
   pub cuGetErrorName:           Option<Symbol<extern "C" fn (CUresult, *mut *const c_char) -> CUresult>>,
   pub cuInit:                   Option<Symbol<extern "C" fn (c_uint) -> CUresult>>,
@@ -14,7 +16,7 @@ pub struct Libcuda {
   pub cuDeviceGetCount:         Option<Symbol<extern "C" fn (*mut c_int) -> CUresult>>,
   pub cuDeviceGetName:          Option<Symbol<extern "C" fn (*mut c_char, c_int, CUdevice) -> CUresult>>,
   pub cuDeviceGet:              Option<Symbol<extern "C" fn (*mut CUdevice, c_int) -> CUresult>>,
-  pub cuDeviceGetAttribute:     Option<Symbol<extern "C" fn (*mut c_int, CUdevice_attribute, c_int) -> CUresult>>,
+  pub cuDeviceGetAttribute:     Option<Symbol<extern "C" fn (*mut c_int, CUdevice_attribute, CUdevice) -> CUresult>>,
   pub cuCtxCreate:              Option<Symbol<extern "C" fn (*mut CUcontext, c_uint, CUdevice) -> CUresult>>,
   pub cuCtxDestroy:             Option<Symbol<extern "C" fn (CUcontext) -> CUresult>>,
   pub cuCtxPopCurrent:          Option<Symbol<extern "C" fn (*mut CUcontext) -> CUresult>>,
@@ -38,7 +40,7 @@ pub struct Libcuda {
 
 impl Drop for Libcuda {
   fn drop(&mut self) {
-    let inner_library = self.inner_library.take();
+    let inner_library = self._inner.take();
     *self = Default::default();
     if let Some(inner) = inner_library {
       drop(inner);
@@ -53,7 +55,16 @@ impl Libcuda {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = Library::new("libcuda.so").map_err(|_| 1)?;
+    let library = match env::var("CUDA_HOME") {
+      Ok(prefix) => {
+        if !prefix.is_empty() {
+          Library::new(&format!("{}/libcuda.so", prefix)),
+        } else {
+          Library::new("libcuda.so")
+        }
+      }
+      _ => Library::new("libcuda.so")
+    }.map_err(|_| 1)?;
     self.cuGetErrorString = library.get(b"cuGetErrorString").ok();
     self.cuGetErrorName = library.get(b"cuGetErrorName").ok();
     self.cuInit = library.get(b"cuInit").ok();
@@ -81,7 +92,7 @@ impl Libcuda {
     self.cuFuncGetAttribute = library.get(b"cuFuncGetAttribute").ok();
     self.cuLaunchKernel = library.get(b"cuLaunchKernel").ok();
     // TODO
-    self.inner_library = library.into();
+    self._inner = library.into();
     //self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -102,7 +113,7 @@ impl Libcuda {
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libcudart {
-  inner_library:                Option<Library>,
+  pub _inner:                   Option<Library>,
   pub cudaGetErrorString:       Option<Symbol<extern "C" fn (cudaError_t) -> *const c_char>>,
   pub cudaDriverGetVersion:     Option<Symbol<extern "C" fn (*mut c_int) -> cudaError_t>>,
   pub cudaRuntimeGetVersion:    Option<Symbol<extern "C" fn (*mut c_int) -> cudaError_t>>,
@@ -124,6 +135,7 @@ pub struct Libcudart {
   pub cudaEventCreate:          Option<Symbol<extern "C" fn (*mut cudaEvent_t) -> cudaError_t>>,
   pub cudaEventCreateWithFlags: Option<Symbol<extern "C" fn (*mut cudaEvent_t, c_uint) -> cudaError_t>>,
   pub cudaEventDestroy:         Option<Symbol<extern "C" fn (cudaEvent_t) -> cudaError_t>>,
+  pub cudaEventElapsedTime:     Option<Symbol<extern "C" fn (*mut f32, cudaEvent_t, cudaEvent_t) -> cudaError_t>>,
   pub cudaEventQuery:           Option<Symbol<extern "C" fn (cudaEvent_t) -> cudaError_t>>,
   pub cudaEventRecord:          Option<Symbol<extern "C" fn (cudaEvent_t, cudaStream_t) -> cudaError_t>>,
   pub cudaEventRecordWithFlags: Option<Symbol<extern "C" fn (cudaEvent_t, cudaStream_t, c_uint) -> cudaError_t>>,
@@ -138,7 +150,7 @@ pub struct Libcudart {
 
 impl Drop for Libcudart {
   fn drop(&mut self) {
-    let inner_library = self.inner_library.take();
+    let inner_library = self._inner.take();
     *self = Default::default();
     if let Some(inner) = inner_library {
       drop(inner);
@@ -153,7 +165,16 @@ impl Libcudart {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = Library::new("libcudart.so").map_err(|_| 1)?;
+    let library = match env::var("CUDA_HOME") {
+      Ok(prefix) => {
+        if !prefix.is_empty() {
+          Library::new(&format!("{}/libcudart.so", prefix)),
+        } else {
+          Library::new("libcudart.so")
+        }
+      }
+      _ => Library::new("libcudart.so")
+    }.map_err(|_| 1)?;
     self.cudaGetErrorString = library.get(b"cudaGetErrorString").ok();
     self.cudaDriverGetVersion = library.get(b"cudaDriverGetVersion").ok();
     self.cudaRuntimeGetVersion = library.get(b"cudaRuntimeGetVersion").ok();
@@ -175,6 +196,7 @@ impl Libcudart {
     self.cudaEventCreate = library.get(b"cudaEventCreate").ok();
     self.cudaEventCreateWithFlags = library.get(b"cudaEventCreateWithFlags").ok();
     self.cudaEventDestroy = library.get(b"cudaEventDestroy").ok();
+    self.cudaEventElapsedTime = library.get(b"cudaEventElapsedTime").ok();
     self.cudaEventQuery = library.get(b"cudaEventQuery").ok();
     self.cudaEventRecord = library.get(b"cudaEventRecord").ok();
     self.cudaEventRecordWithFlags = library.get(b"cudaEventRecordWithFlags").ok();
@@ -185,7 +207,7 @@ impl Libcudart {
     self.cudaStreamSynchronize = library.get(b"cudaStreamSynchronize").ok();
     self.cudaStreamWaitEvent = library.get(b"cudaStreamWaitEvent").ok();
     // TODO
-    self.inner_library = library.into();
+    self._inner = library.into();
     self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -219,7 +241,7 @@ impl Libcudart {
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libnvrtc {
-  inner_library:                Option<Library>,
+  pub _inner:                   Option<Library>,
   pub nvrtcGetErrorString:      Option<Symbol<extern "C" fn (nvrtcResult) -> *const c_char>>,
   pub nvrtcGetVersion:          Option<Symbol<extern "C" fn (*mut c_int, *mut c_int) -> nvrtcResult>>,
   pub nvrtcGetNumSupportedArchs: Option<Symbol<extern "C" fn (*mut c_int) -> nvrtcResult>>,
@@ -236,7 +258,7 @@ pub struct Libnvrtc {
 
 impl Drop for Libnvrtc {
   fn drop(&mut self) {
-    let inner_library = self.inner_library.take();
+    let inner_library = self._inner.take();
     *self = Default::default();
     if let Some(inner) = inner_library {
       drop(inner);
@@ -251,7 +273,16 @@ impl Libnvrtc {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), i32> {
-    let library = Library::new("libnvrtc.so").map_err(|_| 1)?;
+    let library = match env::var("CUDA_HOME") {
+      Ok(prefix) => {
+        if !prefix.is_empty() {
+          Library::new(&format!("{}/libnvrtc.so", prefix)),
+        } else {
+          Library::new("libnvrtc.so")
+        }
+      }
+      _ => Library::new("libnvrtc.so")
+    }.map_err(|_| 1)?;
     self.nvrtcGetErrorString = library.get(b"nvrtcGetErrorString").ok();
     self.nvrtcCreateProgram = library.get(b"nvrtcCreateProgram").ok();
     self.nvrtcDestroyProgram = library.get(b"nvrtcDestroyProgram").ok();
@@ -261,7 +292,7 @@ impl Libnvrtc {
     self.nvrtcGetPTXSize = library.get(b"nvrtcGetPTXSize").ok();
     self.nvrtcGetPTX = library.get(b"nvrtcGetPTX").ok();
     // TODO
-    self.inner_library = library.into();
+    self._inner = library.into();
     //self._check_required().map_err(|_| 2)?;
     Ok(())
   }
@@ -322,7 +353,16 @@ impl Libcublas {
   }*/
 
   pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = Library::new("cublas").map_err(|_| ())?;
+    let library = match env::var("CUDA_HOME") {
+      Ok(prefix) => {
+        if !prefix.is_empty() {
+          Library::new(&format!("{}/libcublas.so", prefix)),
+        } else {
+          Library::new("libcublas.so")
+        }
+      }
+      _ => Library::new("libcublas.so")
+    }.map_err(|_| ())?;
     self.cublasCreate_v2 = library.get(b"cublasCreate_v2").ok();
     self.cublasDestroy_v2 = library.get(b"cublasDestroy_v2").ok();
     self.cublasGetVersion_v2 = library.get(b"cublasGetVersion_v2").ok();
@@ -420,7 +460,16 @@ impl Drop for Libcusolver {
 
 impl Libcusolver {
   pub unsafe fn load_default(&mut self) -> Result<(), ()> {
-    let library = Library::new("cusolver").map_err(|_| ())?;
+    let library = match env::var("CUDA_HOME") {
+      Ok(prefix) => {
+        if !prefix.is_empty() {
+          Library::new(&format!("{}/libcusolver.so", prefix)),
+        } else {
+          Library::new("libcusolver.so")
+        }
+      }
+      _ => Library::new("libcusolver.so")
+    }.map_err(|_| ())?;
     self.cusolverDnCreate = library.get(b"cusolverDnCreate").ok();
     self.cusolverDnDestroy = library.get(b"cusolverDnDestroy").ok();
     self.cusolverDnGetStream = library.get(b"cusolverDnGetStream").ok();
