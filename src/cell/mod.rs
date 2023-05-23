@@ -229,7 +229,7 @@ impl PMachSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 pub enum Dtype {
   _Top,
@@ -310,6 +310,24 @@ impl FromStr for Dtype {
 }
 
 impl Dtype {
+  pub fn format_futhark(self) -> &'static str {
+    match self {
+      Dtype::_Top       => panic!("bug"),
+      Dtype::Float64    => "f64",
+      Dtype::Float32    => "f32",
+      Dtype::Float16    => "f16",
+      Dtype::BFloat16   => unimplemented!(),
+      Dtype::Int64      => "i64",
+      Dtype::Int32      => "i32",
+      Dtype::Int16      => "i16",
+      Dtype::Int8       => "i8",
+      Dtype::UInt64     => "u64",
+      Dtype::UInt32     => "u32",
+      Dtype::UInt16     => "u16",
+      Dtype::UInt8      => "u8",
+    }
+  }
+
   pub fn size_bytes(self) -> usize {
     match self {
       Dtype::_Top       => panic!("bug"),

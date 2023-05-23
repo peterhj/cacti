@@ -15,6 +15,7 @@ use futhark_ffi::{
   CudaBackend,
   FutharkFloatFormatter,
 };
+use libc::{c_void};
 
 use std::any::{Any};
 use std::cell::{RefCell};
@@ -26,6 +27,7 @@ use std::rc::{Rc};
 use std::slice::{from_raw_parts};
 
 pub mod op;
+//pub mod op_gpu;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -101,22 +103,18 @@ pub enum ThunkRet {
 }
 
 pub trait ThunkSpec {
-  fn gen_impl_smp(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=SmpInnerCell>>> {
-    None
-  }
-
-  fn gen_impl_gpu(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=GpuInnerCell>>> {
-    None
-  }
+  fn gen_impl_smp(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=SmpInnerCell>>> { None }
+  fn gen_impl_gpu(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=GpuInnerCell>>> { None }
+  // TODO: gen adj.
 }
 
-// FIXME FIXME: apply_* should not be part of spec.
 pub trait ThunkSpec_ {
   fn as_any(&self) -> &dyn Any;
   fn as_bytes_repr(&self) -> &[u8];
   fn thunk_eq(&self, other: &dyn ThunkSpec_) -> Option<bool>;
   fn gen_impl_smp(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=SmpInnerCell>>>;
   fn gen_impl_gpu(&self, ) -> Option<Box<dyn ThunkImpl_<Cel=GpuInnerCell>>>;
+  // TODO: gen adj.
 }
 
 impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
@@ -185,6 +183,7 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
 
 pub trait FutharkThunkSpec {
   fn gen_futhark(&self) -> FutharkThunkCode;
+  fn gen_adj_futhark(&self, _gen_code: &FutharkThunkCode) -> Option<FutharkThunkCode> { None }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
@@ -254,7 +253,8 @@ pub struct FutharkThunkCode {
   pub arityin:  u16,
   pub arityout: u16,
   //pub decl:     String,
-  pub body:     String,
+  //pub body:     String,
+  pub body:     Vec<String>,
 }
 
 pub trait FutharkThunkImpl_<B: FutBackend> {
@@ -295,6 +295,9 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
   unsafe fn _setup_object(obj: &mut FutObject<CudaBackend>) {
     obj.cfg = (obj.ffi.ctx_cfg_new.as_ref().unwrap())();
     assert!(!obj.cfg.is_null());
+    // TODO TODO
+    (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_ctx_gpu_alloc_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_ctx_gpu_free_hook as *const c_void as _);
     // TODO TODO
     (obj.ffi.ctx_cfg_set_cuGetErrorString.as_ref().unwrap())(obj.cfg, LIBCUDA.cuGetErrorString.as_ref().unwrap().as_ptr());
     (obj.ffi.ctx_cfg_set_cuInit.as_ref().unwrap())(obj.cfg, LIBCUDA.cuInit.as_ref().unwrap().as_ptr());
@@ -352,21 +355,30 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       write!(&mut s, " x_{}", k).unwrap();
     }
     write!(&mut s, " =\n").unwrap();
-    // FIXME FIXME: better pattern match/replace.
-    let mut body = self.code.body.clone();
-    for k in 0 .. self.code.arityin + self.code.arityout {
-      body = body.replace(&format!("{{%{}}}", k), &format!("x_{}", k));
+    for line in self.code.body.iter() {
+      // FIXME FIXME: better pattern match/replace.
+      let mut line = line.clone();
+      for k in 0 .. self.code.arityin {
+        line = line.replace(&format!("{{%{}}}", k), &format!("x_{}", k));
+      }
+      for k in 0 .. self.code.arityout {
+        line = line.replace(&format!("{{%{}}}", self.code.arityin + k), &format!("y_{}", k));
+      }
+      write!(&mut s, "    ").unwrap();
+      s.push_str(&line);
+      write!(&mut s, "\n").unwrap();
     }
-    s.push_str(&body);
+    write!(&mut s, "    ").unwrap();
     if self.code.arityout == 1 {
-      write!(&mut s, "x_{}", self.code.arityin).unwrap();
+      write!(&mut s, "y_{}", 0).unwrap();
     } else {
       write!(&mut s, "(").unwrap();
-      for k in self.code.arityin .. self.code.arityin + self.code.arityout {
-        write!(&mut s, "x_{}, ", k).unwrap();
+      for k in 0 .. self.code.arityout {
+        write!(&mut s, "y_{}, ", k).unwrap();
       }
       write!(&mut s, " )").unwrap();
     }
+    write!(&mut s, "\n").unwrap();
     match FutConfig::default().cached_or_new_object::<B>(s.as_bytes()) {
       Err(e) => println!("WARNING: FutharkThunkImpl::_try_build_object: {} build error: {:?}", B::cmd_arg(), e),
       Ok(mut obj) => {

@@ -23,7 +23,7 @@ impl PanickOnceCtx {
           None => {}
           Some(last_frame) => {
             let loc = last_frame.loc;
-            eprintln!("panick: {}:{},{}", loc.file(), loc.line(), loc.column());
+            eprintln!("panick: {}:{}:{}", loc.file(), loc.line(), loc.column());
           }
         }
       });

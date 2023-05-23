@@ -10,6 +10,7 @@ default = []
 experimental = []
 
 [dependencies]
+cacti_cfg_env = { path = "../cacti_cfg_env" }
 libc = { path = "../../libc" }
 libloading = { path = "../../libloading" }
 once_cell = { path = "../../once_cell" }

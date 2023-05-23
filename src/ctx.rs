@@ -165,7 +165,6 @@ pub fn ctx_init_gpu(_dev: i32) {
 }
 
 #[cfg(feature = "gpu")]
-//#[track_caller]
 pub fn ctx_init_gpu(dev: i32) {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
@@ -173,21 +172,18 @@ pub fn ctx_init_gpu(dev: i32) {
   })
 }
 
-#[track_caller]
 pub fn ctx_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.ctr.fresh_cel()
   })
 }
 
-#[track_caller]
 pub fn ctx_tmp_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.ctr.tmp_fresh()
   })
 }
 
-#[track_caller]
 pub fn ctx_reset_tmp_unchecked() {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
@@ -195,7 +191,6 @@ pub fn ctx_reset_tmp_unchecked() {
   })
 }
 
-#[track_caller]
 pub fn ctx_retain(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -210,7 +205,6 @@ pub fn ctx_retain(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_release(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -225,7 +219,6 @@ pub fn ctx_release(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_lookup_type(x: CellPtr) -> CellType {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -235,7 +228,15 @@ pub fn ctx_lookup_type(x: CellPtr) -> CellType {
   })
 }
 
-#[track_caller]
+pub fn ctx_lookup_dtype(x: CellPtr) -> Dtype {
+  TL_CTX.with(|ctx| {
+    match ctx.env.borrow().lookup(x) {
+      None => panic!("bug"),
+      Some(e) => e.ty.dtype
+    }
+  })
+}
+
 pub fn ctx_lookup_mode(x: CellPtr) -> CellMode {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -245,7 +246,6 @@ pub fn ctx_lookup_mode(x: CellPtr) -> CellMode {
   })
 }
 
-#[track_caller]
 pub fn ctx_lookup_flag(x: CellPtr) -> CellFlag {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -258,7 +258,6 @@ pub fn ctx_lookup_flag(x: CellPtr) -> CellFlag {
   })
 }
 
-#[track_caller]
 pub fn ctx_lookup_eflag(x: CellPtr) -> CellEFlag {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow().lookup(x) {
@@ -270,7 +269,6 @@ pub fn ctx_lookup_eflag(x: CellPtr) -> CellEFlag {
   })
 }
 
-#[track_caller]
 pub fn ctx_insert(ty: CellType) -> CellPtr {
   TL_CTX.with(|ctx| {
     let x = ctx.ctr.fresh_cel();
@@ -280,7 +278,6 @@ pub fn ctx_insert(ty: CellType) -> CellPtr {
   })
 }
 
-#[track_caller]
 pub fn ctx_insert_pmach(ty: CellType, primary: Option<PMachSpec>, compute: Option<PMachSpec>) -> CellPtr {
   TL_CTX.with(|ctx| {
     let x = ctx.ctr.fresh_cel();
@@ -290,7 +287,6 @@ pub fn ctx_insert_pmach(ty: CellType, primary: Option<PMachSpec>, compute: Optio
   })
 }
 
-#[track_caller]
 pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
@@ -307,7 +303,6 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
   })
 }
 
-#[track_caller]
 pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
@@ -325,21 +320,18 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
   })
 }
 
-#[track_caller]
 pub fn ctx_lookup_or_insert_gradl(x: CellPtr, tg: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.env.borrow_mut().lookup_or_insert_gradr(&ctx.ctr, tg, x)
   })
 }
 
-#[track_caller]
 pub fn ctx_lookup_or_insert_gradr(tg: CellPtr, x: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.env.borrow_mut().lookup_or_insert_gradr(&ctx.ctr, tg, x)
   })
 }
 
-#[track_caller]
 pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
@@ -356,7 +348,7 @@ pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
         spine.env.intro.insert(x, sp);
         spine.env.aff.insert(x, sp);
         let th = ctx.ctr.fresh_thunk();
-        let pthunk = PThunk::new0(th, CopyScalarThunkSpec{val: value.into_thunk_val()});
+        let pthunk = PThunk::new0(th, CopyScalarFutThunkSpec{val: value.into_thunk_val()});
         thunkenv.insert(th, pthunk);
         let sp = spine.curp;
         spine.curp += 1;
@@ -376,13 +368,13 @@ pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
   })
 }
 
-/*#[track_caller]
+/*//#[track_caller]
 pub fn ctx_set_mem<T: DtypeExt>(x: CellPtr, mem: &[T]) {
   // FIXME FIXME
   unimplemented!();
 }*/
 
-/*#[track_caller]
+/*//#[track_caller]
 pub fn ctx_set_profile(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -394,7 +386,7 @@ pub fn ctx_set_profile(x: CellPtr) {
   })
 }
 
-#[track_caller]
+//#[track_caller]
 pub fn ctx_set_trace(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -406,7 +398,7 @@ pub fn ctx_set_trace(x: CellPtr) {
   })
 }
 
-#[track_caller]
+//#[track_caller]
 pub fn ctx_set_break(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -418,7 +410,7 @@ pub fn ctx_set_break(x: CellPtr) {
   })
 }
 
-#[track_caller]
+//#[track_caller]
 pub fn ctx_set_opaque(x: CellPtr) {
   TL_CTX.with(|ctx| {
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -430,8 +422,59 @@ pub fn ctx_set_opaque(x: CellPtr) {
   })
 }*/
 
-#[track_caller]
-pub fn ctx_profile(og: CellPtr) -> CellPtr {
+/*
+pub fn ctx_yield_val(og: CellPtr) -> CellPtr {
+  unimplemented!();
+}
+
+pub fn ctx_break_val(og: CellPtr) -> CellPtr {
+  TL_CTX.with(|ctx| {
+    // FIXME FIXME
+    let mut env = ctx.env.borrow_mut();
+    match env.lookup(og) {
+      None => panic!("bug"),
+      Some(e) => {
+        let ty = e.ty.clone();
+        let x = ctx.ctr.fresh_cel();
+        env.insert_alias(x, ty, og);
+        // FIXME
+        let mut spine = ctx.spine.borrow_mut();
+        let sp = spine.curp;
+        spine.curp += 1;
+        spine.log.push(SpineEntry::BreakV(x, og));
+        spine.env.cache.insert(x, sp);
+        spine.env.aff.insert(x, sp);
+        x
+      }
+    }
+  })
+}
+*/
+
+pub fn ctx_trace_val(og: CellPtr) -> CellPtr {
+  TL_CTX.with(|ctx| {
+    // FIXME FIXME
+    let mut env = ctx.env.borrow_mut();
+    match env.lookup(og) {
+      None => panic!("bug"),
+      Some(e) => {
+        let ty = e.ty.clone();
+        let x = ctx.ctr.fresh_cel();
+        env.insert_alias(x, ty, og);
+        // FIXME
+        let mut spine = ctx.spine.borrow_mut();
+        let sp = spine.curp;
+        spine.curp += 1;
+        spine.log.push(SpineEntry::TraceV(x, og));
+        spine.env.cache.insert(x, sp);
+        spine.env.aff.insert(x, sp);
+        x
+      }
+    }
+  })
+}
+
+pub fn ctx_profile_val(og: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
     let mut env = ctx.env.borrow_mut();
@@ -454,55 +497,6 @@ pub fn ctx_profile(og: CellPtr) -> CellPtr {
   })
 }
 
-#[track_caller]
-pub fn ctx_trace(og: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    match env.lookup(og) {
-      None => panic!("bug"),
-      Some(e) => {
-        let ty = e.ty.clone();
-        let x = ctx.ctr.fresh_cel();
-        env.insert_alias(x, ty, og);
-        // FIXME
-        let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::Trace(x, og));
-        spine.env.cache.insert(x, sp);
-        spine.env.aff.insert(x, sp);
-        x
-      }
-    }
-  })
-}
-
-#[track_caller]
-pub fn ctx_break(og: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    match env.lookup(og) {
-      None => panic!("bug"),
-      Some(e) => {
-        let ty = e.ty.clone();
-        let x = ctx.ctr.fresh_cel();
-        env.insert_alias(x, ty, og);
-        // FIXME
-        let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::Break(x, og));
-        spine.env.cache.insert(x, sp);
-        spine.env.aff.insert(x, sp);
-        x
-      }
-    }
-  })
-}
-
-#[track_caller]
 pub fn ctx_opaque(og: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
@@ -526,7 +520,6 @@ pub fn ctx_opaque(og: CellPtr) -> CellPtr {
   })
 }
 
-#[track_caller]
 pub fn ctx_set_cache(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
@@ -546,7 +539,6 @@ pub fn ctx_set_cache(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_init_cache(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
@@ -577,7 +569,6 @@ pub fn ctx_init_cache(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_set_seal(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
@@ -597,7 +588,6 @@ pub fn ctx_set_seal(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_set_unseal(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
@@ -623,7 +613,6 @@ pub fn ctx_set_unseal(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_set_eval(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
@@ -643,7 +632,6 @@ pub fn ctx_set_eval(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_clean_arg() -> bool {
   TL_CTX.with(|ctx| {
     ctx.arg.borrow().is_empty() &&
@@ -651,14 +639,12 @@ pub fn ctx_clean_arg() -> bool {
   })
 }
 
-#[track_caller]
 pub fn ctx_push_cell_arg(x: CellPtr) {
   TL_CTX.with(|ctx| {
     ctx.arg.borrow_mut().push(x)
   })
 }
 
-#[track_caller]
 pub fn ctx_push_cell_out(x: CellPtr) {
   TL_CTX.with(|ctx| {
     /*assert!(ctx.out.get().is_none());
@@ -667,7 +653,6 @@ pub fn ctx_push_cell_out(x: CellPtr) {
   })
 }
 
-#[track_caller]
 pub fn ctx_push_cell_tmp_out() {
   TL_CTX.with(|ctx| {
     //assert!(ctx.out.get().is_none());
@@ -677,7 +662,6 @@ pub fn ctx_push_cell_tmp_out() {
   })
 }
 
-#[track_caller]
 pub fn ctx_pop_thunk<Th: ThunkSpec_>(th: Th) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut h = Blake2s::new_hash();
@@ -733,42 +717,10 @@ pub fn ctx_pop_thunk(th: ThunkPtr) -> CellPtr {
   })
 }*/
 
-#[track_caller]
-pub fn ctx_reset_spine() {
-  //unimplemented!();
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    ctx.spine.borrow_mut().reset();
-  })
-}
-
-#[track_caller]
-pub fn ctx_compile_spine() {
-  //unimplemented!();
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    ctx.spine.borrow_mut().compile();
-  })
-}
-
-#[track_caller]
-pub fn ctx_resume_spine() {
-  //unimplemented!();
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
-    spine.resume(/*&ctx.ctr,*/ &mut *env, &mut *thunkenv);
-  })
-}
-
-#[track_caller]
-pub fn ctx_bar() {
+/*pub fn ctx_bar() {
   unimplemented!();
-}
+}*/
 
-#[track_caller]
 pub fn ctx_gc() {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
@@ -794,7 +746,6 @@ impl CtxCtr {
 }
 
 impl CtxCtr {
-  #[track_caller]
   pub fn fresh_cel(&self) -> CellPtr {
     let next = self.ptr_ctr.get() + 1;
     assert!(next > 0);
@@ -803,7 +754,6 @@ impl CtxCtr {
     CellPtr::from_unchecked(next)
   }
 
-  #[track_caller]
   pub fn fresh_thunk(&self) -> ThunkPtr {
     let next = self.ptr_ctr.get() + 1;
     assert!(next > 0);
@@ -812,7 +762,6 @@ impl CtxCtr {
     ThunkPtr::from_unchecked(next)
   }
 
-  #[track_caller]
   pub fn tmp_fresh(&self) -> CellPtr {
     let next = self.tmp_ctr.get() - 1;
     assert!(next < 0);
@@ -835,7 +784,6 @@ pub struct CtxThunkEnv {
 }
 
 impl CtxThunkEnv {
-  //#[track_caller]
   pub fn insert(&mut self, th: ThunkPtr, thunk: PThunk) {
     // FIXME FIXME
     match self.thunktab.get(&th) {
@@ -845,7 +793,6 @@ impl CtxThunkEnv {
     self.thunktab.insert(th, thunk);
   }
 
-  //#[track_caller]
   pub fn gc(&mut self, gc_list: &[CellPtr]) {
     // FIXME FIXME: remove updating thunks.
   }
@@ -946,7 +893,6 @@ pub struct CtxEnv {
 }
 
 impl CtxEnv {
-  #[track_caller]
   //pub fn lookup(&self, x: CellPtr) -> (CellType, Option<&PCell>) {}
   pub fn lookup(&self, x: CellPtr) -> Option<CellEnvEntryRef> {
     let ty = match self.celtab.get(&x) {
@@ -1035,7 +981,6 @@ impl CtxEnv {
     }
   }
 
-  #[track_caller]
   pub fn lookup_mut(&mut self, x: CellPtr) -> Option<CellEnvEntryMut> {
     let mut noalias = false;
     let ty = match self.celtab.get(&x) {
@@ -1118,7 +1063,6 @@ impl CtxEnv {
     }
   }
 
-  #[track_caller]
   pub fn insert(&mut self, x: CellPtr, ty: CellType, cel: PCell) {
     match self.celtab.get(&x) {
       None => {}
@@ -1135,7 +1079,6 @@ impl CtxEnv {
     self.celtab.insert(x, e);
   }
 
-  #[track_caller]
   pub fn insert_alias(&mut self, x: CellPtr, ty: CellType, og: CellPtr) {
     match self.celtab.get(&x) {
       None => {}
@@ -1158,7 +1101,6 @@ impl CtxEnv {
     root.insert(x, og);
   }
 
-  #[track_caller]
   pub fn lookup_or_insert_gradr(&mut self, ctr: &CtxCtr, tg: CellPtr, x: CellPtr) -> CellPtr {
     match self.gradr.get(&[tg, x]) {
       None => {
@@ -1177,7 +1119,6 @@ impl CtxEnv {
     }
   }
 
-  #[track_caller]
   pub fn gc_prepare(&self, gc_list: &mut Vec<CellPtr>) {
     for (&k, _) in self.celtab.iter() {
       match self.lookup(k) {
@@ -1191,7 +1132,6 @@ impl CtxEnv {
     }
   }
 
-  #[track_caller]
   pub fn gc(&mut self, gc_list: &[CellPtr]) {
     let mut root = self.root.borrow_mut();
     for &k in gc_list.iter() {

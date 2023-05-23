@@ -1,4 +1,5 @@
 pub mod fp;
+//pub mod int;
 pub mod sync;
 
 #[derive(Clone, Copy)]
@@ -129,6 +130,13 @@ impl<T> MergeVecDeque<T> {
     self.front
   }
 
+  pub fn first(&self) -> Option<&T> {
+    if self.buf.len() <= self.front {
+      return None;
+    }
+    Some(&self.buf[self.front])
+  }
+
   pub fn last(&self) -> Option<&T> {
     if self.buf.len() <= self.front {
       return None;
@@ -181,5 +189,80 @@ impl<T: Clone> MergeVecDeque<T> {
     let val = self.buf[self.front].clone();
     self.front += 1;
     Some(val)
+  }
+}
+
+#[derive(Clone, Copy)]
+pub struct Extent {
+  pub offset:   usize,
+  pub mask:     usize,
+}
+
+impl Extent {
+  pub fn new_alloc(offset: usize, size: usize) -> Extent {
+    Extent{
+      offset,
+      mask: size,
+    }
+  }
+
+  pub fn size_bytes(&self) -> usize {
+    self.mask & (isize::max_value() as usize)
+  }
+
+  pub fn free(&self) -> bool {
+    (self.mask & (isize::min_value() as usize)) != 0
+  }
+
+  pub fn set_free(&mut self, val: bool) {
+    if val {
+      self.mask |= (isize::min_value() as usize);
+    } else {
+      self.mask &= (isize::max_value() as usize);
+    }
+  }
+
+  pub fn merge_free_unchecked(&self, rhs: Extent) -> Extent {
+    assert_eq!(self.offset + self.size_bytes(), rhs.offset);
+    let mut e = Extent{
+      offset: self.offset,
+      mask:   self.size_bytes() + rhs.size_bytes(),
+    };
+    e.set_free(true);
+    e
+  }
+}
+
+#[derive(Clone, Default)]
+pub struct ExtentVecList {
+  pub list: MergeVecDeque<Extent>,
+}
+
+impl ExtentVecList {
+  pub fn fresh_alloc(&mut self, size: usize) -> (usize, Extent) {
+    let offset = self.list.last().map(|e| e.offset + e.size_bytes()).unwrap_or(0);
+    let e = Extent::new_alloc(offset, size);
+    let key = self.list.buf.len();
+    self.list.push_back(e);
+    (key, e)
+  }
+
+  pub fn mark_free(&mut self, key: usize) {
+    self.list.buf[key].set_free(true);
+  }
+
+  pub fn merge_free(&mut self) {
+    if self.list.first().map(|e| !e.free()).unwrap_or(true) {
+      return;
+    }
+    let mut e0 = self.list.pop_front().unwrap();
+    loop {
+      if self.list.first().map(|e| !e.free()).unwrap_or(true) {
+        break;
+      }
+      let e = self.list.pop_front().unwrap();
+      e0 = e0.merge_free_unchecked(e);
+    }
+    self.list.push_front(e0);
   }
 }

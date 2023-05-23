@@ -20,6 +20,7 @@ default = ["gpu"]
 gpu = ["cacti_gpu_cu_ffi"]
 
 [dependencies]
+byteorder = { path = "../byteorder" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 futhark_ffi = { path = "../futhark_ffi" }

@@ -1,5 +1,6 @@
 use crate::cell::{CellPtr, StableCell, CellType, Dtype};
 use crate::ctx::*;
+use crate::panick::*;
 use crate::thunk::op::*;
 
 use std::convert::{TryInto};
@@ -38,20 +39,24 @@ use std::ops::{Deref, Add, Sub, Mul, Div};
 impl<'p> Add<f32> for &'p CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: f32) -> CellPtr {
-    let op = AddScalarF32ThunkSpec{scalar: rhs.try_into().unwrap()};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    /*ctx_push_cell_tmp_out();*/
-    ctx_pop_thunk(op)
+    panick_wrap(|| {
+      let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
   }
 }
 
 impl Add<f32> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: f32) -> CellPtr {
-    (&self).add(rhs)
+    panick_wrap(|| (&self).add(rhs))
   }
 }
 
@@ -124,6 +129,7 @@ impl<'p, Q: Into<CellPtr>> Add<Q> for &'p CellPtr {
 impl<'p> Mul<f32> for &'p CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: f32) -> CellPtr {
     unimplemented!();
     /*
@@ -139,14 +145,16 @@ impl<'p> Mul<f32> for &'p CellPtr {
 impl Mul<f32> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: f32) -> CellPtr {
-    (&self).mul(rhs)
+    panick_wrap(|| (&self).mul(rhs))
   }
 }
 
 impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: Q) -> CellPtr {
     unimplemented!();
   }
@@ -155,24 +163,27 @@ impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p CellPtr {
 impl<Q: AsRef<CellPtr>> Mul<Q> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: Q) -> CellPtr {
-    (&self).mul(rhs)
+    panick_wrap(|| (&self).mul(rhs))
   }
 }
 
 impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: Q) -> CellPtr {
-    self.as_ptr_ref().mul(rhs)
+    panick_wrap(|| self.as_ptr_ref().mul(rhs))
   }
 }
 
 impl<Q: AsRef<CellPtr>> Mul<Q> for StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn mul(self, rhs: Q) -> CellPtr {
-    self.as_ptr_ref().mul(rhs)
+    panick_wrap(|| self.as_ptr_ref().mul(rhs))
   }
 }
 
@@ -194,6 +205,7 @@ impl<Q: AsRef<CellPtr>> Mul<Q> for StableCell {
 impl<'p> Div<f32> for &'p CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn div(self, rhs: f32) -> CellPtr {
     unimplemented!();
     /*
@@ -235,6 +247,7 @@ impl Div<f32> for CellPtr {
 impl<'p, Q: Into<CellPtr>> Div<Q> for &'p CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn div(self, rhs: Q) -> CellPtr {
     unimplemented!();
     /*
@@ -251,47 +264,156 @@ impl<'p, Q: Into<CellPtr>> Div<Q> for &'p CellPtr {
 }
 
 pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
+  #[track_caller]
   fn pow(self, rhs: Q) -> CellPtr {
     unimplemented!();
+  }
+
+  /*#[track_caller]
+  fn dot(self, rhs: Q) -> CellPtr {
+    let p = self.into();
+    let q = rhs.into();
+    let op = DotThunkOp::default();
+    assert!(ctx_clean_arg());
+    ctx_push_cell_arg(p);
+    ctx_push_cell_arg(q);
+    //ctx_push_cell_out(_);
+    ctx_pop_thunk(op)
+  }*/
+
+  #[track_caller]
+  fn mm(self, lt: bool, rhs: Q, rt: bool) -> CellPtr {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn block_mm(self, l_block: [i64; 2], lt: bool, rhs: Q, r_block: [i64; 2], rt: bool) -> CellPtr {
+    panick_wrap(|| {
+      let p = self.into();
+      let q = rhs.into();
+      let p_ty = ctx_lookup_type(p);
+      let q_ty = ctx_lookup_type(q);
+      assert_eq!(p_ty.dtype, q_ty.dtype);
+      assert_eq!(p_ty.shape.len(), 2);
+      assert_eq!(q_ty.shape.len(), 2);
+      assert_eq!(p_ty.shape[0] % l_block[0], 0);
+      assert_eq!(p_ty.shape[1] % l_block[1], 0);
+      assert_eq!(q_ty.shape[0] % r_block[0], 0);
+      assert_eq!(q_ty.shape[1] % r_block[1], 0);
+      // FIXME FIXME: transpose block shape checks.
+      let l_nrow = p_ty.shape[0] / l_block[0];
+      let l_ncol = p_ty.shape[1] / l_block[1];
+      let r_nrow = q_ty.shape[0] / r_block[0];
+      let r_ncol = q_ty.shape[1] / r_block[1];
+      let op = BlockMulMatrixThunkSpec{
+        dtype: p_ty.dtype,
+        lt,
+        rt,
+        l_shape: [p_ty.shape[0], p_ty.shape[1]],
+        r_shape: [q_ty.shape[0], q_ty.shape[1]],
+        l_block,
+        r_block,
+        l_nblock: [l_nrow, l_ncol],
+        r_nblock: [r_nrow, r_ncol],
+      };
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(p);
+      ctx_push_cell_arg(q);
+      // FIXME FIXME
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
   }
 }
 
 impl<P: Into<CellPtr>, Q: Into<CellPtr>> MathBinaryOps<Q> for P {}
 
 pub trait MathUnaryOps: Into<CellPtr> {
+  #[track_caller]
   fn sqrt(self) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = SqrtThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = SqrtFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
   }
 
+  #[track_caller]
   fn rsqrt(self) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = RsqrtThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = RsqrtFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
   }
 
+  #[track_caller]
+  fn cos(self) -> CellPtr {
+    panick_wrap(|| {
+      let op = CosFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn sin(self) -> CellPtr {
+    panick_wrap(|| {
+      let op = SinFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn exp(self) -> CellPtr {
+    panick_wrap(|| {
+      let op = ExpFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn tanh(self) -> CellPtr {
+    panick_wrap(|| {
+      let op = TanhFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self.into());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
   fn powi(self, exp: i64) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = PowiThunkOp{exp};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let p = self.into();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(p);
+      /*ctx_push_cell_tmp_out();*/
+      match ctx_lookup_dtype(p) {
+        // FIXME FIXME
+        Dtype::Float32 => {
+          let op = PowiF32FutThunkSpec{exp};
+          ctx_pop_thunk(op)
+        }
+        _ => unimplemented!()
+      }
+    })
   }
 
+  #[track_caller]
   fn inner_max(self) -> CellPtr {
     unimplemented!();
     /*
@@ -310,6 +432,7 @@ pub trait MathUnaryOps: Into<CellPtr> {
     */
   }
 
+  #[track_caller]
   fn inner_mean(self) -> CellPtr {
     unimplemented!();
     /*
@@ -328,6 +451,7 @@ pub trait MathUnaryOps: Into<CellPtr> {
     */
   }
 
+  #[track_caller]
   fn inner_sum(self) -> CellPtr {
     unimplemented!();
     /*
@@ -344,6 +468,11 @@ pub trait MathUnaryOps: Into<CellPtr> {
       _ => unimplemented!()
     }
     */
+  }
+
+  #[track_caller]
+  fn inner_softmax(self) -> CellPtr {
+    unimplemented!();
   }
 
   /*fn mean_1d(self, dim: i64) -> CellPtr {
@@ -367,20 +496,6 @@ pub trait MathUnaryOps: Into<CellPtr> {
     ctx_pop_thunk(op)
     */
   }*/
-
-  fn dot<Q: Into<CellPtr>>(self, rhs: Q) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = self.into();
-    let q = rhs.into();
-    let op = DotThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }
 }
 
 impl<P: Into<CellPtr>> MathUnaryOps for P {}
@@ -394,16 +509,6 @@ pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
 }
 
 pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
-  #[track_caller]
-  fn cast(self, new_dtype: Dtype) -> CellPtr {
-    let ty = ctx_lookup_type(*self.as_ref());
-    if ty.dtype == new_dtype {
-      return self.into();
-    }
-    // TODO
-    unimplemented!();
-  }
-
   /*fn upcast_f32(self) -> CellPtr {
     unimplemented!();
   }
@@ -411,6 +516,28 @@ pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
   fn downcast_f16(self) -> CellPtr {
     unimplemented!();
   }*/
+
+  #[track_caller]
+  fn cast(self, new_dtype: Dtype) -> CellPtr {
+    panick_wrap(|| {
+      let org_dtype = ctx_lookup_dtype(*self.as_ref());
+      if org_dtype == new_dtype {
+        return self.into();
+      }
+      match (org_dtype, new_dtype) {
+        (Dtype::Float32, Dtype::Float16) |
+        (Dtype::Float16, Dtype::Float32) => {
+          let op = CastFutThunkSpec{org_dtype, new_dtype};
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(self.into());
+          // FIXME
+          /*ctx_push_cell_tmp_out();*/
+          ctx_pop_thunk(op)
+        }
+        _ => unimplemented!()
+      }
+    })
+  }
 }
 
 impl<P: AsRef<CellPtr> + Into<CellPtr>> CastOps for P {}
@@ -470,19 +597,26 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
 impl<P: AsRef<CellPtr> + Sized> ArrayOps for P {}
 
 pub trait CtlOps: AsRef<CellPtr> + Sized {
+  /*
   #[track_caller]
-  fn profile(self) -> CellPtr {
-    ctx_profile(*self.as_ref())
-  }
-
-  #[track_caller]
-  fn trace(self) -> CellPtr {
-    ctx_trace(*self.as_ref())
+  fn yield_(self) -> CellPtr {
+    unimplemented!();
   }
 
   #[track_caller]
   fn break_(self) -> CellPtr {
-    ctx_break(*self.as_ref())
+    unimplemented!();
+  }
+  */
+
+  #[track_caller]
+  fn trace(self) -> CellPtr {
+    ctx_trace_val(*self.as_ref())
+  }
+
+  #[track_caller]
+  fn profile(self) -> CellPtr {
+    ctx_profile_val(*self.as_ref())
   }
 
   #[track_caller]

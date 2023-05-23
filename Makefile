@@ -1,12 +1,9 @@
-TARGET := x86_64-unknown-linux-gnu
+include common.mk
 
-CARGO := cargo --offline
-CARGO_TARGET := --target $(TARGET)
-
-.PHONY: all clean
+.PHONY: all distclean
 
 all:
 	$(CARGO) build $(CARGO_TARGET) --release --lib --bins --examples
 
-clean:
+distclean:
 	rm -r target

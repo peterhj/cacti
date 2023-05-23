@@ -1,9 +1,8 @@
 use crate::types::*;
+use cacti_cfg_env::*;
 
 use libc::{c_void, c_char, c_int, c_uint};
 use libloading::nonsafe::{Library, Symbol};
-
-use std::env;
 
 #[cfg(not(unix))]
 pub unsafe fn open_default<S: AsRef<str>>(_lib_name: S) -> Result<Library, ()> {
@@ -12,17 +11,15 @@ pub unsafe fn open_default<S: AsRef<str>>(_lib_name: S) -> Result<Library, ()> {
 
 #[cfg(unix)]
 pub unsafe fn open_default<S: AsRef<str>>(lib_name: S) -> Result<Library, ()> {
-  match env::var("CUDA_HOME") {
-    Ok(prefix) => {
-      if !prefix.is_empty() {
-        // FIXME FIXME
-        Library::new(&format!("{}/lib64/lib{}.so", prefix, lib_name.as_ref()))
-      } else {
-        Library::new(&format!("lib{}.so", lib_name.as_ref()))
-      }
+  for ps in CFG_ENV.cuda_home.iter() {
+    let prefix = ps.to_path();
+    // FIXME FIXME: os-specific path.
+    match Library::new(&format!("{}/lib64/lib{}.so", prefix.display(), lib_name.as_ref())) {
+      Err(_) => {}
+      Ok(library) => return Ok(library)
     }
-    _ => Library::new(&format!("lib{}.so", lib_name.as_ref()))
-  }.map_err(|_| ())
+  }
+  Library::new(&format!("lib{}.so", lib_name.as_ref())).map_err(|_| ())
 }
 
 #[allow(non_snake_case)]
@@ -103,7 +100,36 @@ impl Libcuda {
     self.cuFuncGetAttribute = library.get(b"cuFuncGetAttribute").ok();
     self.cuLaunchKernel = library.get(b"cuLaunchKernel").ok();
     // TODO
-    //self._check_required().map_err(|_| 2)?;
+    self._check_required()?;
+    Ok(())
+  }
+
+  fn _check_required(&self) -> Result<(), i32> {
+    let mut i = 0;
+    i += 1; self.cuGetErrorString.as_ref().ok_or(i)?;
+    i += 1; self.cuInit.as_ref().ok_or(i)?;
+    i += 1; self.cuDeviceGetCount.as_ref().ok_or(i)?;
+    i += 1; self.cuDeviceGetName.as_ref().ok_or(i)?;
+    i += 1; self.cuDeviceGet.as_ref().ok_or(i)?;
+    i += 1; self.cuDeviceGetAttribute.as_ref().ok_or(i)?;
+    i += 1; self.cuCtxCreate.as_ref().ok_or(i)?;
+    i += 1; self.cuCtxDestroy.as_ref().ok_or(i)?;
+    i += 1; self.cuCtxPopCurrent.as_ref().ok_or(i)?;
+    i += 1; self.cuCtxPushCurrent.as_ref().ok_or(i)?;
+    i += 1; self.cuCtxSynchronize.as_ref().ok_or(i)?;
+    i += 1; self.cuMemAlloc.as_ref().ok_or(i)?;
+    i += 1; self.cuMemFree.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpy.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpyHtoD.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpyDtoH.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpyAsync.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpyHtoDAsync.as_ref().ok_or(i)?;
+    i += 1; self.cuMemcpyDtoHAsync.as_ref().ok_or(i)?;
+    i += 1; self.cuModuleLoadData.as_ref().ok_or(i)?;
+    i += 1; self.cuModuleUnload.as_ref().ok_or(i)?;
+    i += 1; self.cuModuleGetFunction.as_ref().ok_or(i)?;
+    i += 1; self.cuFuncGetAttribute.as_ref().ok_or(i)?;
+    i += 1; self.cuLaunchKernel.as_ref().ok_or(i)?;
     Ok(())
   }
 
@@ -208,31 +234,32 @@ impl Libcudart {
     self.cudaStreamSynchronize = library.get(b"cudaStreamSynchronize").ok();
     self.cudaStreamWaitEvent = library.get(b"cudaStreamWaitEvent").ok();
     // TODO
-    self._check_required().map_err(|_| 2)?;
+    self._check_required()?;
     Ok(())
   }
 
-  fn _check_required(&self) -> Result<(), ()> {
-    self.cudaGetErrorString.as_ref().ok_or(())?;
-    self.cudaDriverGetVersion.as_ref().ok_or(())?;
-    self.cudaRuntimeGetVersion.as_ref().ok_or(())?;
-    self.cudaGetDeviceCount.as_ref().ok_or(())?;
-    self.cudaGetDevice.as_ref().ok_or(())?;
-    self.cudaSetDevice.as_ref().ok_or(())?;
-    self.cudaMemGetInfo.as_ref().ok_or(())?;
-    self.cudaMalloc.as_ref().ok_or(())?;
-    self.cudaMallocHost.as_ref().ok_or(())?;
-    self.cudaFree.as_ref().ok_or(())?;
-    self.cudaFreeHost.as_ref().ok_or(())?;
-    self.cudaMemcpyAsync.as_ref().ok_or(())?;
-    self.cudaEventCreateWithFlags.as_ref().ok_or(())?;
-    self.cudaEventDestroy.as_ref().ok_or(())?;
-    self.cudaEventRecordWithFlags.as_ref().ok_or(())?;
-    self.cudaEventSynchronize.as_ref().ok_or(())?;
-    self.cudaStreamCreateWithFlags.as_ref().ok_or(())?;
-    self.cudaStreamDestroy.as_ref().ok_or(())?;
-    self.cudaStreamSynchronize.as_ref().ok_or(())?;
-    self.cudaStreamWaitEvent.as_ref().ok_or(())?;
+  fn _check_required(&self) -> Result<(), i32> {
+    let mut i = 0;
+    i += 1; self.cudaGetErrorString.as_ref().ok_or(i)?;
+    i += 1; self.cudaDriverGetVersion.as_ref().ok_or(i)?;
+    i += 1; self.cudaRuntimeGetVersion.as_ref().ok_or(i)?;
+    i += 1; self.cudaGetDeviceCount.as_ref().ok_or(i)?;
+    i += 1; self.cudaGetDevice.as_ref().ok_or(i)?;
+    i += 1; self.cudaSetDevice.as_ref().ok_or(i)?;
+    i += 1; self.cudaMemGetInfo.as_ref().ok_or(i)?;
+    i += 1; self.cudaMalloc.as_ref().ok_or(i)?;
+    i += 1; self.cudaMallocHost.as_ref().ok_or(i)?;
+    i += 1; self.cudaFree.as_ref().ok_or(i)?;
+    i += 1; self.cudaFreeHost.as_ref().ok_or(i)?;
+    i += 1; self.cudaMemcpyAsync.as_ref().ok_or(i)?;
+    i += 1; self.cudaEventCreateWithFlags.as_ref().ok_or(i)?;
+    i += 1; self.cudaEventDestroy.as_ref().ok_or(i)?;
+    i += 1; self.cudaEventRecordWithFlags.as_ref().ok_or(i)?;
+    i += 1; self.cudaEventSynchronize.as_ref().ok_or(i)?;
+    i += 1; self.cudaStreamCreateWithFlags.as_ref().ok_or(i)?;
+    i += 1; self.cudaStreamDestroy.as_ref().ok_or(i)?;
+    i += 1; self.cudaStreamSynchronize.as_ref().ok_or(i)?;
+    i += 1; self.cudaStreamWaitEvent.as_ref().ok_or(i)?;
     // TODO
     Ok(())
   }
@@ -283,7 +310,7 @@ impl Libnvrtc {
     self.nvrtcGetPTXSize = library.get(b"nvrtcGetPTXSize").ok();
     self.nvrtcGetPTX = library.get(b"nvrtcGetPTX").ok();
     // TODO
-    //self._check_required().map_err(|_| 2)?;
+    //self._check_required()?;
     Ok(())
   }
 }
@@ -300,6 +327,17 @@ pub struct Libcublas {
   pub cublasSetPointerMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasPointerMode_t) -> cublasStatus_t>>,
   pub cublasSetAtomicsMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasAtomicsMode_t) -> cublasStatus_t>>,
   pub cublasSetMathMode:        Option<Symbol<extern "C" fn (cublasHandle_t, cublasMath_t) -> cublasStatus_t>>,
+  pub cublasSgemmEx:            Option<Symbol<extern "C" fn (
+                                    cublasHandle_t,
+                                    cublasOperation_t,
+                                    cublasOperation_t,
+                                    c_int, c_int, c_int,
+                                    *const f32,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const c_void, cudaDataType_t, c_int,
+                                    *const f32,
+                                    *mut c_void, cudaDataType_t, c_int,
+                                ) -> cublasStatus_t>>,
   pub cublasGemmEx:             Option<Symbol<extern "C" fn (
                                     cublasHandle_t,
                                     cublasOperation_t,
@@ -313,16 +351,31 @@ pub struct Libcublas {
                                     cublasComputeType_t,
                                     cublasGemmAlgo_t,
                                 ) -> cublasStatus_t>>,
-  pub cublasSgemmEx:            Option<Symbol<extern "C" fn (
+  pub cublasSgemmBatched:       Option<Symbol<extern "C" fn (
+                                    cublasHandle_t,
+                                    cublasOperation_t,
+                                    cublasOperation_t,
+                                    c_int, c_int, c_int,
+                                    *const f32,
+                                    *const *const f32, c_int,
+                                    *const *const f32, c_int,
+                                    *const f32,
+                                    *const *mut f32, c_int,
+                                    c_int,
+                                ) -> cublasStatus_t>>,
+  pub cublasGemmBatchedEx:      Option<Symbol<extern "C" fn (
                                     cublasHandle_t,
                                     cublasOperation_t,
                                     cublasOperation_t,
                                     c_int, c_int, c_int,
                                     *const c_void,
-                                    *const c_void, cudaDataType_t, c_int,
-                                    *const c_void, cudaDataType_t, c_int,
+                                    *const *const c_void, cudaDataType_t, c_int,
+                                    *const *const c_void, cudaDataType_t, c_int,
                                     *const c_void,
-                                    *mut c_void, cudaDataType_t, c_int,
+                                    *const *mut c_void, cudaDataType_t, c_int,
+                                    c_int,
+                                    cublasComputeType_t,
+                                    cublasGemmAlgo_t,
                                 ) -> cublasStatus_t>>,
   // TODO
 }
@@ -343,7 +396,7 @@ impl Libcublas {
     Ok(())
   }
 
-  pub unsafe fn load_symbols(&mut self) -> Result<(), ()> {
+  pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
     let library = self._inner.as_ref().unwrap();
     self.cublasCreate_v2 = library.get(b"cublasCreate_v2").ok();
     self.cublasDestroy_v2 = library.get(b"cublasDestroy_v2").ok();
@@ -354,13 +407,26 @@ impl Libcublas {
     self.cublasSetMathMode = library.get(b"cublasSetMathMode").ok();
     self.cublasSgemmEx = library.get(b"cublasSgemmEx").ok();
     self.cublasGemmEx = library.get(b"cublasGemmEx").ok();
+    self.cublasSgemmBatched = library.get(b"cublasSgemmBatched").ok();
+    self.cublasGemmBatchedEx = library.get(b"cublasGemmBatchedEx").ok();
     // TODO
     self._check_required()?;
     Ok(())
   }
 
-  fn _check_required(&self) -> Result<(), ()> {
-    // FIXME
+  fn _check_required(&self) -> Result<(), i32> {
+    let mut i = 0;
+    i += 1; self.cublasCreate_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasDestroy_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetStream_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetPointerMode_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetAtomicsMode_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetMathMode.as_ref().ok_or(i)?;
+    i += 1; self.cublasSgemmEx.as_ref().ok_or(i)?;
+    i += 1; self.cublasGemmEx.as_ref().ok_or(i)?;
+    i += 1; self.cublasSgemmBatched.as_ref().ok_or(i)?;
+    i += 1; self.cublasGemmBatchedEx.as_ref().ok_or(i)?;
+    // TODO
     Ok(())
   }
 }
@@ -445,7 +511,7 @@ impl Libcusolver {
     Ok(())
   }
 
-  pub unsafe fn load_symbols(&mut self) -> Result<(), ()> {
+  pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
     let library = self._inner.as_ref().unwrap();
     self.cusolverDnCreate = library.get(b"cusolverDnCreate").ok();
     self.cusolverDnDestroy = library.get(b"cusolverDnDestroy").ok();
@@ -461,7 +527,7 @@ impl Libcusolver {
     Ok(())
   }
 
-  fn _check_required(&self) -> Result<(), ()> {
+  fn _check_required(&self) -> Result<(), i32> {
     // FIXME
     Ok(())
   }

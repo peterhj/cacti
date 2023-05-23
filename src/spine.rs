@@ -1,7 +1,7 @@
 use crate::cell::*;
 use crate::clock::{Counter};
-use crate::ctx::{CtxEnv, CtxThunkEnv, ctx_reset_spine, ctx_compile_spine, ctx_resume_spine};
-use crate::panick::*;
+use crate::ctx::{TL_CTX, CtxEnv, CtxThunkEnv};
+use crate::panick::{panick_wrap};
 use crate::thunk::*;
 
 use std::collections::{HashMap, HashSet};
@@ -11,10 +11,13 @@ use std::collections::{HashMap, HashSet};
 //#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SpineEntry {
   _Top,
-  Opaque(CellPtr, CellPtr),
-  Break(CellPtr, CellPtr),
-  Trace(CellPtr, CellPtr),
+  Yield_,
+  Break_,
+  YieldV(CellPtr, CellPtr),
+  BreakV(CellPtr, CellPtr),
+  TraceV(CellPtr, CellPtr),
   Profile(CellPtr, CellPtr),
+  Opaque(CellPtr, CellPtr),
   CacheAff(CellPtr),
   CacheMux(CellPtr),
   //IntroFin(CellPtr),
@@ -35,10 +38,10 @@ pub enum SpineEntry {
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum SpineState {
-  Top,
+  _Top,
   Halt,
-  EarlyHalt,
-  Break,
+  Yield_,
+  Break_,
   Bot,
 }
 
@@ -89,7 +92,6 @@ impl Default for Spine {
 }
 
 impl Spine {
-  //#[track_caller]
   pub fn reset(&mut self) {
     self.ctr = self.ctr.advance();
     self.ctlp = 0;
@@ -99,7 +101,6 @@ impl Spine {
     self.env.reset();
   }
 
-  //#[track_caller]
   pub fn compile(&mut self, ) {
     // FIXME FIXME
     //unimplemented!();
@@ -116,13 +117,12 @@ impl Spine {
     self.hltp = self.curp;
   }*/
 
-  //#[track_caller]
   pub fn resume(&mut self, /*ctr: &CtxCtr,*/ env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineState {
     //self._start();
     println!("DEBUG: Spine::resume: ctr={:?} ctlp={} hltp={} curp={}",
         self.ctr, self.ctlp, self.hltp, self.curp);
     self.hltp = self.curp;
-    while self.ctlp < self.hltp {
+    loop {
       let state = self._step(/*ctr,*/ env, thunkenv);
       match state {
         SpineState::Bot => {
@@ -132,35 +132,44 @@ impl Spine {
       }
       self.ctlp += 1;
       match state {
-        SpineState::Halt => {
-          return SpineState::EarlyHalt;
+        SpineState::Halt   |
+        SpineState::Yield_ |
+        SpineState::Break_ => {
+          return state;
         }
         _ => {}
       }
     }
-    SpineState::Halt
+    unreachable!();
   }
 
-  //#[track_caller]
-  pub fn _step(&mut self, /*ctr: &CtxCtr,*/ env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineState {
+  pub fn _step(&self, /*ctr: &CtxCtr,*/ env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineState {
     if self.ctlp >= self.hltp {
       return SpineState::Halt;
     }
-    let mut state = SpineState::Top;
+    let mut state = SpineState::_Top;
     let entry = &self.log[self.ctlp as usize];
-    // FIXME FIXME: every use of `ogty` below is probably wrong.
     match entry {
       // TODO
-      &SpineEntry::Opaque(x, og) => {
+      &SpineEntry::Yield_ => {
+        state = SpineState::Yield_;
+      }
+      &SpineEntry::Break_ => {
+        state = SpineState::Break_;
+      }
+      &SpineEntry::YieldV(_, _) => {
         unimplemented!();
       }
-      &SpineEntry::Break(_, _) => {
+      &SpineEntry::BreakV(_, _) => {
         unimplemented!();
       }
-      &SpineEntry::Trace(_, _) => {
+      &SpineEntry::TraceV(_, _) => {
         unimplemented!();
       }
       &SpineEntry::Profile(_, _) => {
+        unimplemented!();
+      }
+      &SpineEntry::Opaque(x, og) => {
         unimplemented!();
       }
       &SpineEntry::CacheAff(x) => {
@@ -476,6 +485,9 @@ impl Spine {
       /*&SpineEntry::Alias(x, y) => {
         unimplemented!();
       }*/
+      &SpineEntry::Bot => {
+        state = SpineState::Bot;
+      }
       _ => unimplemented!()
     }
     state
@@ -492,17 +504,44 @@ impl Spine {
 
 #[track_caller]
 pub fn reset() {
-  panick_wrap(|| ctx_reset_spine())
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    ctx.spine.borrow_mut().reset();
+  }))
 }
 
 #[track_caller]
 pub fn compile() {
-  panick_wrap(|| ctx_compile_spine())
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    ctx.spine.borrow_mut().compile();
+  }))
 }
 
 #[track_caller]
 pub fn resume() {
-  panick_wrap(|| ctx_resume_spine())
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    spine.resume(/*&ctx.ctr,*/ &mut *env, &mut *thunkenv);
+  }))
+}
+
+#[track_caller]
+pub fn yield_() {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut spine = ctx.spine.borrow_mut();
+    spine.curp += 1;
+    spine.log.push(SpineEntry::Yield_);
+  }))
+}
+
+#[track_caller]
+pub fn break_() {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut spine = ctx.spine.borrow_mut();
+    spine.curp += 1;
+    spine.log.push(SpineEntry::Break_);
+  }))
 }
 
 #[derive(Default)]

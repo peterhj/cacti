@@ -1,5 +1,5 @@
 use super::*;
-use crate::algo::{Bitvec64, MergeVecDeque};
+use crate::algo::{Bitvec64, MergeVecDeque, ExtentVecList, Extent};
 use crate::algo::sync::{SpinWait};
 use crate::clock::*;
 
@@ -261,6 +261,7 @@ pub struct GpuMemPool {
   pub front_cursor: Cell<usize>,
   pub back_bitmap:  RefCell<Bitvec64>,
   pub back_cursor:  Cell<usize>,
+  pub tmp_freelist: ExtentVecList,
   // TODO
 }
 
@@ -325,6 +326,7 @@ impl GpuMemPool {
       front_cursor: Cell::new(0),
       back_bitmap:  RefCell::new(Bitvec64::new()),
       back_cursor:  Cell::new(back_sz),
+      tmp_freelist: ExtentVecList::default(),
       // TODO
     }
   }
@@ -367,6 +369,20 @@ impl GpuMemPool {
   pub fn back_free_all(&self) {
     unimplemented!();
   }
+}
+
+pub extern "C" fn tl_ctx_gpu_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
+  TL_CTX.with(|ctx| {
+    // FIXME FIXME
+    0
+  })
+}
+
+pub extern "C" fn tl_ctx_gpu_free_hook(dptr: u64) -> i32 {
+  TL_CTX.with(|ctx| {
+    // FIXME FIXME
+    0
+  })
 }
 
 pub struct GpuDryCtx {

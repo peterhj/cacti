@@ -1,5 +1,6 @@
 #![allow(non_upper_case_globals)]
 
+extern crate cacti_cfg_env;
 extern crate libc;
 extern crate libloading;
 extern crate once_cell;
@@ -59,7 +60,7 @@ pub static LIBNVRTC: Lazy<Libnvrtc> = Lazy::new(|| {
   lib
 });
 
-/*pub static LIBCUBLAS: Lazy<Libcublas> = Lazy::new(|| {
+pub static LIBCUBLAS: Lazy<Libcublas> = Lazy::new(|| {
   let mut lib = Libcublas::default();
   unsafe {
     if let Err(_) = lib.open_default() {
@@ -70,7 +71,7 @@ pub static LIBNVRTC: Lazy<Libnvrtc> = Lazy::new(|| {
     }
   }
   lib
-});*/
+});
 
 pub type CudartResult<T=()> = Result<T, i32>;
 
