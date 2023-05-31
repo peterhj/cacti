@@ -5,9 +5,17 @@ edition = "2018"
 
 [workspace]
 members = [
+    "cacti_cfg_env",
     "cacti_gpu_cu_ffi",
     "cacti_smp_c_ffi",
 ]
+
+[profile.dev]
+opt-level = 3
+overflow-checks = true
+panic = "abort"
+codegen-units = 1
+incremental = false
 
 [profile.release]
 overflow-checks = true
@@ -21,10 +29,12 @@ gpu = ["cacti_gpu_cu_ffi"]
 
 [dependencies]
 byteorder = { path = "../byteorder" }
+cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 futhark_ffi = { path = "../futhark_ffi" }
 half = { path = "../half" }
+home = { path = "../home" }
 libc = { path = "../libc" }
 #msgpack_serialize = { path = "../msgpack_serialize" }
 once_cell = { path = "../once_cell" }

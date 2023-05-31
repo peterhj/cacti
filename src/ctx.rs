@@ -1,18 +1,16 @@
 use crate::cell::*;
-#[cfg(feature = "gpu")]
-use crate::cell::gpu::{GpuCtx};
 use crate::cell::smp::{SmpCtx};
 use crate::panick::*;
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::*;
 
-use futhark_ffi::blake2s::{Blake2s};
-
 //use std::any::{Any, TypeId};
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-//use std::hash::{Hash};
+use std::hash::{Hash, Hasher};
+use std::mem::{swap};
+use std::rc::{Rc};
 
 thread_local! {
   pub static TL_CTX_CFG: CtxCfg = CtxCfg::default();
@@ -130,8 +128,6 @@ pub struct Ctx {
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
   pub smp:      SmpCtx,
-  #[cfg(feature = "gpu")]
-  pub gpu:      GpuCtx,
 }
 
 impl Ctx {
@@ -148,8 +144,6 @@ impl Ctx {
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
       smp:      SmpCtx::new(),
-      #[cfg(feature = "gpu")]
-      gpu:      GpuCtx::new(),
     };
     TL_CTX_CFG.with(|cfg| cfg._seal.set(true));
     ctx
@@ -160,7 +154,7 @@ pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
   TL_CTX.with(f)
 }
 
-#[cfg(not(feature = "gpu"))]
+/*#[cfg(not(feature = "gpu"))]
 pub fn ctx_init_gpu(_dev: i32) {
 }
 
@@ -170,7 +164,7 @@ pub fn ctx_init_gpu(dev: i32) {
     // FIXME FIXME
     ctx.gpu.dev.set(dev);
   })
-}
+}*/
 
 pub fn ctx_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
@@ -180,14 +174,32 @@ pub fn ctx_fresh() -> CellPtr {
 
 pub fn ctx_tmp_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
-    ctx.ctr.tmp_fresh()
+    ctx.ctr.fresh_tmp()
   })
 }
 
-pub fn ctx_reset_tmp_unchecked() {
+pub fn ctx_reset_tmp() {
   TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    ctx.ctr.tmp_ctr.set(0);
+    ctx.env.borrow_mut().reset_tmp();
+    ctx.ctr.reset_tmp();
+  })
+}
+
+pub fn ctx_fresh_tmp() -> CellPtr {
+  TL_CTX.with(|ctx| {
+    ctx.ctr.fresh_tmp()
+  })
+}
+
+pub fn ctx_peek_tmp() -> CellPtr {
+  TL_CTX.with(|ctx| {
+    ctx.ctr.peek_tmp()
+  })
+}
+
+pub fn ctx_unify(x: CellPtr, uty: Option<CellType>) -> CellPtr {
+  TL_CTX.with(|ctx| {
+    ctx.env.borrow_mut().unify(&ctx.ctr, x, uty)
   })
 }
 
@@ -332,7 +344,7 @@ pub fn ctx_lookup_or_insert_gradr(tg: CellPtr, x: CellPtr) -> CellPtr {
   })
 }
 
-pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
+/*pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
     let mut env = ctx.env.borrow_mut();
@@ -342,31 +354,18 @@ pub fn ctx_set_copy_scalar_value<T: ThunkValExt>(x: CellPtr, value: T) {
       Some(e) => {
         // FIXME
         let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::IntroAff(x));
-        spine.env.intro.insert(x, sp);
-        spine.env.aff.insert(x, sp);
+        spine.intro_aff(x);
+        // FIXME FIXME: this should use the pop thunk api.
         let th = ctx.ctr.fresh_thunk();
-        let pthunk = PThunk::new0(th, CopyScalarFutThunkSpec{val: value.into_thunk_val()});
-        thunkenv.insert(th, pthunk);
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::ApplyAff(th, x));
-        match spine.env.apply.get_mut(&x) {
-          None => {
-            let mut thlist = Vec::new();
-            thlist.push((sp, th));
-            spine.env.apply.insert(x, thlist);
-          }
-          Some(thlist) => {
-            thlist.push((sp, th));
-          }
-        }
+        let tspec = CopyScalarFutThunkSpec{val: value.into_thunk_val()};
+        let tys = vec![ThunkSpec_::out_dim(&tspec, &[]).unwrap()];
+        let pthunk = PThunk::new(th, tys, Rc::new(tspec));
+        thunkenv.insert0(th, pthunk);
+        spine.apply_aff(th, x);
       }
     }
   })
-}
+}*/
 
 /*//#[track_caller]
 pub fn ctx_set_mem<T: DtypeExt>(x: CellPtr, mem: &[T]) {
@@ -509,18 +508,14 @@ pub fn ctx_opaque(og: CellPtr) -> CellPtr {
         env.insert_alias(x, ty, og);
         // FIXME
         let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::Opaque(x, og));
-        spine.env.cache.insert(x, sp);
-        spine.env.aff.insert(x, sp);
+        spine.opaque(x, og);
         x
       }
     }
   })
 }
 
-pub fn ctx_set_cache(x: CellPtr) {
+/*pub fn ctx_set_cache(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
     let mut env = ctx.env.borrow_mut();
@@ -537,9 +532,9 @@ pub fn ctx_set_cache(x: CellPtr) {
       }
     }
   })
-}
+}*/
 
-pub fn ctx_init_cache(x: CellPtr) {
+/*pub fn ctx_init_cache(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -558,7 +553,7 @@ pub fn ctx_init_cache(x: CellPtr) {
           let mut spine = ctx.spine.borrow_mut();
           let sp = spine.curp;
           spine.curp += 1;
-          spine.log.push(SpineEntry::CacheMux(x));
+          spine.log.push(SpineEntry::ICacheMux(x));
           spine.env.cache.insert(x, sp);
           spine.env.mux.insert(x, sp);
         } else {
@@ -567,9 +562,9 @@ pub fn ctx_init_cache(x: CellPtr) {
       }
     }
   })
-}
+}*/
 
-pub fn ctx_set_seal(x: CellPtr) {
+/*pub fn ctx_set_seal(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -586,9 +581,9 @@ pub fn ctx_set_seal(x: CellPtr) {
       }
     }
   })
-}
+}*/
 
-pub fn ctx_set_unseal(x: CellPtr) {
+/*pub fn ctx_set_unseal(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -611,9 +606,9 @@ pub fn ctx_set_unseal(x: CellPtr) {
       }
     }
   })
-}
+}*/
 
-pub fn ctx_set_eval(x: CellPtr) {
+/*pub fn ctx_set_eval(x: CellPtr) {
   TL_CTX.with(|ctx| {
     //match ctx.env.borrow().lookup(x) {}
     match ctx.env.borrow_mut().lookup_mut(x) {
@@ -630,7 +625,7 @@ pub fn ctx_set_eval(x: CellPtr) {
       }
     }
   })
-}
+}*/
 
 pub fn ctx_clean_arg() -> bool {
   TL_CTX.with(|ctx| {
@@ -656,66 +651,77 @@ pub fn ctx_push_cell_out(x: CellPtr) {
 pub fn ctx_push_cell_tmp_out() {
   TL_CTX.with(|ctx| {
     //assert!(ctx.out.get().is_none());
-    let x = ctx.ctr.tmp_fresh();
+    let x = ctx.ctr.fresh_tmp();
     //ctx.out.set(Some(x));
     ctx.out.borrow_mut().push(x)
   })
 }
 
-pub fn ctx_pop_thunk<Th: ThunkSpec_>(th: Th) -> CellPtr {
+pub fn ctx_pop_thunk<Th: ThunkSpec_ + 'static>(th: Th) -> CellPtr {
   TL_CTX.with(|ctx| {
-    let mut h = Blake2s::new_hash();
-    for a in ctx.arg.borrow().iter() {
-      h.hash_bytes(a.as_bytes_repr());
+    let mut tp_ = None;
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    // FIXME FIXME: we also need out dim.
+    let mut tys = Vec::with_capacity(ctx.arg.borrow().len());
+    let mut tys_ = Vec::with_capacity(ctx.arg.borrow().len());
+    for &arg in ctx.arg.borrow().iter() {
+      let ty_ = ctx_lookup_type(arg);
+      tys.push(ty_.to_dim());
+      tys_.push(ty_);
     }
-    h.hash_bytes(th.as_bytes_repr());
-    let th_hash = h.finalize();
-    let thunkenv = ctx.thunkenv.borrow();
-    let mut tp = match thunkenv.thunkidx.get(&th_hash) {
-      None => {
-        unimplemented!();
-      }
+    let (ar_in, ar_out) = th.arity();
+    let oty = match th.out_dim(&tys) {
+      Err(_) => panic!("BUG: type error"),
+      Ok(ty) => ty
+    };
+    let oty_ = match th.out_ty_(&tys_) {
+      Err(_) => panic!("BUG: type error"),
+      Ok(ty_) => ty_
+    };
+    tys.push(oty);
+    let tk = ThunkKey(Rc::new(th));
+    let key = (tk, ar_in, ar_out, tys);
+    match thunkenv.thunkidx.get(&key) {
+      None => {}
       Some(&tp) => {
         match thunkenv.thunktab.get(&tp) {
           None => {
-            // FIXME: this might happen due to thunk gc.
-            unimplemented!();
+            // NB: this might happen due to thunk gc.
           }
-          Some(_) => {
-            // FIXME FIXME: thunk comparison here.
-            Some(tp)
+          Some(te) => {
+            assert!(((key.0).0).thunk_eq(&*te.thunk.spec_).unwrap_or(false));
+            tp_ = Some(tp);
           }
         }
       }
-    };
-    drop(thunkenv);
-    if tp.is_none() {
-      // TODO
-      unimplemented!();
     }
-    unimplemented!();
+    let (tk, ar_in, ar_out, tys) = key;
+    if tp_.is_none() {
+      let tp = ctx.ctr.fresh_thunk();
+      let mut args = Vec::new();
+      swap(&mut args, &mut *ctx.arg.borrow_mut());
+      let pt = PThunk::new(tp, tys.clone(), (tk.0).clone());
+      let te = ThunkEnvEntry{args, thunk: pt};
+      thunkenv.thunkidx.insert((tk, ar_in, ar_out, tys), tp);
+      thunkenv.thunktab.insert(tp, te);
+      tp_ = Some(tp);
+    }
+    drop(thunkenv);
+    let tp = tp_.unwrap();
+    let x = ctx.ctr.fresh_cel();
+    let cel = PCell::new(x, oty_.clone());
+    ctx.env.borrow_mut().insert(x, oty_, cel);
+    let mut spine = ctx.spine.borrow_mut();
+    spine.intro_aff(x);
+    spine.apply_aff(tp, x);
+    x
   })
 }
 
-/*//pub fn ctx_pop_thunk<Th: Any + Hash>(th: Th) -> CellPtr {}
-pub fn ctx_pop_thunk(th: ThunkPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut thunkenv = ctx.thunkenv.borrow_mut();
-    //let th_tyid = TypeId::new::<Th>();
-    // FIXME
-    //let th_hash = [0; 32];
-    //thunkenv.thunkidx.insert((th_tyid, th_hash), ());
-    unimplemented!();
-    /*
-    let mut arg = ctx.arg.borrow_mut();
-    // TODO
-    arg.clear();
-    ctx.out.set(None);
-    // FIXME
-    */
-  })
-}*/
+pub fn ctx_pop_thunk_mux<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) {
+  // FIXME FIXME
+  unimplemented!();
+}
 
 /*pub fn ctx_bar() {
   unimplemented!();
@@ -762,35 +768,55 @@ impl CtxCtr {
     ThunkPtr::from_unchecked(next)
   }
 
-  pub fn tmp_fresh(&self) -> CellPtr {
+  pub fn reset_tmp(&self) {
+    self.tmp_ctr.set(0);
+  }
+
+  pub fn fresh_tmp(&self) -> CellPtr {
     let next = self.tmp_ctr.get() - 1;
     assert!(next < 0);
     assert!(next > i32::min_value());
     self.tmp_ctr.set(next);
     CellPtr::from_unchecked(next)
   }
+
+  pub fn peek_tmp(&self) -> CellPtr {
+    CellPtr::from_unchecked(self.tmp_ctr.get())
+  }
 }
 
-/*pub struct ThunkEnvEntry {
-}*/
+pub struct ThunkEnvEntry {
+  // FIXME
+  pub args:     Vec<CellPtr>,
+  pub thunk:    PThunk,
+}
 
 #[derive(Default)]
 pub struct CtxThunkEnv {
   // FIXME
-  pub thunktab: HashMap<ThunkPtr, PThunk>,
-  //pub thunkidx: HashMap<Box<dyn (Any + Eq + Hash + 'static)>, ThunkPtr>,
-  //pub thunkidx: HashMap<(TypeId, [u8; 32]), ThunkPtr>,
-  pub thunkidx: HashMap<[u8; 32], ThunkPtr>,
+  pub thunktab: HashMap<ThunkPtr, ThunkEnvEntry>,
+  pub thunkidx: HashMap<(ThunkKey, u16, u16, Vec<Dim>), ThunkPtr>,
 }
 
 impl CtxThunkEnv {
-  pub fn insert(&mut self, th: ThunkPtr, thunk: PThunk) {
+  pub fn insert0(&mut self, th: ThunkPtr, thunk: PThunk) {
     // FIXME FIXME
     match self.thunktab.get(&th) {
       None => {}
       Some(_) => panic!("bug")
     }
-    self.thunktab.insert(th, thunk);
+    let e = ThunkEnvEntry{args: Vec::new(), thunk};
+    self.thunktab.insert(th, e);
+  }
+
+  pub fn insert(&mut self, th: ThunkPtr, args: Vec<CellPtr>, thunk: PThunk) {
+    // FIXME FIXME
+    match self.thunktab.get(&th) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    let e = ThunkEnvEntry{args, thunk};
+    self.thunktab.insert(th, e);
   }
 
   pub fn gc(&mut self, gc_list: &[CellPtr]) {
@@ -849,6 +875,26 @@ pub enum CellRef {
   Bot,
 }
 
+impl CellRef {
+  pub fn swap_in(&mut self, p: PCell) {
+    let mut ret = CellRef::Place(p);
+    swap(self, &mut ret);
+    match ret {
+      CellRef::Top => {}
+      _ => panic!("bug")
+    }
+  }
+
+  pub fn swap_out(&mut self) -> PCell {
+    let mut ret = CellRef::Top;
+    swap(self, &mut ret);
+    match ret {
+      CellRef::Place(p) => p,
+      _ => panic!("bug")
+    }
+  }
+}
+
 pub struct CellEnvEntry {
   pub stablect: Cell<usize>,
   pub ty:       CellType,
@@ -859,8 +905,8 @@ pub struct CellEnvEntry {
   pub ithunk:   Option<ThunkPtr>,
   pub thunk:    Vec<ThunkPtr>,
   pub eflag:    CellEFlag,
-  pub ref_:     CellRef,
   //pub cel:      PCell,
+  pub ref_:     CellRef,
 }
 
 pub struct CellEnvEntryRef<'a> {
@@ -881,9 +927,19 @@ pub struct CellEnvEntryMut<'a> {
   pub cel:      &'a mut PCell,
 }
 
+pub struct CellEnvEntryMutRef<'a> {
+  pub stablect: &'a Cell<usize>,
+  pub ty:       CellType,
+  pub ithunk:   &'a mut Option<ThunkPtr>,
+  pub thunk:    &'a mut Vec<ThunkPtr>,
+  pub eflag:    &'a mut CellEFlag,
+  pub ref_:     &'a mut CellRef,
+}
+
 #[derive(Default)]
 pub struct CtxEnv {
   // FIXME
+  pub tmptab:   HashMap<CellPtr, CellPtr>,
   pub celtab:   HashMap<CellPtr, CellEnvEntry>,
   pub root:     RefCell<HashMap<CellPtr, CellPtr>>,
   pub gradr:    HashMap<[CellPtr; 2], CellPtr>,
@@ -956,8 +1012,10 @@ impl CtxEnv {
           }
           &CellRef::Place(ref cel) => {
             // FIXME FIXME
-            assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
-            assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+            if e.ty.dtype != Dtype::_Top {
+              assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
+              assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+            }
             assert_eq!(p, cel.optr);
             return Some(CellEnvEntryRef{
               stablect: &e.stablect,
@@ -1038,8 +1096,10 @@ impl CtxEnv {
           }
           &mut CellRef::Place(ref mut cel) => {
             // FIXME FIXME
-            assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
-            assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+            if e.ty.dtype != Dtype::_Top {
+              assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
+              assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+            }
             assert_eq!(p, cel.optr);
             return Some(CellEnvEntryMut{
               stablect: &e.stablect,
@@ -1059,6 +1119,85 @@ impl CtxEnv {
             //return None;
           }
         }
+      }
+    }
+  }
+
+  pub fn lookup_mut_ref(&mut self, x: CellPtr) -> Option<CellEnvEntryMutRef> {
+    let mut noalias = false;
+    let ty = match self.celtab.get(&x) {
+      None => panic!("bug"),
+      Some(e) => {
+        match &e.ref_ {
+          &CellRef::Top |
+          &CellRef::Place(_) => {
+            noalias = true;
+          }
+          &CellRef::Alias(_) => {}
+          &CellRef::Bot => {
+            // FIXME FIXME
+            panic!("bug");
+            //return None;
+          }
+        }
+        e.ty.clone()
+      }
+    };
+    let mut p = x;
+    if !noalias {
+      let mut root = self.root.borrow_mut();
+      loop {
+        let p2;
+        match root.get(&p) {
+          None => {
+            break;
+          }
+          Some(&q) => {
+            p2 = q;
+          }
+        }
+        match root.get(&p2) {
+          None => {
+            p = p2;
+            break;
+          }
+          Some(&q) => {
+            root.insert(p, q);
+            p = q;
+          }
+        }
+      }
+      drop(root);
+    }
+    match self.celtab.get_mut(&p) {
+      None => panic!("bug"),
+      Some(e) => {
+        match &e.ref_ {
+          &CellRef::Top => {}
+          &CellRef::Place(ref cel) => {
+            assert_eq!(p, cel.optr);
+          }
+          &CellRef::Alias(_) => {
+            panic!("bug");
+          }
+          &CellRef::Bot => {
+            // FIXME FIXME
+            panic!("bug");
+            //return None;
+          }
+        }
+        if e.ty.dtype != Dtype::_Top {
+          assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
+          assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+        }
+        return Some(CellEnvEntryMutRef{
+          stablect: &e.stablect,
+          ty,
+          ithunk: &mut e.ithunk,
+          thunk: &mut e.thunk,
+          eflag: &mut e.eflag,
+          ref_: &mut e.ref_,
+        });
       }
     }
   }
@@ -1116,6 +1255,43 @@ impl CtxEnv {
         dx
       }
       Some(&dx) => dx
+    }
+  }
+
+  pub fn reset_tmp(&mut self) {
+    self.tmptab.clear();
+  }
+
+  pub fn unify(&mut self, ctr: &CtxCtr, x: CellPtr, uty: Option<CellType>) -> CellPtr {
+    assert!(x.to_unchecked() < 0);
+    //assert!(y.to_unchecked() > 0);
+    match self.lookup_mut(x) {
+      None => panic!("bug"),
+      Some(e) => {
+        // FIXME FIXME: cases.
+        if e.cel.optr == x {
+          // FIXME FIXME: fixup Top celltype.
+          let y = ctr.fresh_cel();
+          if let Some(ty) = uty.as_ref() {
+            e.cel.optr = y;
+            e.cel.ogty = ty.clone();
+            e.cel.lay = CellLayout::new_packed(&ty);
+          }
+          let mut e = self.celtab.remove(&x).unwrap();
+          if let Some(ty) = uty {
+            e.ty = ty;
+          }
+          assert!(self.celtab.insert(y, e).is_none());
+          let mut root = self.root.borrow_mut();
+          root.insert(x, y);
+          self.tmptab.insert(x, y);
+          y
+        } else if e.cel.optr.to_unchecked() <= 0 {
+          panic!("bug")
+        } else {
+          e.cel.optr
+        }
+      }
     }
   }
 

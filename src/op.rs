@@ -4,7 +4,7 @@ use crate::panick::*;
 use crate::thunk::op::*;
 
 use std::convert::{TryInto};
-use std::ops::{Deref, Add, Sub, Mul, Div};
+use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
 
 /*impl<P: Into<CellPtr> + Sized> Add<P> for f32 {
   type Output = CellPtr;
@@ -36,6 +36,20 @@ use std::ops::{Deref, Add, Sub, Mul, Div};
   }
 }*/
 
+impl AddAssign<f32> for CellPtr {
+  #[track_caller]
+  fn add_assign(&mut self, rhs: f32) {
+    // FIXME FIXME
+    unimplemented!();
+    /*panick_wrap(|| {
+      let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk_mux(op, self.into())
+    })*/
+  }
+}
+
 impl<'p> Add<f32> for &'p CellPtr {
   type Output = CellPtr;
 
@@ -57,6 +71,15 @@ impl Add<f32> for CellPtr {
   #[track_caller]
   fn add(self, rhs: f32) -> CellPtr {
     panick_wrap(|| (&self).add(rhs))
+  }
+}
+
+impl Add<f32> for StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: f32) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
   }
 }
 
@@ -609,19 +632,21 @@ pub trait CtlOps: AsRef<CellPtr> + Sized {
   }
   */
 
-  #[track_caller]
+  /*#[track_caller]
   fn trace(self) -> CellPtr {
+    // FIXME FIXME
     ctx_trace_val(*self.as_ref())
-  }
+  }*/
 
-  #[track_caller]
+  /*#[track_caller]
   fn profile(self) -> CellPtr {
+    // FIXME FIXME
     ctx_profile_val(*self.as_ref())
-  }
+  }*/
 
   #[track_caller]
   fn opaque(self) -> CellPtr {
-    ctx_opaque(*self.as_ref())
+    panick_wrap(|| ctx_opaque(*self.as_ref()))
   }
 }
 
@@ -633,45 +658,51 @@ pub trait Ops: AsRef<CellPtr> + Sized {
     unimplemented!();
   }
 
-  fn bar(self) -> Self {
+  /*fn bar(self) -> Self {
     unimplemented!();
-  }
+  }*/
 
   /*fn set_mem(self, ) -> Self {
     unimplemented!();
   }*/
 
-  fn set_futhark(self, fut_str: &str) -> Self {
+  /*fn set_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
-  }
+  }*/
 
   //fn set(self, set_f: Box<FnOnce() -> _>) -> Self;
   //fn set_in_place(self, set_f: Box<FnOnce(_)>) -> Self;
 
-  #[track_caller]
+  /*#[track_caller]
   fn init_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
-  }
+  }*/
 
   //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
 
-  #[track_caller]
+  /*#[track_caller]
   fn apply_futhark(self, fut_str: &str) -> Self {
     unimplemented!();
-  }
+  }*/
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
   #[track_caller]
   fn cache(self) -> Self {
-    ctx_set_cache(*self.as_ref());
-    self
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.cache_aff(*self.as_ref());
+      self
+    }))
   }
 
   #[track_caller]
   fn init_cache(self) -> Self {
-    ctx_init_cache(*self.as_ref());
-    self
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.init_cache_mux(*self.as_ref());
+      self
+    }))
   }
 
   #[track_caller]
@@ -684,13 +715,19 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 
   #[track_caller]
   fn unseal_init(self) -> Self {
-    unimplemented!();
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.unseal_mux(*self.as_ref());
+      self
+    }))
   }
 
   #[track_caller]
   fn eval(self) -> Self {
-    ctx_set_eval(*self.as_ref());
-    self
+    // FIXME FIXME
+    unimplemented!();
+    /*ctx_set_eval(*self.as_ref());
+    self*/
   }
 }
 

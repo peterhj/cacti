@@ -95,8 +95,8 @@ pub struct Libcblas {
 impl Drop for Libcblas {
   fn drop(&mut self) {
     let inner_library = self.inner_library.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }

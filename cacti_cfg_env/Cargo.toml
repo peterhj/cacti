@@ -2,7 +2,9 @@
 name = "cacti_cfg_env"
 version = "0.1.0-devel"
 edition = "2018"
+license = "ISC"
 workspace = ".."
 
 [dependencies]
+home = { path = "../../home" }
 once_cell = { path = "../../once_cell" }

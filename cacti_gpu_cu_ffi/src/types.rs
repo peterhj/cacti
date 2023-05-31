@@ -1,15 +1,30 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
-use libc::{c_int, c_uint, c_ulonglong};
+use libc::{c_int, c_uint};
 
 pub type CUresult = c_int;
+
+pub const CUDA_SUCCESS: CUresult = 0;
+pub const CUDA_ERROR_DEINITIALIZED: CUresult = 4;
+pub const CUDA_ERROR_INVALID_CONTEXT: CUresult = 201;
+pub const CUDA_ERROR_ILLEGAL_ADDRESS: CUresult = 700;
+
 pub type CUdevice = c_int;
 pub type CUdevice_attribute = c_int;
 pub type CUfunction_attribute = c_int;
 
+#[cfg(target_pointer_width = "32")]
+pub type CUdeviceptr = u32;
 #[cfg(target_pointer_width = "64")]
-pub type CUdeviceptr = c_ulonglong;
+pub type CUdeviceptr = u64;
+
+pub type CUctx_flags = c_uint;
+
+pub const CU_CTX_SCHED_AUTO: CUctx_flags = 0;
+pub const CU_CTX_SCHED_SPIN: CUctx_flags = 1;
+pub const CU_CTX_SCHED_YIELD: CUctx_flags = 2;
+pub const CU_CTX_SCHED_BLOCKING_SYNC: CUctx_flags = 4;
 
 #[repr(C)]
 pub struct CUctx_st([u8; 0]);

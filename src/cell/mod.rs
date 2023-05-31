@@ -1,17 +1,16 @@
 use crate::algo::fp::*;
-#[cfg(feature = "gpu")]
-use crate::cell::gpu::*;
 use crate::cell::smp::*;
 use crate::cell::swap::*;
 use crate::clock::*;
 use crate::ctx::*;
-//use crate::ptr::*;
+#[cfg(feature = "gpu")]
+use crate::pctx::nvgpu::*;
 use crate::thunk::*;
+use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::torch::{TorchDtype};
 
-//use std::alloc::{Layout};
 use std::any::{Any};
-//use std::cell::{Cell, RefCell};
+use std::cell::{Cell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of};
@@ -20,8 +19,8 @@ use std::rc::{Weak};
 use std::slice::{from_raw_parts};
 use std::str::{FromStr};
 
-#[cfg(feature = "gpu")]
-pub mod gpu;
+//#[cfg(feature = "gpu")]
+//pub mod gpu;
 pub mod smp;
 pub mod swap;
 
@@ -60,6 +59,10 @@ impl Debug for CellPtr {
 }
 
 impl CellPtr {
+  pub fn nil() -> CellPtr {
+    CellPtr(0)
+  }
+
   pub fn from_unchecked(p: i32) -> CellPtr {
     CellPtr(p)
   }
@@ -82,16 +85,29 @@ pub struct StableCell {
   ptr:  CellPtr,
 }
 
-impl Deref for StableCell {
-  type Target = CellPtr;
+impl From<CellPtr> for StableCell {
+  fn from(ptr: CellPtr) -> StableCell {
+    ctx_retain(ptr);
+    StableCell{ptr}
+  }
+}
 
-  fn deref(&self) -> &CellPtr {
-    self.as_ptr_ref()
+impl From<f32> for StableCell {
+  fn from(value: f32) -> StableCell {
+    StableCell::new_scalar(value)
   }
 }
 
 impl AsRef<CellPtr> for StableCell {
   fn as_ref(&self) -> &CellPtr {
+    self.as_ptr_ref()
+  }
+}
+
+impl Deref for StableCell {
+  type Target = CellPtr;
+
+  fn deref(&self) -> &CellPtr {
     self.as_ptr_ref()
   }
 }
@@ -108,13 +124,6 @@ impl Clone for StableCell {
   }
 }
 
-impl From<CellPtr> for StableCell {
-  fn from(ptr: CellPtr) -> StableCell {
-    ctx_retain(ptr);
-    StableCell{ptr}
-  }
-}
-
 impl Drop for StableCell {
   fn drop(&mut self) {
     ctx_release(self.ptr);
@@ -123,14 +132,7 @@ impl Drop for StableCell {
 
 impl StableCell {
   pub fn new_scalar<T: ThunkValExt>(value: T) -> StableCell {
-    let shape = [].into();
-    let dtype = T::dtype();
-    let ty = CellType{shape, dtype};
-    let x = ctx_insert_pmach(ty, Some(PMachSpec::Smp), None);
-    // FIXME FIXME
-    //ctx_set_mem(x, &[value]);
-    ctx_set_copy_scalar_value(x, value);
-    x.into()
+    ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_thunk_val()}).into()
   }
 
   pub fn new_array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
@@ -155,13 +157,14 @@ impl StableCell {
 
   #[inline]
   pub fn as_ptr_ref(&self) -> &CellPtr {
-    // SAFETY: The following should be safe as `StableCell` has the same
+    // SAFETY: The following is safe as `StableCell` has the same
     // (transparent) repr as `CellPtr`.
     unsafe { &*((self as *const StableCell) as *const CellPtr) as &CellPtr }
   }
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum CellSpec {
   Primary,
   Compute,
@@ -169,6 +172,7 @@ pub enum CellSpec {
 }
 
 #[derive(Clone, Copy)]
+#[repr(transparent)]
 pub struct PMachFlag {
   bits: u8,
 }
@@ -198,6 +202,7 @@ impl PMachFlag {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u8)]
 pub enum PMachSpec {
   _Top = 0,
   //Cpu = 1,
@@ -376,6 +381,12 @@ pub fn dtype<T: DtypeExt>() -> Dtype {
   T::dtype()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Dim {
+  pub ndim:     u8,
+  pub dtype:    Dtype,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum ShapeCompat {
@@ -393,6 +404,22 @@ pub struct CellType {
 }
 
 impl CellType {
+  pub fn top() -> CellType {
+    CellType{
+      shape:    Vec::new(),
+      dtype:    Dtype::_Top,
+    }
+  }
+
+  pub fn to_dim(&self) -> Dim {
+    Dim{ndim: self.ndim(), dtype: self.dtype}
+  }
+
+  pub fn ndim(&self) -> u8 {
+    assert!(self.shape.len() <= u8::max_value() as usize);
+    self.shape.len() as u8
+  }
+
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
     if &self.shape == &orig.shape {
       return ShapeCompat::Equal;
@@ -449,6 +476,11 @@ pub struct CellLayout {
 
 impl CellLayout {
   pub fn new_packed(ty: &CellType) -> CellLayout {
+    if ty.dtype == Dtype::_Top {
+      let offset = 0;
+      let pitch = Vec::new();
+      return CellLayout{offset, pitch};
+    }
     let offset = 0;
     let nd = ty.shape.len();
     let mut pitch = Vec::with_capacity(nd);
@@ -463,6 +495,9 @@ impl CellLayout {
   }
 
   pub fn is_packed(&self, ty: &CellType) -> bool {
+    if ty.dtype == Dtype::_Top {
+      return true;
+    }
     if self.offset != 0 {
       return false;
     }
@@ -594,7 +629,7 @@ pub struct PCell {
   // FIXME FIXME: to implement fusion w/ unique cells, simply change
   // the PCell's owning ptr; the original ptr then becomes dangling.
   pub optr: CellPtr,
-  //pub ptr:  Cell<CellPtr>,
+  //pub optr: Cell<CellPtr>,
   pub ogty: CellType,
   pub lay:  CellLayout,
   pub mode: CellMode,
@@ -623,6 +658,7 @@ impl PCell {
     let compute = InnerCell::empty(CellSpec::Compute, compute.unwrap_or_else(|| ctx_cfg_get_default_compute()));
     PCell{
       optr: ptr,
+      //optr: Cell::new(ptr),
       ogty: ty,
       lay,
       mode,
@@ -756,7 +792,7 @@ impl InnerCell {
     }
   }
 
-  pub fn sync_thunk(&mut self, x: CellPtr, ty: &CellType, pthunk: &PThunk, clk: Clock) {
+  /*pub fn sync_thunk(&mut self, x: CellPtr, ty: &CellType, args: &[CellPtr], pthunk: &PThunk, clk: Clock) {
     if self.synced(ty, clk) {
       return;
     }
@@ -817,7 +853,7 @@ impl InnerCell {
         panic!("bug: InnerCell::sync_thunk: thunk not implemented");
       }
     }
-  }
+  }*/
 
   pub fn unsync(&mut self, clk: Clock) {
     unimplemented!();

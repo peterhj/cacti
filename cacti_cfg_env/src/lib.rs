@@ -1,58 +1,76 @@
+extern crate home;
+extern crate once_cell;
+
+use home::{home_dir};
 use once_cell::sync::{Lazy};
 
-use std::env;
+use std::env::{var};
 use std::path::{PathBuf};
 
 pub static CFG_ENV: Lazy<CfgEnv> = Lazy::new(|| CfgEnv::get());
+thread_local! {
+  pub static TL_CFG_ENV: CfgEnv = CFG_ENV.clone();
+}
 
+#[derive(Clone)]
 pub struct CfgEnv {
-  pub cuda_home:  Vec<PathSpec>,
+  pub cabalpath:  Vec<PathBuf>,
+  pub cudaprefix: Vec<PathBuf>,
   pub virtualenv: bool,
 }
 
 impl CfgEnv {
   pub fn get() -> CfgEnv {
-    let cuda_home = env::var("CACTI_CUDA_HOME").map(|s| {
-      let mut ps = Vec::new();
-      for s in s.split(":") {
-        if s == "@cuda_home" {
-          ps.push(PathSpec::BuiltinCudaHome);
-        } else if !s.is_empty() {
-          ps.push(PathSpec::Path(PathBuf::from(s)));
-        }
-      }
-      ps
-    }).unwrap_or_else(|_| env::var("CUDA_HOME").map(|s| {
+    let cabalpath = var("CACTI_CABAL_BIN_PATH").map(|s| {
       let mut ps = Vec::new();
       for s in s.split(":") {
         if !s.is_empty() {
-          ps.push(PathSpec::Path(PathBuf::from(s)));
+          ps.push(PathBuf::from(s));
         }
       }
       ps
-    }).unwrap_or_else(|_| vec![PathSpec::BuiltinCudaHome])
-    );
-    let virtualenv = env::var("VIRTUAL_ENV")
+    }).unwrap_or_else(|_| {
+      home_dir().map(|p| vec![p.join(".cabal").join("bin")])
+        .unwrap_or_else(|| Vec::new())
+    });
+    let cudaprefix = var("CACTI_CUDA_PREFIX").map(|s| {
+      let mut ps = Vec::new();
+      for s in s.split(":") {
+        if s == "@cuda" {
+          // FIXME FIXME: os-specific paths.
+          ps.push(PathBuf::from("/usr/local/cuda"));
+        } else if !s.is_empty() {
+          ps.push(PathBuf::from(s));
+        }
+      }
+      ps
+    }).unwrap_or_else(|_| var("CUDA_HOME").map(|s| {
+      let mut ps = Vec::new();
+      if !s.is_empty() {
+        ps.push(PathBuf::from(s));
+      }
+      ps
+    }).unwrap_or_else(|_| var("CUDA_ROOT").map(|s| {
+      let mut ps = Vec::new();
+      if !s.is_empty() {
+        ps.push(PathBuf::from(s));
+      }
+      ps
+    }).unwrap_or_else(|_| var("CUDA_PATH").map(|s| {
+      let mut ps = Vec::new();
+      if !s.is_empty() {
+        ps.push(PathBuf::from(s));
+      }
+      ps
+    }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
+    )));
+    let virtualenv = var("VIRTUAL_ENV")
       .map(|_| true)
       .unwrap_or_else(|_| false);
     CfgEnv{
-      cuda_home,
+      cabalpath,
+      cudaprefix,
       virtualenv,
-    }
-  }
-}
-
-pub enum PathSpec {
-  Path(PathBuf),
-  BuiltinCudaHome,
-}
-
-impl PathSpec {
-  pub fn to_path(&self) -> PathBuf {
-    match self {
-      &PathSpec::Path(ref p) => p.clone(),
-      // FIXME FIXME: os-specific paths.
-      &PathSpec::BuiltinCudaHome => PathBuf::from("/usr/local/cuda"),
     }
   }
 }

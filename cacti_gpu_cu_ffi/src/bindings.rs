@@ -11,15 +11,18 @@ pub unsafe fn open_default<S: AsRef<str>>(_lib_name: S) -> Result<Library, ()> {
 
 #[cfg(unix)]
 pub unsafe fn open_default<S: AsRef<str>>(lib_name: S) -> Result<Library, ()> {
-  for ps in CFG_ENV.cuda_home.iter() {
-    let prefix = ps.to_path();
-    // FIXME FIXME: os-specific path.
-    match Library::new(&format!("{}/lib64/lib{}.so", prefix.display(), lib_name.as_ref())) {
-      Err(_) => {}
-      Ok(library) => return Ok(library)
+  TL_CFG_ENV.with(|env| {
+    let filename = format!("lib{}.so", lib_name.as_ref());
+    for prefix in env.cudaprefix.iter() {
+      // FIXME FIXME: os-specific path.
+      let p = prefix.join("lib64").join(&filename);
+      match Library::new(&p) {
+        Err(_) => {}
+        Ok(library) => return Ok(library)
+      }
     }
-  }
-  Library::new(&format!("lib{}.so", lib_name.as_ref())).map_err(|_| ())
+    Library::new(&filename).map_err(|_| ())
+  })
 }
 
 #[allow(non_snake_case)]
@@ -34,13 +37,20 @@ pub struct Libcuda {
   pub cuDeviceGetName:          Option<Symbol<extern "C" fn (*mut c_char, c_int, CUdevice) -> CUresult>>,
   pub cuDeviceGet:              Option<Symbol<extern "C" fn (*mut CUdevice, c_int) -> CUresult>>,
   pub cuDeviceGetAttribute:     Option<Symbol<extern "C" fn (*mut c_int, CUdevice_attribute, CUdevice) -> CUresult>>,
+  pub cuDevicePrimaryCtxReset:  Option<Symbol<extern "C" fn (CUdevice) -> CUresult>>,
+  pub cuDevicePrimaryCtxRetain: Option<Symbol<extern "C" fn (*mut CUcontext, CUdevice) -> CUresult>>,
+  pub cuDevicePrimaryCtxRelease: Option<Symbol<extern "C" fn (CUdevice) -> CUresult>>,
+  pub cuDevicePrimaryCtxSetFlags: Option<Symbol<extern "C" fn (CUdevice, CUctx_flags) -> CUresult>>,
+  pub cuDevicePrimaryCtxGetState: Option<Symbol<extern "C" fn (CUdevice, *mut c_uint, *mut c_int) -> CUresult>>,
   pub cuCtxCreate:              Option<Symbol<extern "C" fn (*mut CUcontext, c_uint, CUdevice) -> CUresult>>,
   pub cuCtxDestroy:             Option<Symbol<extern "C" fn (CUcontext) -> CUresult>>,
   pub cuCtxPopCurrent:          Option<Symbol<extern "C" fn (*mut CUcontext) -> CUresult>>,
   pub cuCtxPushCurrent:         Option<Symbol<extern "C" fn (CUcontext) -> CUresult>>,
   pub cuCtxSynchronize:         Option<Symbol<extern "C" fn () -> CUresult>>,
   pub cuMemAlloc:               Option<Symbol<extern "C" fn (*mut CUdeviceptr, usize) -> CUresult>>,
+  pub cuMemAllocHost:           Option<Symbol<extern "C" fn (*mut *mut c_void, usize) -> CUresult>>,
   pub cuMemFree:                Option<Symbol<extern "C" fn (CUdeviceptr) -> CUresult>>,
+  pub cuMemFreeHost:            Option<Symbol<extern "C" fn (*mut c_void) -> CUresult>>,
   pub cuMemcpy:                 Option<Symbol<extern "C" fn (CUdeviceptr, CUdeviceptr, usize) -> CUresult>>,
   pub cuMemcpyHtoD:             Option<Symbol<extern "C" fn (CUdeviceptr, *const c_void, usize) -> CUresult>>,
   pub cuMemcpyDtoH:             Option<Symbol<extern "C" fn (*mut c_void, CUdeviceptr, usize) -> CUresult>>,
@@ -58,8 +68,8 @@ pub struct Libcuda {
 impl Drop for Libcuda {
   fn drop(&mut self) {
     let inner_library = self._inner.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }
@@ -81,19 +91,26 @@ impl Libcuda {
     self.cuDeviceGetName = library.get(b"cuDeviceGetName").ok();
     self.cuDeviceGet = library.get(b"cuDeviceGet").ok();
     self.cuDeviceGetAttribute = library.get(b"cuDeviceGetAttribute").ok();
-    self.cuCtxCreate = library.get(b"cuCtxCreate").ok();
-    self.cuCtxDestroy = library.get(b"cuCtxDestroy").ok();
-    self.cuCtxPopCurrent = library.get(b"cuCtxPopCurrent").ok();
-    self.cuCtxPushCurrent = library.get(b"cuCtxPushCurrent").ok();
+    self.cuDevicePrimaryCtxReset = library.get(b"cuDevicePrimaryCtxReset_v2").ok();
+    self.cuDevicePrimaryCtxRetain = library.get(b"cuDevicePrimaryCtxRetain").ok();
+    self.cuDevicePrimaryCtxRelease = library.get(b"cuDevicePrimaryCtxRelease_v2").ok();
+    self.cuDevicePrimaryCtxSetFlags = library.get(b"cuDevicePrimaryCtxSetFlags_v2").ok();
+    self.cuDevicePrimaryCtxGetState = library.get(b"cuDevicePrimaryCtxGetState").ok();
+    self.cuCtxCreate = library.get(b"cuCtxCreate_v2").ok();
+    self.cuCtxDestroy = library.get(b"cuCtxDestroy_v2").ok();
+    self.cuCtxPopCurrent = library.get(b"cuCtxPopCurrent_v2").ok();
+    self.cuCtxPushCurrent = library.get(b"cuCtxPushCurrent_v2").ok();
     self.cuCtxSynchronize = library.get(b"cuCtxSynchronize").ok();
-    self.cuMemAlloc = library.get(b"cuMemAlloc").ok();
-    self.cuMemFree = library.get(b"cuMemFree").ok();
+    self.cuMemAlloc = library.get(b"cuMemAlloc_v2").ok();
+    self.cuMemAllocHost = library.get(b"cuMemAllocHost_v2").ok();
+    self.cuMemFree = library.get(b"cuMemFree_v2").ok();
+    self.cuMemFreeHost = library.get(b"cuMemFreeHost").ok();
     self.cuMemcpy = library.get(b"cuMemcpy").ok();
-    self.cuMemcpyHtoD = library.get(b"cuMemcpyHtoD").ok();
-    self.cuMemcpyDtoH = library.get(b"cuMemcpyDtoH").ok();
+    self.cuMemcpyHtoD = library.get(b"cuMemcpyHtoD_v2").ok();
+    self.cuMemcpyDtoH = library.get(b"cuMemcpyDtoH_v2").ok();
     self.cuMemcpyAsync = library.get(b"cuMemcpyAsync").ok();
-    self.cuMemcpyHtoDAsync = library.get(b"cuMemcpyHtoDAsync").ok();
-    self.cuMemcpyDtoHAsync = library.get(b"cuMemcpyDtoHAsync").ok();
+    self.cuMemcpyHtoDAsync = library.get(b"cuMemcpyHtoDAsync_v2").ok();
+    self.cuMemcpyDtoHAsync = library.get(b"cuMemcpyDtoHAsync_v2").ok();
     self.cuModuleLoadData = library.get(b"cuModuleLoadData").ok();
     self.cuModuleUnload = library.get(b"cuModuleUnload").ok();
     self.cuModuleGetFunction = library.get(b"cuModuleGetFunction").ok();
@@ -187,8 +204,8 @@ pub struct Libcudart {
 impl Drop for Libcudart {
   fn drop(&mut self) {
     let inner_library = self._inner.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }
@@ -265,6 +282,29 @@ impl Libcudart {
   }
 }
 
+#[allow(non_camel_case_types)]
+#[derive(Default)]
+pub struct Libnvrtc_builtins {
+  pub _inner:   Option<Library>,
+}
+
+impl Drop for Libnvrtc_builtins {
+  fn drop(&mut self) {
+    let inner_library = self._inner.take();
+    if let Some(inner) = inner_library {
+      *self = Default::default();
+      drop(inner);
+    }
+  }
+}
+
+impl Libnvrtc_builtins {
+  pub unsafe fn open_default(&mut self) -> Result<(), ()> {
+    self._inner = Some(open_default("nvrtc-builtins")?);
+    Ok(())
+  }
+}
+
 #[allow(non_snake_case)]
 #[derive(Default)]
 pub struct Libnvrtc {
@@ -286,8 +326,8 @@ pub struct Libnvrtc {
 impl Drop for Libnvrtc {
   fn drop(&mut self) {
     let inner_library = self._inner.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }
@@ -319,13 +359,13 @@ impl Libnvrtc {
 #[derive(Default)]
 pub struct Libcublas {
   pub _inner:                   Option<Library>,
-  pub cublasCreate_v2:          Option<Symbol<extern "C" fn (*mut cublasHandle_t) -> cublasStatus_t>>,
-  pub cublasDestroy_v2:         Option<Symbol<extern "C" fn (cublasHandle_t) -> cublasStatus_t>>,
-  pub cublasGetVersion_v2:      Option<Symbol<extern "C" fn (cublasHandle_t, *mut c_int) -> cublasStatus_t>>,
-  pub cublasGetStream_v2:       Option<Symbol<extern "C" fn (cublasHandle_t, *mut cudaStream_t) -> cublasStatus_t>>,
-  pub cublasSetStream_v2:       Option<Symbol<extern "C" fn (cublasHandle_t, cudaStream_t) -> cublasStatus_t>>,
-  pub cublasSetPointerMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasPointerMode_t) -> cublasStatus_t>>,
-  pub cublasSetAtomicsMode_v2:  Option<Symbol<extern "C" fn (cublasHandle_t, cublasAtomicsMode_t) -> cublasStatus_t>>,
+  pub cublasCreate:             Option<Symbol<extern "C" fn (*mut cublasHandle_t) -> cublasStatus_t>>,
+  pub cublasDestroy:            Option<Symbol<extern "C" fn (cublasHandle_t) -> cublasStatus_t>>,
+  pub cublasGetVersion:         Option<Symbol<extern "C" fn (cublasHandle_t, *mut c_int) -> cublasStatus_t>>,
+  pub cublasGetStream:          Option<Symbol<extern "C" fn (cublasHandle_t, *mut cudaStream_t) -> cublasStatus_t>>,
+  pub cublasSetStream:          Option<Symbol<extern "C" fn (cublasHandle_t, cudaStream_t) -> cublasStatus_t>>,
+  pub cublasSetPointerMode:     Option<Symbol<extern "C" fn (cublasHandle_t, cublasPointerMode_t) -> cublasStatus_t>>,
+  pub cublasSetAtomicsMode:     Option<Symbol<extern "C" fn (cublasHandle_t, cublasAtomicsMode_t) -> cublasStatus_t>>,
   pub cublasSetMathMode:        Option<Symbol<extern "C" fn (cublasHandle_t, cublasMath_t) -> cublasStatus_t>>,
   pub cublasSgemmEx:            Option<Symbol<extern "C" fn (
                                     cublasHandle_t,
@@ -383,8 +423,8 @@ pub struct Libcublas {
 impl Drop for Libcublas {
   fn drop(&mut self) {
     let inner_library = self._inner.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }
@@ -398,12 +438,12 @@ impl Libcublas {
 
   pub unsafe fn load_symbols(&mut self) -> Result<(), i32> {
     let library = self._inner.as_ref().unwrap();
-    self.cublasCreate_v2 = library.get(b"cublasCreate_v2").ok();
-    self.cublasDestroy_v2 = library.get(b"cublasDestroy_v2").ok();
-    self.cublasGetVersion_v2 = library.get(b"cublasGetVersion_v2").ok();
-    self.cublasSetStream_v2 = library.get(b"cublasSetStream_v2").ok();
-    self.cublasSetPointerMode_v2 = library.get(b"cublasSetPointerMode_v2").ok();
-    self.cublasSetAtomicsMode_v2 = library.get(b"cublasSetAtomicsMode_v2").ok();
+    self.cublasCreate = library.get(b"cublasCreate_v2").ok();
+    self.cublasDestroy = library.get(b"cublasDestroy_v2").ok();
+    self.cublasGetVersion = library.get(b"cublasGetVersion_v2").ok();
+    self.cublasSetStream = library.get(b"cublasSetStream_v2").ok();
+    self.cublasSetPointerMode = library.get(b"cublasSetPointerMode_v2").ok();
+    self.cublasSetAtomicsMode = library.get(b"cublasSetAtomicsMode_v2").ok();
     self.cublasSetMathMode = library.get(b"cublasSetMathMode").ok();
     self.cublasSgemmEx = library.get(b"cublasSgemmEx").ok();
     self.cublasGemmEx = library.get(b"cublasGemmEx").ok();
@@ -416,11 +456,11 @@ impl Libcublas {
 
   fn _check_required(&self) -> Result<(), i32> {
     let mut i = 0;
-    i += 1; self.cublasCreate_v2.as_ref().ok_or(i)?;
-    i += 1; self.cublasDestroy_v2.as_ref().ok_or(i)?;
-    i += 1; self.cublasSetStream_v2.as_ref().ok_or(i)?;
-    i += 1; self.cublasSetPointerMode_v2.as_ref().ok_or(i)?;
-    i += 1; self.cublasSetAtomicsMode_v2.as_ref().ok_or(i)?;
+    i += 1; self.cublasCreate.as_ref().ok_or(i)?;
+    i += 1; self.cublasDestroy.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetStream.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetPointerMode.as_ref().ok_or(i)?;
+    i += 1; self.cublasSetAtomicsMode.as_ref().ok_or(i)?;
     i += 1; self.cublasSetMathMode.as_ref().ok_or(i)?;
     i += 1; self.cublasSgemmEx.as_ref().ok_or(i)?;
     i += 1; self.cublasGemmEx.as_ref().ok_or(i)?;
@@ -498,8 +538,8 @@ pub struct Libcusolver {
 impl Drop for Libcusolver {
   fn drop(&mut self) {
     let inner_library = self._inner.take();
-    *self = Default::default();
     if let Some(inner) = inner_library {
+      *self = Default::default();
       drop(inner);
     }
   }

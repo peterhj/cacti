@@ -1,6 +1,6 @@
-#[cfg(feature = "gpu")]
-use crate::cell::gpu::{GpuOuterCell};
 use crate::clock::*;
+#[cfg(feature = "gpu")]
+use crate::pctx::nvgpu::{GpuOuterCell};
 
 use cacti_smp_c_ffi::*;
 

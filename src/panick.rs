@@ -19,10 +19,11 @@ impl PanickOnceCtx {
     set_hook(Box::new(move |info| {
       PANICK_TL_CTX.with(|ctx| {
         let stack = ctx.stack.borrow();
-        match stack.last() {
+        // TODO TODO: full backtrace?
+        match stack.first() {
           None => {}
-          Some(last_frame) => {
-            let loc = last_frame.loc;
+          Some(frame) => {
+            let loc = frame.loc;
             eprintln!("panick: {}:{}:{}", loc.file(), loc.line(), loc.column());
           }
         }

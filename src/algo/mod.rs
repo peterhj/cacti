@@ -266,3 +266,35 @@ impl ExtentVecList {
     self.list.push_front(e0);
   }
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Region {
+  pub off:  usize,
+  pub sz:   usize,
+}
+
+/*impl PartialOrd for Region {
+  fn partial_cmp(&self, rhs: &Region) -> Option<Ordering> {
+    Some(self.cmp(rhs))
+  }
+}
+
+impl Ord for Region {
+  fn cmp(&self, rhs: &Region) -> Ordering {
+    let ret = self.off.cmp(&rhs.off);
+    if ret == Ordering::Equal {
+      assert_eq!(self.sz, rhs.sz);
+    }
+    ret
+  }
+}*/
+
+impl Region {
+  pub fn merge(&self, rhs: &Region) -> Region {
+    assert_eq!(self.off + self.sz, rhs.off);
+    Region{
+      off:  self.off,
+      sz:   self.sz + rhs.sz,
+    }
+  }
+}
