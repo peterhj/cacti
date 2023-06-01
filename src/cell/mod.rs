@@ -1,10 +1,11 @@
 use crate::algo::fp::*;
-use crate::cell::smp::*;
-use crate::cell::swap::*;
 use crate::clock::*;
 use crate::ctx::*;
+use crate::pctx::{Locus, PMach};
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::*;
+use crate::pctx::smp::*;
+use crate::pctx::swap::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::torch::{TorchDtype};
@@ -18,11 +19,6 @@ use std::ops::{Deref};
 use std::rc::{Weak};
 use std::slice::{from_raw_parts};
 use std::str::{FromStr};
-
-//#[cfg(feature = "gpu")]
-//pub mod gpu;
-pub mod smp;
-pub mod swap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
@@ -94,7 +90,7 @@ impl From<CellPtr> for StableCell {
 
 impl From<f32> for StableCell {
   fn from(value: f32) -> StableCell {
-    StableCell::new_scalar(value)
+    StableCell::scalar(value)
   }
 }
 
@@ -131,11 +127,16 @@ impl Drop for StableCell {
 }
 
 impl StableCell {
-  pub fn new_scalar<T: ThunkValExt>(value: T) -> StableCell {
+  pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
+    env.retain(ptr);
+    StableCell{ptr}
+  }
+
+  pub fn scalar<T: ThunkValExt>(value: T) -> StableCell {
     ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_thunk_val()}).into()
   }
 
-  pub fn new_array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
+  pub fn array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
     let shape: Vec<i64> = shape.into();
     let dtype: Dtype = match dtype.try_into() {
       Ok(d) => d,
@@ -143,6 +144,12 @@ impl StableCell {
     };
     let ty = CellType{shape, dtype};
     ctx_insert(ty).into()
+  }
+
+  pub fn release(self, env: &CtxEnv) -> CellPtr {
+    let StableCell{ptr} = self;
+    env.release(ptr);
+    ptr
   }
 
   #[inline]
@@ -169,69 +176,6 @@ pub enum CellSpec {
   Primary,
   Compute,
   //Backup,
-}
-
-#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct PMachFlag {
-  bits: u8,
-}
-
-impl Default for PMachFlag {
-  fn default() -> PMachFlag {
-    PMachFlag{bits: 0}
-  }
-}
-
-impl PMachFlag {
-  pub fn set_primary(self) -> PMachFlag {
-    PMachFlag{bits: self.bits | 1}
-  }
-
-  pub fn set_compute(self) -> PMachFlag {
-    PMachFlag{bits: self.bits | 2}
-  }
-
-  pub fn primary(self) -> bool {
-    (self.bits & 1) != 0
-  }
-
-  pub fn compute(self) -> bool {
-    (self.bits & 2) != 0
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[repr(u8)]
-pub enum PMachSpec {
-  _Top = 0,
-  //Cpu = 1,
-  //Cpu(CpuSet),
-  Smp = 1,
-  //Smp(CpuSet),
-  Swap = 2,
-  //Swap(SwapSet),
-  #[cfg(feature = "gpu")]
-  Gpu = 3,
-  //Gpu(GpuSet),
-}
-
-impl PMachSpec {
-  pub fn flag(&self) -> PMachFlag {
-    match self {
-      &PMachSpec::Smp => {
-        PMachFlag::default().set_primary().set_compute()
-      }
-      &PMachSpec::Swap => {
-        PMachFlag::default().set_primary()
-      }
-      #[cfg(feature = "gpu")]
-      &PMachSpec::Gpu => {
-        PMachFlag::default().set_compute()
-      }
-      _ => panic!("bug: unimplemented")
-    }
-  }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -412,15 +356,19 @@ impl CellType {
   }
 
   pub fn to_dim(&self) -> Dim {
+    assert!(self.dtype != Dtype::_Top, "bug");
     Dim{ndim: self.ndim(), dtype: self.dtype}
   }
 
   pub fn ndim(&self) -> u8 {
+    assert!(self.dtype != Dtype::_Top, "bug");
     assert!(self.shape.len() <= u8::max_value() as usize);
     self.shape.len() as u8
   }
 
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
+    assert!(self.dtype != Dtype::_Top, "bug");
+    assert!(orig.dtype != Dtype::_Top, "bug");
     if &self.shape == &orig.shape {
       return ShapeCompat::Equal;
     }
@@ -625,53 +573,110 @@ impl CellFlag {
   }
 }
 
+#[derive(Clone, Default)]
+pub struct CellState {
+  pub mode: CellMode,
+  pub flag: CellFlag,
+  pub clk:  Clock,
+}
+
+pub struct CowCell {
+  pub optr: CellPtr,
+  pub pcel: CellPtr,
+  //pub cel_: Cell_,
+}
+
 pub struct PCell {
   // FIXME FIXME: to implement fusion w/ unique cells, simply change
   // the PCell's owning ptr; the original ptr then becomes dangling.
   pub optr: CellPtr,
   //pub optr: Cell<CellPtr>,
   pub ogty: CellType,
-  pub lay:  CellLayout,
-  pub mode: CellMode,
+  pub olay: CellLayout,
+  //pub cel_: Cell_,
+  /*pub mode: CellMode,
   pub flag: CellFlag,
-  pub clk:  Clock,
+  pub clk:  Clock,*/
   //pub flag: RefCell<CellFlag>,
   //pub clk:  Cell<Clock>,
-  pub primary:  InnerCell,
-  pub compute:  InnerCell,
+  // TODO TODO: replica set.
+  //pub primary:  InnerCell,
+  //pub compute:  InnerCell,
+  pub primary:  Locus,
+  pub replicas: Vec<(Locus, PMach, Option<Weak<dyn InnerCell_>>)>,
 }
 
 impl PCell {
-  pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
+  /*pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     PCell::new_pmach(ptr, ty, None, None)
   }
 
   pub fn new_pmach(ptr: CellPtr, ty: CellType, primary: Option<PMachSpec>, compute: Option<PMachSpec>) -> PCell {
-    //let ptr = Cell::new(ptr);
-    //let ogty = CellType{shape, dtype};
+  }*/
+  pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     let lay = CellLayout::new_packed(&ty);
     let mode = CellMode::default();
-      // FIXME FIXME
+    // FIXME FIXME
     let flag = CellFlag::default();
     let clk = Clock::default();
-    let primary = InnerCell::empty(CellSpec::Primary, primary.unwrap_or_else(|| ctx_cfg_get_default_primary()));
-    let compute = InnerCell::empty(CellSpec::Compute, compute.unwrap_or_else(|| ctx_cfg_get_default_compute()));
+    //let primary = InnerCell::empty(CellSpec::Primary, primary.unwrap_or_else(|| ctx_cfg_get_default_primary()));
+    //let compute = InnerCell::empty(CellSpec::Compute, compute.unwrap_or_else(|| ctx_cfg_get_default_compute()));
+    let primary = Locus::fastest();
+    let replicas = Vec::new();
     PCell{
       optr: ptr,
       //optr: Cell::new(ptr),
       ogty: ty,
-      lay,
-      mode,
-      flag,
-      clk,
+      olay: lay,
+      /*cel_: Cell_{
+              mode,
+              flag,
+              clk,
+            },*/
       //flag: RefCell::new(CellFlag::default()),
       //clk:  Cell::new(Clock::default()),
+      //primary,
+      //compute,
       primary,
-      compute,
+      replicas,
     }
+  }
+
+  /*pub fn push_empty_replica(&mut self, locus: Locus, pmach: PMach) {
+    for &(o_locus, o_pmach, _) in self.replicas.iter() {
+      if (o_locus, o_pmach) == (locus, pmach) {
+        panic!("bug");
+      }
+    }
+    self.replicas.push((locus, pmach, None));
+    self.replicas.sort_by(|&(l_locus, l_pmach, _), &(r_locus, r_pmach, _)| {
+      (r_locus, r_pmach).cmp(&(l_locus, l_pmach))
+    });
+  }*/
+
+  pub fn push_new_replica(&mut self, locus: Locus, pmach: PMach, cel: Option<Weak<dyn InnerCell_>>) {
+    for &(o_locus, o_pmach, _) in self.replicas.iter() {
+      if (o_locus, o_pmach) == (locus, pmach) {
+        panic!("bug");
+      }
+    }
+    self.replicas.push((locus, pmach, cel));
+    self.replicas.sort_by(|&(l_locus, l_pmach, _), &(r_locus, r_pmach, _)| {
+      (r_locus, r_pmach).cmp(&(l_locus, l_pmach))
+    });
+  }
+
+  pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, &mut Option<Weak<dyn InnerCell_>>)> {
+    for &mut (locus, pmach, ref mut cel) in self.replicas.iter_mut() {
+      if locus == q_locus {
+        return Some((pmach, cel));
+      }
+    }
+    None
   }
 }
 
+/*
 pub enum InnerCell {
   Uninit,
   Smp(Weak<SmpInnerCell>),
@@ -857,5 +862,21 @@ impl InnerCell {
 
   pub fn unsync(&mut self, clk: Clock) {
     unimplemented!();
+  }
+}
+*/
+
+pub trait InnerCell {
+  // TODO TODO
+}
+
+pub trait InnerCell_ {
+  // TODO TODO
+  fn as_any(&self) -> &dyn Any;
+}
+
+impl<C: InnerCell + Any> InnerCell_ for C {
+  fn as_any(&self) -> &dyn Any {
+    self
   }
 }

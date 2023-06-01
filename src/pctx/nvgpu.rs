@@ -4,6 +4,7 @@ use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::*;
+use crate::pctx::{Locus, PMach};
 
 use cacti_gpu_cu_ffi::*;
 use cacti_gpu_cu_ffi::types::{CU_CTX_SCHED_YIELD, cudaErrorCudartUnloading, cudaErrorNotReady};
@@ -81,7 +82,10 @@ pub struct GpuInnerCell {
   // TODO
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl InnerCell for GpuInnerCell {
+}
+
+/*#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct GpuInnerRef(u32);
 
@@ -93,13 +97,13 @@ impl GpuInnerRef {
   pub fn is_free(&self) -> bool {
     self.0 == 0
   }
-}
+}*/
 
 pub type NvGpuPCtx = GpuPCtx;
 
 pub struct GpuPCtx {
   // FIXME FIXME: work threads for copying.
-  pub iref_ctr:     Cell<u32>,
+  //pub iref_ctr:     Cell<u32>,
   //pub dev:          i32,
   pub pctx:         CudaPrimaryCtx,
   pub main:         CudartStream,
@@ -112,8 +116,11 @@ pub struct GpuPCtx {
 }
 
 impl GpuPCtx {
-  pub fn new(dev: i32) -> GpuPCtx {
+  pub fn new(dev: i32) -> Option<GpuPCtx> {
     println!("DEBUG: GpuPCtx::new: dev={}", dev);
+    if LIBCUDA._inner.is_none() {
+      return None;
+    }
     cudart_set_cur_dev(dev).unwrap();
     let pctx = CudaPrimaryCtx::retain(dev).unwrap();
     // FIXME: confirm that SCHED_YIELD is what we really want.
@@ -125,32 +132,44 @@ impl GpuPCtx {
     let copy_to = CudartStream::create().unwrap();
     let copy_from = CudartStream::create().unwrap();*/
     let mem_pool = GpuMemPool::new(dev);
-    GpuPCtx{
-      iref_ctr:     Cell::new(0),
+    let cel_map = RefCell::new(HashMap::default());
+    Some(GpuPCtx{
+      //iref_ctr:     Cell::new(0),
       //dev,
       pctx,
       main,
       copy_to,
       copy_from,
       mem_pool,
-      cel_map:      RefCell::new(HashMap::default()),
+      cel_map,
       // TODO
-    }
+    })
   }
 
   pub fn dev(&self) -> i32 {
     self.pctx.device()
   }
 
-  fn _fresh_inner_ref(&self) -> GpuInnerRef {
+  pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {
+    // FIXME: query device/driver capabilities.
+    lp.push((Locus::VMem, PMach::NvGpu));
+    pl.push((PMach::NvGpu, Locus::VMem));
+  }
+
+  pub fn fastest_locus(&self) -> Locus {
+    // FIXME: query device/driver capabilities.
+    Locus::VMem
+  }
+
+  /*fn _fresh_inner_ref(&self) -> GpuInnerRef {
     let next = self.iref_ctr.get() + 1;
     assert!(next > 0);
     assert!(next < u32::max_value());
     self.iref_ctr.set(next);
     GpuInnerRef(next)
-  }
+  }*/
 
-  pub fn find_dptr(&self, r: GpuInnerRef) -> Option<u64> {
+  pub fn find_dptr(&self, p: CellPtr) -> Option<u64> {
     unimplemented!();
   }
 
@@ -206,6 +225,7 @@ impl GpuPCtx {
       // FIXME
     });
     println!("DEBUG: GpuPCtx::alloc: p={:?} dptr=0x{:016x} sz={} off={}", ptr, dptr, req_sz, offset);
+    assert!(self.mem_pool.alloc_map.borrow_mut().insert(Region{off: offset, sz: req_sz}, ptr).is_none());
     let xcel = Rc::downgrade(&cel);
     self.cel_map.borrow_mut().insert(ptr, cel);
     xcel
@@ -227,10 +247,31 @@ impl GpuPCtx {
         // FIXME FIXME: remove from front.
         drop(cel);
         self.mem_pool.front_set.borrow_mut().remove(&ptr);
+        assert_eq!(self.mem_pool.alloc_map.borrow_mut().remove(&Region{off: cel.off, sz: cel.sz}), Some(ptr));
         self.cel_map.borrow_mut().remove(&ptr);
       }
     }
     Some(())
+  }
+
+  pub fn unify(&self, x: CellPtr, y: CellPtr) {
+    let mut cel_map = self.cel_map.borrow_mut();
+    match cel_map.remove(&x) {
+      None => panic!("bug"),
+      Some(mut cel) => {
+        assert_eq!(cel.ptr.get(), x);
+        cel.ptr.set(y);
+        let mut alloc_map = self.mem_pool.alloc_map.borrow_mut();
+        match alloc_map.remove(&Region{off: cel.off, sz: cel.sz}) {
+          None => panic!("bug"),
+          Some(ox) => {
+            assert_eq!(ox, x);
+          }
+        }
+        alloc_map.insert(Region{off: cel.off, sz: cel.sz}, y);
+        cel_map.insert(y, cel);
+      }
+    }
   }
 }
 
@@ -355,11 +396,15 @@ impl GpuMemPool {
 
   //pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<GpuInnerRef>)> {}
   pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<CellPtr>)> {
+    println!("DEBUG: GpuMemPool::lookup_dptr: query dptr=0x{:016x}", query_dptr);
+    println!("DEBUG: GpuMemPool::lookup_dptr:   res base=0x{:016x}", self.reserve_base);
     if query_dptr < self.reserve_base {
       return None;
     } else if query_dptr >= self.reserve_base + self.reserve_sz as u64 {
       return None;
     }
+    println!("DEBUG: GpuMemPool::lookup_dptr:   allocmap={:?}", &self.alloc_map);
+    println!("DEBUG: GpuMemPool::lookup_dptr:   free set={:?}", &self.free_set);
     let query_off = (query_dptr - self.reserve_base) as usize;
     let q = Region{off: query_off, sz: 0};
     if self.alloc_map.borrow().len() <= self.free_set.borrow().len() {
@@ -449,21 +494,16 @@ impl GpuMemPool {
 pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
-    match pctx.nvgpu.try_pre_alloc(sz) {
+    match pctx.nvgpu.as_ref().unwrap().try_pre_alloc(sz) {
       None => panic!("bug"),
       Some((offset, req_sz, next_offset)) => {
         // FIXME FIXME
         let p = ctx_fresh_tmp();
-        let x = pctx.nvgpu.alloc(p, offset, req_sz, next_offset);
+        let x = pctx.nvgpu.as_ref().unwrap().alloc(p, offset, req_sz, next_offset);
         let y = Weak::upgrade(&x).unwrap();
         unsafe {
           write(dptr, y.dptr);
         }
-        // FIXME FIXME
-        /*let ty = CellType::top();
-        let mut cel = PCell::new(p, ty.clone());
-        cel.compute = InnerCell::Gpu(x);
-        ctx.env.borrow_mut().insert(p, ty, cel);*/
       }
     }
     0
@@ -481,7 +521,7 @@ pub extern "C" fn tl_pctx_gpu_back_alloc_hook(dptr: *mut u64, sz: usize) -> i32 
   assert!(!dptr.is_null());
   TL_PCTX.with(|ctx| {
     // FIXME FIXME
-    let x = ctx.nvgpu.mem_pool.back_alloc(sz);
+    let x = ctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);
     unsafe {
       write(dptr, x);
     }

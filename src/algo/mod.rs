@@ -1,3 +1,5 @@
+use std::cmp::{Ordering};
+
 pub mod fp;
 //pub mod int;
 pub mod sync;
@@ -267,13 +269,13 @@ impl ExtentVecList {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Region {
   pub off:  usize,
   pub sz:   usize,
 }
 
-/*impl PartialOrd for Region {
+impl PartialOrd for Region {
   fn partial_cmp(&self, rhs: &Region) -> Option<Ordering> {
     Some(self.cmp(rhs))
   }
@@ -283,11 +285,11 @@ impl Ord for Region {
   fn cmp(&self, rhs: &Region) -> Ordering {
     let ret = self.off.cmp(&rhs.off);
     if ret == Ordering::Equal {
-      assert_eq!(self.sz, rhs.sz);
+      return self.sz.cmp(&rhs.sz);
     }
     ret
   }
-}*/
+}
 
 impl Region {
   pub fn merge(&self, rhs: &Region) -> Region {

@@ -124,8 +124,8 @@ pub struct Spine {
   pub ctlp: u32,
   pub hltp: u32,
   pub curp: u32,
-  pub log:  Vec<SpineEntry>,
   pub env:  SpineEnv,
+  pub log:  Vec<SpineEntry>,
 }
 
 impl Default for Spine {
@@ -135,27 +135,29 @@ impl Default for Spine {
       ctlp: 0,
       hltp: 0,
       curp: 0,
-      log:  Vec::new(),
       env:  SpineEnv::default(),
+      log:  Vec::new(),
     }
   }
 }
 
 impl Spine {
   pub fn _reset(&mut self) {
+    println!("DEBUG: Spine::_reset: ctr={:?} ctlp={} hltp={} curp={}",
+        self.ctr, self.ctlp, self.hltp, self.curp);
     self.ctr = self.ctr.advance();
     self.ctlp = 0;
     self.hltp = 0;
     self.curp = 0;
-    self.log.clear();
     self.env.reset();
+    self.log.clear();
   }
 
   pub fn opaque(&mut self, x: CellPtr, og: CellPtr) {
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::Opaque(x, og));
     self.env.cache.insert(x, sp);
+    self.log.push(SpineEntry::Opaque(x, og));
   }
 
   pub fn cache_aff(&mut self, x: CellPtr) {
@@ -163,10 +165,10 @@ impl Spine {
     assert!(!self.env.seal.contains_key(&x));
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::CacheAff(x));
     self.env.intro.insert(x, sp);
     self.env.seal.insert(x, sp);
     self.env.aff.insert(x, sp);
+    self.log.push(SpineEntry::CacheAff(x));
   }
 
   pub fn intro_aff(&mut self, x: CellPtr) {
@@ -174,18 +176,18 @@ impl Spine {
     assert!(!self.env.seal.contains_key(&x));
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::IntroAff(x));
     self.env.intro.insert(x, sp);
     self.env.aff.insert(x, sp);
+    self.log.push(SpineEntry::IntroAff(x));
   }
 
   pub fn init_cache_mux(&mut self, x: CellPtr) {
     assert!(!self.env.seal.contains_key(&x));
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::ICacheMux(x));
     self.env.intro.insert(x, sp);
     self.env.mux.insert(x, sp);
+    self.log.push(SpineEntry::ICacheMux(x));
   }
 
   pub fn init_mux(&mut self, x: CellPtr) {
@@ -194,9 +196,9 @@ impl Spine {
     /*
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::InitMux(x));
     self.env.intro.insert(x, sp);
     self.env.mux.insert(x, sp);
+    self.log.push(SpineEntry::InitMux(x));
     */
   }
 
@@ -206,8 +208,8 @@ impl Spine {
     assert!(self.env.mux.contains_key(&x));
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::SealMux(x));
     self.env.seal.insert(x, sp);
+    self.log.push(SpineEntry::SealMux(x));
   }
 
   pub fn unseal_mux(&mut self, x: CellPtr) {
@@ -216,15 +218,14 @@ impl Spine {
     assert!(self.env.mux.contains_key(&x));
     //let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::UnsealMux(x));
     self.env.seal.remove(&x);
+    self.log.push(SpineEntry::UnsealMux(x));
   }
 
   pub fn apply_aff(&mut self, th: ThunkPtr, x: CellPtr) {
     assert!(self.env.aff.contains_key(&x));
     let sp = self.curp;
     self.curp += 1;
-    self.log.push(SpineEntry::ApplyAff(th, x));
     match self.env.apply.get_mut(&x) {
       None => {
         let mut thlist = Vec::new();
@@ -236,6 +237,7 @@ impl Spine {
       }
     }
     self.env.seal.insert(x, sp);
+    self.log.push(SpineEntry::ApplyAff(th, x));
   }
 
   pub fn apply_mux(&mut self, th: ThunkPtr, x: CellPtr) {
@@ -322,9 +324,9 @@ impl Spine {
       &SpineEntry::Opaque(_x, _og) => {
       }
       &SpineEntry::CacheAff(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
+          Some(mut e) => {
             /*match e.cel.mode {
               CellMode::Top => {
                 e.cel.mode = CellMode::Aff;
@@ -334,21 +336,21 @@ impl Spine {
             }*/
             // FIXME FIXME
             //unimplemented!();
-            let flag = !e.cel.flag.set_cache();
-            let mode = match e.cel.mode.set_aff() {
+            let flag = !e.state().flag.set_cache();
+            let mode = match e.state().mode.set_aff() {
               Err(_) => panic!("bug"),
               Ok(prev) => !prev
             };
             assert!(flag);
             assert!(mode);
-            assert!(self.ctr.succeeds(e.cel.clk));
+            assert!(self.ctr.succeeds(e.state().clk));
           }
         }
       }
       &SpineEntry::ICacheMux(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
+          Some(mut e) => {
             /*match e.cel.mode {
               CellMode::Top => {
                 e.cel.mode = CellMode::Mux;
@@ -358,8 +360,8 @@ impl Spine {
             }*/
             // FIXME FIXME
             //unimplemented!();
-            let flag = !e.cel.flag.set_cache();
-            let mode = match e.cel.mode.set_mux() {
+            let flag = !e.state().flag.set_cache();
+            let mode = match e.state().mode.set_mux() {
               Err(_) => panic!("bug"),
               Ok(prev) => !prev
             };
@@ -406,49 +408,50 @@ impl Spine {
       }
       */
       &SpineEntry::IntroAff(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
-            match e.cel.mode {
-              CellMode::Top => {
-                e.cel.mode = CellMode::Aff;
+          Some(mut e) => {
+            match e.state().mode {
+              CellMode::Top => {}
+              CellMode::Aff => {
+                // FIXME FIXME: should warn here?
               }
-              CellMode::Aff => {}
               _ => panic!("bug")
             }
-            if !e.cel.clk.happens_before(self.ctr).unwrap() {
+            e.state().mode = CellMode::Aff;
+            if !e.state().clk.happens_before(self.ctr).unwrap() {
               panic!("bug");
             }
-            assert!(!e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
+            assert!(!e.state().flag.intro());
+            assert!(!e.state().flag.seal());
             // FIXME
-            e.cel.clk = self.ctr.into();
-            e.cel.flag.reset();
-            e.cel.flag.set_intro();
+            e.state().clk = self.ctr.into();
+            e.state().flag.reset();
+            e.state().flag.set_intro();
           }
         }
       }
       &SpineEntry::InitMux(ith, x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(mut e) => {
-            match e.cel.mode {
+            match e.state().mode {
               CellMode::Top => {
-                e.cel.mode = CellMode::Mux;
+                e.state().mode = CellMode::Mux;
               }
               CellMode::Mux => {}
               _ => panic!("bug")
             }
-            if !e.cel.clk.happens_before(self.ctr).unwrap() {
+            if !e.state().clk.happens_before(self.ctr).unwrap() {
               panic!("bug");
             }
-            assert!(!e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
+            assert!(!e.state().flag.intro());
+            assert!(!e.state().flag.seal());
             // FIXME
-            e.cel.clk = self.ctr.into();
+            e.state().clk = self.ctr.into();
             // FIXME FIXME: set ithunk.
             //match (env.cache.contains(&x), e.ithunk) {}
-            match (e.cel.flag.cache(), e.ithunk) {
+            match (e.state().flag.cache(), e.ithunk) {
               (true, None) => {}
               (false, Some(thunk)) => {
                 let te = match thunkenv.thunktab.get(&thunk) {
@@ -470,49 +473,46 @@ impl Spine {
               }
               _ => panic!("bug")
             }
-            e.cel.flag.reset();
-            e.cel.flag.set_intro();
+            e.state().flag.reset();
+            e.state().flag.set_intro();
           }
         }
       }
       &SpineEntry::SealMux(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
-            match e.cel.mode {
+          Some(mut e) => {
+            match e.state().mode {
               CellMode::Top => {
-                e.cel.mode = CellMode::Mux;
+                e.state().mode = CellMode::Mux;
               }
               CellMode::Mux => {}
               _ => panic!("bug")
             }
-            assert_eq!(e.cel.clk.ctr(), self.ctr);
-            assert!(e.cel.clk.tup > 0);
-            assert!(e.cel.clk.tup != u16::max_value());
-            assert!(e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
-            e.cel.flag.reset();
-            e.cel.flag.set_seal();
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert!(e.state().clk.tup > 0);
+            assert!(e.state().clk.tup != u16::max_value());
+            assert!(e.state().flag.intro());
+            assert!(!e.state().flag.seal());
+            e.state().flag.reset();
+            e.state().flag.set_seal();
           }
         }
       }
       &SpineEntry::ApplyAff(th, x) => {
-        let tup = match env.lookup_mut(x) {
+        let tup = match env.lookup_mut_ref(x) {
           None => panic!("bug"),
           Some(mut e) => {
-            match e.cel.mode {
-              CellMode::Top => {
-                e.cel.mode = CellMode::Aff;
-              }
+            match e.state().mode {
               CellMode::Aff => {}
               _ => panic!("bug")
             }
-            assert_eq!(e.cel.clk.ctr(), self.ctr);
-            assert_eq!(e.cel.clk.tup, 0);
-            assert!(e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert_eq!(e.state().clk.tup, 0);
+            assert!(e.state().flag.intro());
+            assert!(!e.state().flag.seal());
             // FIXME
-            let tup = e.cel.clk.tup;
+            let tup = e.state().clk.tup;
             if (tup as usize) != e.thunk.len() {
               println!("DEBUG: Spine::_step: tup={} e.thunk.len={}", tup, e.thunk.len());
               self._debug_dump();
@@ -529,7 +529,7 @@ impl Spine {
             te.thunk.apply(/*env,*/ &te.args, x, &e.ty, &mut e.cel);*/
           }
         };
-        let mut cel = match env.lookup_mut_ref(x) {
+        /*let mut cel = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(mut e) => {
             let te = match thunkenv.thunktab.get(&e.thunk[tup as usize]) {
@@ -544,103 +544,124 @@ impl Spine {
             cel
           }
         };
-        match env.lookup_mut_ref(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(mut e) => {
             //e.cel.flag.set_seal();
             cel.flag.set_seal();
             e.ref_.swap_in(cel);
           }
+        }*/
+        {
+          let te = match thunkenv.thunktab.get(&th) {
+            None => panic!("bug"),
+            Some(thunk) => thunk
+          };
+          te.thunk.apply(ctr, env, &te.args, x);
+        }
+        match env.lookup_ref(x) {
+          None => panic!("bug"),
+          Some(mut e) => {
+            e.state().flag.set_seal();
+          }
         }
       }
       &SpineEntry::ApplyMux(th, x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(mut e) => {
-            match e.cel.mode {
+            match e.state().mode {
               CellMode::Top => {
-                e.cel.mode = CellMode::Mux;
+                e.state().mode = CellMode::Mux;
               }
               CellMode::Mux => {}
               _ => panic!("bug")
             }
-            assert_eq!(e.cel.clk.ctr(), self.ctr);
-            /*assert!(e.cel.clk.tup >= 0);*/
-            assert!(e.cel.clk.tup != u16::max_value());
-            assert!(e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            /*assert!(e.state().clk.tup >= 0);*/
+            assert!(e.state().clk.tup != u16::max_value());
+            assert!(e.state().flag.intro());
+            assert!(!e.state().flag.seal());
             // FIXME
-            let tup = e.cel.clk.tup;
+            let tup = e.state().clk.tup;
             assert!((tup as usize) < e.thunk.len());
             let te = match thunkenv.thunktab.get(&e.thunk[tup as usize]) {
               None => panic!("bug"),
               Some(thunk) => thunk
             };
-            e.cel.clk = e.cel.clk.update();
-            /*match &e.cel.compute {
+            e.state().clk = e.state().clk.update();
+            /*match &e.state().compute {
               &InnerCell::Uninit => panic!("bug"),
               &InnerCell::Primary => {
-                e.cel.primary.sync_thunk(x, &e.ty, &te.args, &te.thunk, e.cel.clk);
+                e.state().primary.sync_thunk(x, &e.ty, &te.args, &te.thunk, e.state().clk);
               }
               _ => {
-                e.cel.compute.sync_thunk(x, &e.ty, &te.args, &te.thunk, e.cel.clk);
+                e.state().compute.sync_thunk(x, &e.ty, &te.args, &te.thunk, e.state().clk);
               }
             }*/
             // FIXME FIXME: the above api is not very ergonomic.
             unimplemented!();
-            //te.thunk.apply(/*env,*/ &te.args, x, &e.ty, &mut e.cel);
-            //e.cel.flag.set_seal();
+            //te.thunk.apply(/*env,*/ &te.args, x, &e.ty, &mut e.state());
+            //e.state().flag.set_seal();
           }
         }
       }
       &SpineEntry::Eval(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
-            assert_eq!(e.cel.clk.ctr(), self.ctr);
-            assert!(e.cel.flag.intro());
-            assert!(e.cel.flag.seal());
-            match &e.cel.compute {
+          Some(mut e) => {
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert!(e.state().flag.intro());
+            assert!(e.state().flag.seal());
+            // FIXME FIXME
+            unimplemented!()
+            /*
+            match &e.state().compute {
               &InnerCell::Uninit => panic!("bug"),
               &InnerCell::Primary => {
-                assert!(e.cel.primary.synced(&e.ty, e.cel.clk));
+                assert!(e.state().primary.synced(&e.ty, e.state().clk));
               }
               _ => {
-                match &e.cel.primary {
+                match &e.state().primary {
                   &InnerCell::Uninit => {}
                   &InnerCell::Primary => panic!("bug"),
                   _ => {
-                    e.cel.primary.sync_cell(x, &e.ty, &e.cel.compute, e.cel.clk);
+                    e.state().primary.sync_cell(x, &e.ty, &e.state().compute, e.state().clk);
                   }
                 }
               }
             }
+            */
           }
         }
       }
       &SpineEntry::Unsync(x) => {
-        match env.lookup_mut(x) {
+        match env.lookup_ref(x) {
           None => panic!("bug"),
-          Some(e) => {
-            assert_eq!(e.cel.clk.ctr(), self.ctr);
-            assert!(e.cel.flag.intro());
-            assert!(e.cel.flag.seal());
-            match &e.cel.compute {
+          Some(mut e) => {
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert!(e.state().flag.intro());
+            assert!(e.state().flag.seal());
+            // FIXME FIXME
+            unimplemented!()
+            /*
+            match &e.state().compute {
               &InnerCell::Uninit => panic!("bug"),
               &InnerCell::Primary => {
-                assert!(e.cel.primary.synced(&e.ty, e.cel.clk));
+                assert!(e.state().primary.synced(&e.ty, e.state().clk));
               }
               _ => {
-                match &e.cel.primary {
+                match &e.state().primary {
                   &InnerCell::Uninit => {}
                   &InnerCell::Primary => panic!("bug"),
                   _ => {
-                    e.cel.primary.sync_cell(x, &e.ty, &e.cel.compute, e.cel.clk);
+                    e.state().primary.sync_cell(x, &e.ty, &e.state().compute, e.state().clk);
                   }
                 }
-                e.cel.compute.unsync(e.cel.clk);
+                e.state().compute.unsync(e.state().clk);
               }
             }
+            */
           }
         }
       }

@@ -23,9 +23,9 @@ fn main() {
   let mut opt = AdamW::new(Llama::default_adamw());
   opt.push_param(llm.param());
 
-  //let x = StableCell::new_array([ubat_sz, seq_cap], Dtype::UInt16);
-  let x = StableCell::new_array([ubat_sz, seq_cap], u16::dtype());
-  let y = StableCell::new_array([ubat_sz, seq_cap], "u16");
+  //let x = StableCell::array([ubat_sz, seq_cap], Dtype::UInt16);
+  let x = StableCell::array([ubat_sz, seq_cap], u16::dtype());
+  let y = StableCell::array([ubat_sz, seq_cap], "u16");
 
   // TODO
 

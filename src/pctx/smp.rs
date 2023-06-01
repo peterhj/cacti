@@ -1,3 +1,4 @@
+use super::*;
 use crate::clock::*;
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::{GpuOuterCell};
@@ -27,25 +28,31 @@ impl SmpInnerCell {
   }
 }
 
-pub struct SmpCtx {
+pub struct SmpPCtx {
 }
 
-impl SmpCtx {
-  pub fn new() -> SmpCtx {
+impl SmpPCtx {
+  pub fn new() -> SmpPCtx {
     let n = unsafe {
       (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())()
     };
-    println!("DEBUG: SmpCtx::new: blas num threads={}", n);
-    let n = 4;
+    println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
+    // FIXME FIXME: debugging.
+    let n = 1;
     unsafe {
       (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n)
     };
-    println!("DEBUG: SmpCtx::new: blas set num threads={}", n);
+    println!("DEBUG: SmpPCtx::new: blas set num threads={}", n);
     let n = unsafe {
       (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())()
     };
-    println!("DEBUG: SmpCtx::new: blas num threads={}", n);
-    SmpCtx{
+    println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
+    SmpPCtx{
     }
+  }
+
+  pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {
+    lp.push((Locus::Mem, PMach::Smp));
+    pl.push((PMach::Smp, Locus::Mem));
   }
 }

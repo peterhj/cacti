@@ -1,12 +1,12 @@
 use crate::algo::fp::*;
 use crate::cell::*;
-use crate::cell::smp::*;
 use crate::clock::*;
-use crate::ctx::{CtxCtr, CtxEnv};
+use crate::ctx::{CtxCtr, CtxEnv, Cell_};
 use crate::op::*;
-use crate::pctx::{TL_PCTX};
+use crate::pctx::{TL_PCTX, Locus, PMach};
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::*;
+use crate::pctx::smp::*;
 use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::{LIBCUDA, LIBCUDART, LIBNVRTC, TL_LIBNVRTC_BUILTINS_BARRIER};
 use cacti_gpu_cu_ffi::{cuda_memcpy_d2h_async, CudartStream, cudart_set_cur_dev};
@@ -148,8 +148,9 @@ pub trait ThunkSpec {
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
   fn mode(&self) -> CellMode { CellMode::Aff }
-  fn gen_impl_smp(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>> { None }
-  fn gen_impl_gpu(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>> { None }
+  /*fn gen_impl_smp(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> { None }
+  fn gen_impl_gpu(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> { None }*/
+  fn gen_impl_(&self, _spectype: Vec<Dim>, _pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> { None }
   // TODO: gen adj.
 }
 
@@ -161,8 +162,9 @@ pub trait ThunkSpec_ {
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
   fn mode(&self) -> CellMode;
-  fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>>;
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>>;
+  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>>;
+  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>>;*/
+  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>>;
   // TODO: gen adj.
 }
 
@@ -198,12 +200,16 @@ impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
     ThunkSpec::mode(self)
   }
 
-  fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>> {
+  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
     ThunkSpec::gen_impl_smp(self, spectype)
   }
 
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>> {
+  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
     ThunkSpec::gen_impl_gpu(self, spectype)
+  }*/
+
+  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    ThunkSpec::gen_impl_(self, spectype, pmach)
   }
 }
 
@@ -211,30 +217,33 @@ impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
 //pub type ThunkGpuImpl_ = ThunkImpl_<Cel=GpuInnerCell>;
 
 pub trait ThunkImpl {
-  type Cel;
+  //type Cel;
 
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _cel: &mut Weak<Self::Cel>) -> ThunkRet {
+  //fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _cel: &mut Weak<Self::Cel>) -> ThunkRet {}
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr, /*_cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     ThunkRet::NotImpl
   }
 }
 
 pub trait ThunkImpl_ {
-  type Cel;
+  //type Cel;
 
   fn as_any(&self) -> &dyn Any;
   //fn thunk_eq(&self, other: &dyn ThunkImpl_) -> Option<bool>;
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet;
+  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet;
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
-  type Cel = <T as ThunkImpl>::Cel;
+  //type Cel = <T as ThunkImpl>::Cel;
 
   fn as_any(&self) -> &dyn Any {
     self
   }
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet {
-    ThunkImpl::apply(self, ctr, env, spec_, args, cel)
+  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet {}
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+    ThunkImpl::apply(self, ctr, env, spec_, args, out, /*cel*/)
   }
 }
 
@@ -264,7 +273,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     FutharkThunkSpec::mode(self)
   }
 
-  fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>> {
+  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
     let (arityin, arityout) = self.arity();
     let code = self.gen_futhark();
     Some(Rc::new(FutharkThunkImpl::<MulticoreBackend>{
@@ -276,7 +285,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     }))
   }
 
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>> {
+  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
     let (arityin, arityout) = self.arity();
     let code = self.gen_futhark();
     Some(Rc::new(FutharkThunkImpl::<CudaBackend>{
@@ -286,6 +295,34 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
       code,
       object: RefCell::new(None),
     }))
+  }*/
+
+  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    let (arityin, arityout) = self.arity();
+    let code = self.gen_futhark();
+    Some(match pmach {
+      PMach::Smp => {
+        Rc::new(FutharkThunkImpl::<MulticoreBackend>{
+          arityin,
+          arityout,
+          spectype,
+          code,
+          object: RefCell::new(None),
+          consts: RefCell::new(Vec::new()),
+        })
+      }
+      PMach::NvGpu => {
+        Rc::new(FutharkThunkImpl::<CudaBackend>{
+          arityin,
+          arityout,
+          spectype,
+          code,
+          object: RefCell::new(None),
+          consts: RefCell::new(Vec::new()),
+        })
+      }
+      _ => unimplemented!()
+    })
   }
 }
 
@@ -345,6 +382,7 @@ pub struct FutharkThunkCode {
 pub trait FutharkThunkImpl_<B: FutBackend> {
   fn _dropck(&mut self);
   unsafe fn _setup_object(obj: &mut FutObject<B>);
+  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str) -> Option<(FutObject<B>, Vec<StableCell>)>;
 }
 
 pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
@@ -357,6 +395,7 @@ pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThu
   pub spectype: Vec<Dim>,
   pub code:     FutharkThunkCode,
   pub object:   RefCell<Option<FutObject<B>>>,
+  pub consts:   RefCell<Vec<StableCell>>,
 }
 
 impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> {
@@ -364,6 +403,10 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
   }
 
   unsafe fn _setup_object(_obj: &mut FutObject<MulticoreBackend>) {
+  }
+
+  fn _build_object(_ctr: &CtxCtr, _env: &mut CtxEnv, _config: &FutConfig, _source: &str) -> Option<(FutObject<MulticoreBackend>, Vec<StableCell>)> {
+    None
   }
 }
 
@@ -442,11 +485,69 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     // FIXME FIXME
     //unimplemented!();
   }
+
+  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str) -> Option<(FutObject<CudaBackend>, Vec<StableCell>)> {
+    assert!(TL_LIBNVRTC_BUILTINS_BARRIER.with(|&bar| bar));
+    // FIXME FIXME: get the correct dev from pctx.
+    cudart_set_cur_dev(0).unwrap();
+    match config.cached_or_new_object::<CudaBackend>(source.as_bytes()) {
+      Err(e) => {
+        println!("WARNING: FutharkThunkImpl::<CudaBackend>::_build_object: build error: {:?}", e);
+        None
+      }
+      Ok(mut obj) => {
+        // FIXME FIXME: object ctx may create constants that need to be tracked.
+        let mut consts = Vec::new();
+        env.reset_tmp();
+        ctr.reset_tmp();
+        unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
+        let x0 = ctr.peek_tmp();
+        /*let tmp_ct = -x0.to_unchecked();
+        if tmp_ct > 0 {
+          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: alloc tmp: {}", tmp_ct);
+        }*/
+        for x in (x0.to_unchecked() .. 0).rev() {
+          let x = CellPtr::from_unchecked(x);
+          // FIXME FIXME
+          TL_PCTX.with(|pctx| {
+            match pctx.nvgpu.as_ref().unwrap().cel_map.borrow().get(&x) {
+              None => panic!("bug"),
+              Some(cel) => {
+                let ty = CellType::top();
+                let cel = Rc::downgrade(cel);
+                let mut pcel = PCell::new(x, ty.clone());
+                // FIXME FIXME
+                /*pcel.compute = InnerCell::Gpu(cel);*/
+                pcel.push_new_replica(Locus::VMem, PMach::NvGpu, Some(cel));
+                env.insert_phy(x, ty, pcel);
+              }
+            }
+          });
+          let y = env.unify(ctr, x, None);
+          TL_PCTX.with(|pctx| {
+            pctx.nvgpu.as_ref().unwrap().unify(x, y);
+          });
+          consts.push(StableCell::retain(env, y));
+          // FIXME FIXME
+        }
+        if consts.len() > 0 {
+          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: consts: {:?}", consts);
+        }
+        Some((obj, consts))
+      }
+    }
+  }
 }
 
 impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   fn drop(&mut self) {
     *self.object.borrow_mut() = None;
+    /*// FIXME FIXME: in case of custom dropck that takes &mut CtxEnv.
+    let mut consts = Vec::new();
+    swap(&mut *self.consts.borrow_mut(), &mut consts);
+    for x in consts.into_iter() {
+      x.release(_);
+    }*/
     self._dropck();
   }
 }
@@ -520,49 +621,18 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         config.include = prefix.join("include");
       }
     });
-    assert!(TL_LIBNVRTC_BUILTINS_BARRIER.with(|&bar| bar));
-    // FIXME FIXME: get the correct dev from pctx.
-    cudart_set_cur_dev(0).unwrap();
-    match config.cached_or_new_object::<B>(s.as_bytes()) {
-      Err(e) => println!("WARNING: FutharkThunkImpl::_try_build_object: {} build error: {:?}", B::cmd_arg(), e),
-      Ok(mut obj) => {
-        // FIXME FIXME: object ctx may create constants that need to be tracked.
-        env.reset_tmp();
-        ctr.reset_tmp();
-        unsafe { FutharkThunkImpl::<B>::_setup_object(&mut obj); }
-        *self.object.borrow_mut() = Some(obj);
-        let x0 = ctr.peek_tmp();
-        let tmp_ct = -x0.to_unchecked();
-        if tmp_ct > 0 {
-          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: alloc tmp: {}", tmp_ct);
-        }
-        for x in (x0.to_unchecked() .. 0).rev() {
-          let x = CellPtr::from_unchecked(x);
-          // FIXME FIXME
-          TL_PCTX.with(|pctx| {
-            match pctx.nvgpu.cel_map.borrow().get(&x) {
-              None => panic!("bug"),
-              Some(cel) => {
-                let ty = CellType::top();
-                let cel = Rc::downgrade(cel);
-                let mut pcel = PCell::new(x, ty.clone());
-                pcel.compute = InnerCell::Gpu(cel);
-                env.insert(x, ty, pcel);
-              }
-            }
-          });
-          let y = env.unify(ctr, x, None);
-          // FIXME FIXME
-        }
-      }
+    if let Some((obj, consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, &s) {
+      *self.object.borrow_mut() = Some(obj);
+      *self.consts.borrow_mut() = consts;
     }
   }
 }
 
 impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
-  type Cel = SmpInnerCell;
+  //type Cel = SmpInnerCell;
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {
+  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     // FIXME
     if self.object.borrow().is_none() {
       self._try_build_object(ctr, env);
@@ -575,9 +645,9 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
 }
 
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
-  type Cel = GpuInnerCell;
+  //type Cel = GpuInnerCell;
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<GpuInnerCell>) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     if self.object.borrow().is_none() {
       self._try_build_object(ctr, env);
     }
@@ -588,7 +658,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let mut arg_ty_ = Vec::with_capacity(self.arityin as usize);
     let mut arg_arr = Vec::with_capacity(self.arityin as usize);
     for k in 0 .. self.arityin as usize {
-      let ty_ = env.lookup(args[k]).unwrap().ty.clone();
+      let ty_ = env.lookup_ref(args[k]).unwrap().ty.clone();
       assert_eq!(self.spectype[k], ty_.to_dim());
       let a = match self.spectype[k].ndim {
         0 | 1 => FutArrayDev::alloc_1d(),
@@ -631,6 +701,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime error");
     }
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out={:?}", out);
     // FIXME: at this point, the remaining memblocks are the outputs.
     // but, if any of the inputs were clobbered, then we have to unset those.
     // so, do some kind of unification here.
@@ -646,10 +717,41 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         assert_eq!(&out_ty_[0].shape, out_arr[0].shape().unwrap());
       }
     }
-    // TODO TODO
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?}", out_arr[0].refcount());
     let (mem_dptr, mem_size) = out_arr[0].parts().unwrap();
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: dptr=0x{:016x} size={}", mem_dptr, mem_size);
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      match gpu.mem_pool.lookup_dptr(mem_dptr) {
+        None => {
+        }
+        Some((region, p)) => {
+          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: region={:?} p={:?}", region, p);
+          if let Some(p) = p {
+            for k in self.consts.borrow().iter() {
+              if k.as_ref() == &p {
+                println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   is const");
+                match env.lookup_mut_ref(out) {
+                  None => panic!("bug"),
+                  Some(e) => {
+                    match e.cel_ {
+                      &mut Cell_::Top(ref state, optr) => {
+                        let state = RefCell::new(state.borrow().clone());
+                        *e.cel_ = Cell_::Cow(state, CowCell{optr, pcel: p});
+                        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: cow {:?} -> {:?}", out, p);
+                      }
+                      // FIXME FIXME
+                      _ => unimplemented!()
+                    }
+                  }
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    });
+    // TODO TODO
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
     unsafe {
       let mut dst_buf = Vec::with_capacity(mem_size);
       dst_buf.set_len(mem_size);
@@ -674,8 +776,12 @@ pub struct PThunk {
   pub spec_:    Rc<dyn ThunkSpec_>,
   //pub sub:      Vec<ThunkArg>,
   //pub sub:      RefCell<Vec<ThunkArg>>,
-  pub impl_smp: RefCell<Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>>>,
-  pub impl_gpu: RefCell<Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>>>,
+  // TODO TODO
+  //pub impl_smp: RefCell<Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>>>,
+  //pub impl_gpu: RefCell<Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>>>,
+  pub impl_smp: RefCell<Option<Rc<dyn ThunkImpl_>>>,
+  pub impl_gpu: RefCell<Option<Rc<dyn ThunkImpl_>>>,
+  pub impl_:    RefCell<Vec<(PMach, Rc<dyn ThunkImpl_>)>>,
 }
 
 impl PThunk {
@@ -696,10 +802,31 @@ impl PThunk {
       //sub,
       impl_smp: RefCell::new(None),
       impl_gpu: RefCell::new(None),
+      impl_: RefCell::new(Vec::new()),
     }
   }
 
-  pub fn apply_smp(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {
+  pub fn push_new_impl_(&self, pmach: PMach, thunk: Rc<dyn ThunkImpl_>) {
+    for &(o_pmach, _) in self.impl_.borrow().iter() {
+      if o_pmach == pmach {
+        panic!("bug");
+      }
+    }
+    let mut impl_ = self.impl_.borrow_mut();
+    impl_.push((pmach, thunk));
+    impl_.sort_by(|&(l_pmach, _), &(r_pmach, _)| r_pmach.cmp(&l_pmach));
+  }
+
+  pub fn lookup_impl_(&self, q_pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    for &(pmach, ref thimpl_) in self.impl_.borrow().iter() {
+      if pmach == q_pmach {
+        return Some(thimpl_.clone());
+      }
+    }
+    None
+  }
+
+  /*pub fn apply_smp(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {
     // FIXME FIXME
     //unimplemented!();
     //self.spec_.apply_smp(cel)
@@ -711,9 +838,9 @@ impl PThunk {
       None => panic!("bug"),
       Some(th) => th.apply(ctr, env, &*self.spec_, args, cel)
     }
-  }
+  }*/
 
-  pub fn apply_gpu(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Weak<GpuInnerCell>) -> ThunkRet {
+  /*pub fn apply_gpu(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Option<Weak<dyn InnerCell_>>) -> ThunkRet {
     // FIXME FIXME
     //unimplemented!();
     //self.spec_.apply_gpu(cel)
@@ -725,13 +852,13 @@ impl PThunk {
       None => panic!("bug"),
       Some(th) => th.apply(ctr, env, &*self.spec_, args, cel)
     }
-  }
+  }*/
 
   // FIXME FIXME: think about this api.
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], out: CellPtr, out_ty: &CellType, out_cel: &mut PCell) {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], out: CellPtr, /*out_ty: &CellType, out_cel: &mut PCell*/) -> ThunkRet {
   //pub fn apply(&self, args: &[(CellPtr, &CellType, &PCell)], out: CellPtr, out_ty: &CellType, out_cel: &mut PCell) {}
     // FIXME FIXME
-    match &mut out_cel.compute {
+    /*match &mut out_cel.compute {
       &mut InnerCell::Primary => {
         match &mut out_cel.primary {
           &mut InnerCell::Gpu(ref mut cel) => {
@@ -746,6 +873,62 @@ impl PThunk {
         self.apply_gpu(ctr, env, args, cel);
       }
       _ => unimplemented!()
+    }*/
+    /*match out_cel.lookup_replica(out_cel.primary) {
+      None => {
+        // FIXME FIXME
+        out_cel.push_new_replica(out_cel.primary, PMach::NvGpu, None);
+      }
+      _ => {}
+    }
+    match out_cel.lookup_replica(out_cel.primary) {
+      None => panic!("bug"),
+      Some((PMach::NvGpu, cel)) => {
+        /*self.apply_gpu(ctr, env, args, cel)*/
+        match self.lookup_impl_(PMach::NvGpu) {
+          None => {
+            match self.spec_.gen_impl_(self.spectype.clone(), PMach::NvGpu) {
+              None => {
+                // FIXME: fail stop here.
+              }
+              Some(thimpl_) => {
+                self.push_new_impl_(PMach::NvGpu, thimpl_);
+              }
+            }
+          }
+          _ => {}
+        }
+        match self.lookup_impl_(PMach::NvGpu) {
+          None => panic!("bug"),
+          Some(thimpl_) => {
+            thimpl_.apply(ctr, env, &*self.spec_, args, out, /*out_ty, cel*/)
+          }
+        }
+      }
+      Some(_) => {
+        // FIXME FIXME
+        unimplemented!();
+      }
+    }*/
+    // FIXME FIXME
+    match self.lookup_impl_(PMach::NvGpu) {
+      None => {
+        match self.spec_.gen_impl_(self.spectype.clone(), PMach::NvGpu) {
+          None => {
+            // FIXME: fail stop here.
+          }
+          Some(thimpl_) => {
+            self.push_new_impl_(PMach::NvGpu, thimpl_);
+          }
+        }
+      }
+      _ => {}
+    }
+    match self.lookup_impl_(PMach::NvGpu) {
+      None => panic!("bug"),
+      Some(thimpl_) => {
+        thimpl_.apply(ctr, env, &*self.spec_, args, out, /*out_ty, cel*/)
+      }
     }
   }
 }
