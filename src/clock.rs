@@ -1,3 +1,4 @@
+use std::cmp::{Ordering};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -133,5 +134,10 @@ impl Clock {
       return Some(false);
     }
     None
+  }
+
+  pub fn partial_cmp<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
+    // FIXME FIXME
+    unimplemented!();
   }
 }

@@ -2,11 +2,12 @@ use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{CtxCtr, CtxEnv, Cell_};
-use crate::op::*;
+//use crate::op::*;
 use crate::pctx::{TL_PCTX, Locus, PMach};
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::*;
-use crate::pctx::smp::*;
+//use crate::pctx::smp::*;
+//use crate::spine::{Spine};
 use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::{LIBCUDA, LIBCUDART, LIBNVRTC, TL_LIBNVRTC_BUILTINS_BARRIER};
 use cacti_gpu_cu_ffi::{cuda_memcpy_d2h_async, CudartStream, cudart_set_cur_dev};
@@ -21,7 +22,7 @@ use futhark_ffi::{
   ArrayDev as FutArrayDev,
   FutharkFloatFormatter,
 };
-use futhark_ffi::types::*;
+//use futhark_ffi::types::*;
 use home::{home_dir};
 use libc::{c_void};
 //use smol_str::{SmolStr};
@@ -29,7 +30,7 @@ use libc::{c_void};
 use std::any::{Any};
 use std::cell::{RefCell};
 use std::cmp::{max};
-use std::convert::{TryFrom};
+//use std::convert::{TryFrom};
 use std::fmt::{Debug, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::hash::{Hash, Hasher};
 use std::mem::{size_of};
@@ -51,12 +52,20 @@ impl Debug for ThunkPtr {
 }
 
 impl ThunkPtr {
+  pub fn nil() -> ThunkPtr {
+    ThunkPtr(0)
+  }
+
   pub fn from_unchecked(p: i32) -> ThunkPtr {
     ThunkPtr(p)
   }
 
   pub fn to_unchecked(&self) -> i32 {
     self.0
+  }
+
+  pub fn is_nil(&self) -> bool {
+    self.0 == 0
   }
 
   pub fn as_bytes_repr(&self) -> &[u8] {
@@ -68,13 +77,7 @@ impl ThunkPtr {
   }
 }
 
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ThunkKey {
-  // FIXME
-  //tyid: TypeId,
-}*/
-
-#[derive(Clone, Copy)]
+/*#[derive(Clone, Copy)]
 #[repr(u8)]
 pub enum ThunkArgMode {
   _Top,
@@ -90,10 +93,10 @@ pub struct ThunkArg {
   //pub ty_:  CellType,
   pub amod: ThunkArgMode,
   // TODO
-}
+}*/
 
 pub trait ThunkValExt: DtypeExt {
-  type Val: DtypeExt + Eq + Any;
+  type Val: DtypeExt + Copy + Eq + Any;
 
   fn into_thunk_val(self) -> Self::Val;
 }
@@ -120,10 +123,29 @@ pub enum ThunkDimErr {
   _Bot,
 }
 
+impl Default for ThunkDimErr {
+  fn default() -> ThunkDimErr {
+    ThunkDimErr::_Bot
+  }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ThunkTypeErr {
   // FIXME FIXME
+  Nondeterministic,
   _Bot,
+}
+
+impl Default for ThunkTypeErr {
+  fn default() -> ThunkTypeErr {
+    ThunkTypeErr::_Bot
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ThunkAdjErr {
+  // FIXME FIXME
+  NotImpl,
 }
 
 #[derive(Clone)]
@@ -147,11 +169,10 @@ pub trait ThunkSpec {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
-  fn mode(&self) -> CellMode { CellMode::Aff }
-  /*fn gen_impl_smp(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> { None }
-  fn gen_impl_gpu(&self, _spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> { None }*/
-  fn gen_impl_(&self, _spectype: Vec<Dim>, _pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> { None }
-  // TODO: gen adj.
+  fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
+  //fn mode(&self) -> CellMode { CellMode::Aff }
+  fn gen_impl_(&self, _spec_dim: Vec<Dim>, _pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> { None }
+  fn pop_adj(&self, /*_ctr: &CtxCtr, _env: &mut CtxEnv, _spine: &mut Spine,*/ _arg: &[CellPtr], /*_out: CellPtr,*/ _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> { Err(ThunkAdjErr::NotImpl) }
 }
 
 pub trait ThunkSpec_ {
@@ -161,11 +182,10 @@ pub trait ThunkSpec_ {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
-  fn mode(&self) -> CellMode;
-  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>>;
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>>;*/
-  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>>;
-  // TODO: gen adj.
+  //fn scalar_val(&self) -> Option<&dyn DtypeExt>;
+  //fn mode(&self) -> CellMode;
+  fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>>;
+  fn pop_adj(&self, /*ctr: &CtxCtr, env: &mut CtxEnv, spine: &mut Spine,*/ arg: &[CellPtr], /*out: CellPtr,*/ out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr>;
 }
 
 impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
@@ -196,20 +216,16 @@ impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
     ThunkSpec::out_ty_(self, arg)
   }
 
-  fn mode(&self) -> CellMode {
+  /*fn mode(&self) -> CellMode {
     ThunkSpec::mode(self)
-  }
-
-  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
-    ThunkSpec::gen_impl_smp(self, spectype)
-  }
-
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
-    ThunkSpec::gen_impl_gpu(self, spectype)
   }*/
 
-  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
-    ThunkSpec::gen_impl_(self, spectype, pmach)
+  fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    ThunkSpec::gen_impl_(self, spec_dim, pmach)
+  }
+
+  fn pop_adj(&self, /*ctr: &CtxCtr, env: &mut CtxEnv, spine: &mut Spine,*/ arg: &[CellPtr], out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> {
+    ThunkSpec::pop_adj(self, /*ctr, env, spine,*/ arg, out_adj, arg_adj)
   }
 }
 
@@ -220,9 +236,8 @@ pub trait ThunkImpl {
   //type Cel;
 
   //fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _cel: &mut Weak<Self::Cel>) -> ThunkRet {}
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr, /*_cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
-    ThunkRet::NotImpl
-  }
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr, /*_cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet { ThunkRet::NotImpl }
+  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
 }
 
 pub trait ThunkImpl_ {
@@ -232,6 +247,7 @@ pub trait ThunkImpl_ {
   //fn thunk_eq(&self, other: &dyn ThunkImpl_) -> Option<bool>;
   //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet;
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet;
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
@@ -241,9 +257,13 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
     self
   }
 
-  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet {}
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
-    ThunkImpl::apply(self, ctr, env, spec_, args, out, /*cel*/)
+  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet {}
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+    ThunkImpl::apply(self, ctr, env, spec_, arg, out, /*cel*/)
+  }
+
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    ThunkImpl::accumulate(self, ctr, env, spec_, arg, out)
   }
 }
 
@@ -251,9 +271,10 @@ pub trait FutharkThunkSpec {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
-  fn mode(&self) -> CellMode { CellMode::Aff }
+  fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
+  //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_futhark(&self) -> FutharkThunkCode;
-  fn gen_adj_futhark(&self, _gen_code: &FutharkThunkCode) -> Option<FutharkThunkCode> { None }
+  //fn gen_adj_futhark(&self, _gen_code: &FutharkThunkCode) -> Option<FutharkThunkCode> { None }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
@@ -269,35 +290,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     FutharkThunkSpec::out_ty_(self, arg)
   }
 
-  fn mode(&self) -> CellMode {
+  /*fn mode(&self) -> CellMode {
     FutharkThunkSpec::mode(self)
-  }
-
-  /*fn gen_impl_smp(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
-    let (arityin, arityout) = self.arity();
-    let code = self.gen_futhark();
-    Some(Rc::new(FutharkThunkImpl::<MulticoreBackend>{
-      arityin,
-      arityout,
-      spectype,
-      code,
-      object: RefCell::new(None),
-    }))
-  }
-
-  fn gen_impl_gpu(&self, spectype: Vec<Dim>) -> Option<Rc<dyn ThunkImpl_>> {
-    let (arityin, arityout) = self.arity();
-    let code = self.gen_futhark();
-    Some(Rc::new(FutharkThunkImpl::<CudaBackend>{
-      arityin,
-      arityout,
-      spectype,
-      code,
-      object: RefCell::new(None),
-    }))
   }*/
 
-  fn gen_impl_(&self, spectype: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+  fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
     let (arityin, arityout) = self.arity();
     let code = self.gen_futhark();
     Some(match pmach {
@@ -305,7 +302,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         Rc::new(FutharkThunkImpl::<MulticoreBackend>{
           arityin,
           arityout,
-          spectype,
+          spec_dim,
           code,
           object: RefCell::new(None),
           consts: RefCell::new(Vec::new()),
@@ -315,7 +312,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         Rc::new(FutharkThunkImpl::<CudaBackend>{
           arityin,
           arityout,
-          spectype,
+          spec_dim,
           code,
           object: RefCell::new(None),
           consts: RefCell::new(Vec::new()),
@@ -392,7 +389,7 @@ pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThu
   //pub f_hash:   _,
   pub arityin:  u16,
   pub arityout: u16,
-  pub spectype: Vec<Dim>,
+  pub spec_dim: Vec<Dim>,
   pub code:     FutharkThunkCode,
   pub object:   RefCell<Option<FutObject<B>>>,
   pub consts:   RefCell<Vec<StableCell>>,
@@ -417,63 +414,57 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     assert!(LIBNVRTC._inner.is_some());
   }
 
-  #[cfg(not(unix))]
-  unsafe fn _setup_object(_obj: &mut FutObject<CudaBackend>) {
-    unimplemented!();
-  }
-
-  #[cfg(unix)]
   unsafe fn _setup_object(obj: &mut FutObject<CudaBackend>) {
     println!("DEBUG: FutharkThunkImpl::_setup_object: cfg...");
     obj.cfg = (obj.ffi.ctx_cfg_new.as_ref().unwrap())();
     assert!(!obj.cfg.is_null());
     // TODO TODO
     // FIXME FIXME
-    //(obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemAlloc.as_ref().unwrap().as_ptr());
-    //(obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemFree.as_ref().unwrap().as_ptr());
+    //(obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemAlloc.as_ref().unwrap().as_ptr() as _);
+    //(obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemFree.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_alloc_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_free_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_back_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_back_alloc_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_back_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_back_free_hook as *const c_void as _);
     // TODO TODO
-    (obj.ffi.ctx_cfg_set_cuGetErrorString.as_ref().unwrap())(obj.cfg, LIBCUDA.cuGetErrorString.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuInit.as_ref().unwrap())(obj.cfg, LIBCUDA.cuInit.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDeviceGetCount.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetCount.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDeviceGetName.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetName.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDeviceGet.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGet.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDeviceGetAttribute.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetAttribute.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDevicePrimaryCtxRetain.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDevicePrimaryCtxRetain.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuDevicePrimaryCtxRelease.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDevicePrimaryCtxRelease.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuCtxCreate.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxCreate.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuCtxDestroy.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxDestroy.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuCtxPopCurrent.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxPopCurrent.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuCtxPushCurrent.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxPushCurrent.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuCtxSynchronize.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxSynchronize.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemAlloc.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemAlloc.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemFree.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemFree.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpy.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpy.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpyHtoD.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoD.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpyDtoH.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoH.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpyAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyAsync.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpyHtoDAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoDAsync.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuMemcpyDtoHAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoHAsync.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cudaEventCreate.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventCreate.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cudaEventDestroy.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventDestroy.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cudaEventRecord.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventRecord.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cudaEventElapsedTime.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventElapsedTime.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcGetErrorString.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetErrorString.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcCreateProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcCreateProgram.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcDestroyProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcDestroyProgram.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcCompileProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcCompileProgram.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcGetProgramLogSize.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetProgramLogSize.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcGetProgramLog.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetProgramLog.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcGetPTXSize.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetPTXSize.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_nvrtcGetPTX.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetPTX.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuModuleLoadData.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleLoadData.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuModuleUnload.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleUnload.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuModuleGetFunction.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleGetFunction.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuFuncGetAttribute.as_ref().unwrap())(obj.cfg, LIBCUDA.cuFuncGetAttribute.as_ref().unwrap().as_ptr());
-    (obj.ffi.ctx_cfg_set_cuLaunchKernel.as_ref().unwrap())(obj.cfg, LIBCUDA.cuLaunchKernel.as_ref().unwrap().as_ptr());
+    (obj.ffi.ctx_cfg_set_cuGetErrorString.as_ref().unwrap())(obj.cfg, LIBCUDA.cuGetErrorString.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuInit.as_ref().unwrap())(obj.cfg, LIBCUDA.cuInit.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDeviceGetCount.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetCount.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDeviceGetName.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetName.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDeviceGet.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGet.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDeviceGetAttribute.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDeviceGetAttribute.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDevicePrimaryCtxRetain.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDevicePrimaryCtxRetain.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuDevicePrimaryCtxRelease.as_ref().unwrap())(obj.cfg, LIBCUDA.cuDevicePrimaryCtxRelease.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuCtxCreate.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxCreate.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuCtxDestroy.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxDestroy.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuCtxPopCurrent.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxPopCurrent.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuCtxPushCurrent.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxPushCurrent.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuCtxSynchronize.as_ref().unwrap())(obj.cfg, LIBCUDA.cuCtxSynchronize.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemAlloc.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemAlloc.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemFree.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemFree.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpy.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpy.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpyHtoD.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoD.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpyDtoH.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoH.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpyAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyAsync.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpyHtoDAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoDAsync.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuMemcpyDtoHAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoHAsync.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cudaEventCreate.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventCreate.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cudaEventDestroy.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventDestroy.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cudaEventRecord.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventRecord.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cudaEventElapsedTime.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventElapsedTime.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcGetErrorString.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetErrorString.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcCreateProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcCreateProgram.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcDestroyProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcDestroyProgram.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcCompileProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcCompileProgram.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcGetProgramLogSize.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetProgramLogSize.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcGetProgramLog.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetProgramLog.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcGetPTXSize.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetPTXSize.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_nvrtcGetPTX.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetPTX.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuModuleLoadData.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleLoadData.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuModuleUnload.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleUnload.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuModuleGetFunction.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleGetFunction.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuFuncGetAttribute.as_ref().unwrap())(obj.cfg, LIBCUDA.cuFuncGetAttribute.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuLaunchKernel.as_ref().unwrap())(obj.cfg, LIBCUDA.cuLaunchKernel.as_ref().unwrap().as_ptr() as _);
     // TODO TODO
     println!("DEBUG: FutharkThunkImpl::_setup_object: cfg done");
     println!("DEBUG: FutharkThunkImpl::_setup_object: ctx...");
@@ -553,39 +544,69 @@ impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: Futh
 }
 
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  pub fn _to_futhark_entry_type(ty_: Dim) -> String {
+  pub fn _to_futhark_entry_type(dim: Dim) -> String {
     let mut s = String::new();
     // NB: futhark scalars in entry arg position are always emitted as
     // pointers to host memory, so we must coerce those to 1-d arrays.
-    if ty_.ndim == 0 {
+    if dim.ndim == 0 {
       s.push_str("[1]");
     }
-    for _ in 0 .. ty_.ndim {
+    for _ in 0 .. dim.ndim {
       s.push_str("[]");
     }
-    s.push_str(ty_.dtype.format_futhark());
+    s.push_str(dim.dtype.format_futhark());
     s
   }
 
-  pub fn _try_build_object(&self, ctr: &CtxCtr, env: &mut CtxEnv, /*args: &[CellPtr]*/) {
+  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, out_mode: CellMode) {
     let mut s = String::new();
     write!(&mut s, "entry kernel").unwrap();
     for k in 0 .. self.arityin {
-      let ty_ = self.spectype[k as usize];
-      write!(&mut s, " (x_{}: {})", k, Self::_to_futhark_entry_type(ty_)).unwrap();
+      let dim = self.spec_dim[k as usize];
+      write!(&mut s, " (x_{}: {})", k, Self::_to_futhark_entry_type(dim)).unwrap();
     }
     if self.arityout == 1 {
-      let ty_ = self.spectype[self.arityin as usize];
-      write!(&mut s, " : {}", Self::_to_futhark_entry_type(ty_)).unwrap();
-    } else {
+      match out_mode {
+        CellMode::_Top => panic!("bug"),
+        CellMode::Aff => {
+          let dim = self.spec_dim[self.arityin as usize];
+          write!(&mut s, " : {}", Self::_to_futhark_entry_type(dim)).unwrap();
+        }
+        CellMode::Init => {
+          let dim = self.spec_dim[self.arityin as usize];
+          let fty = Self::_to_futhark_entry_type(dim);
+          write!(&mut s, " (oy_{}: *{}) : *{}", 0, fty, fty).unwrap();
+        }
+      }
+    } else if out_mode == CellMode::Aff {
       write!(&mut s, " : (").unwrap();
       for k in 0 .. self.arityout {
-        let ty_ = self.spectype[(self.arityin + k) as usize];
-        write!(&mut s, "{}, ", Self::_to_futhark_entry_type(ty_)).unwrap();
+        let dim = self.spec_dim[(self.arityin + k) as usize];
+        write!(&mut s, "{}, ", Self::_to_futhark_entry_type(dim)).unwrap();
       }
       write!(&mut s, ")").unwrap();
+    } else {
+      panic!("bug");
     }
     write!(&mut s, " =\n").unwrap();
+    for k in 0 .. self.arityin {
+      let dim = self.spec_dim[k as usize];
+      if dim.ndim == 0 {
+        write!(&mut s, "\tlet [x_{}] = x_{} in\n", k, k).unwrap();
+      }
+    }
+    if self.arityout == 1 {
+      match out_mode {
+        CellMode::_Top => panic!("bug"),
+        CellMode::Aff => {}
+        CellMode::Init => {
+          let dim = self.spec_dim[self.arityin as usize];
+          if dim.ndim == 0 {
+            write!(&mut s, "\tlet [oy_{}] = oy_{} in\n", 0, 0).unwrap();
+          }
+        }
+      }
+    }
     for line in self.code.body.iter() {
       // FIXME FIXME: better pattern match/replace.
       let mut line = line.clone();
@@ -595,19 +616,63 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       for k in 0 .. self.arityout {
         line = line.replace(&format!("{{%{}}}", self.arityin + k), &format!("y_{}", k));
       }
-      write!(&mut s, "    ").unwrap();
+      write!(&mut s, "\t").unwrap();
       s.push_str(&line);
       write!(&mut s, "\n").unwrap();
     }
-    write!(&mut s, "    ").unwrap();
+    if self.arityout == 1 {
+      match out_mode {
+        CellMode::_Top => panic!("bug"),
+        CellMode::Aff => {}
+        CellMode::Init => {
+          let dim = self.spec_dim[self.arityin as usize];
+          match dim.ndim {
+            0 => {
+              write!(&mut s, "\tlet y_{} = oy_{} + y_{} in\n", 0, 0, 0).unwrap();
+            }
+            1 => {
+              write!(&mut s, "\tlet y_{} = map2 (+) oy_{} y_{} in\n", 0, 0, 0).unwrap();
+            }
+            2 => {
+              write!(&mut s, "\tlet oy_{} = flatten oy_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = flatten y_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = map2 (+) oy_{} y_{} in\n", 0, 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = unflatten y_{}_s_0 y_{}_s_1 y_{} in\n", 0, 0, 0, 0).unwrap();
+            }
+            3 => {
+              write!(&mut s, "\tlet oy_{} = flatten_3d oy_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = flatten_3d y_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = map2 (+) oy_{} y_{} in\n", 0, 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = unflatten_3d y_{}_s_0 y_{}_s_1 y_{}_s_2 y_{} in\n", 0, 0, 0, 0, 0).unwrap();
+            }
+            4 => {
+              write!(&mut s, "\tlet oy_{} = flatten_4d oy_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = flatten_4d y_{} in\n", 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = map2 (+) oy_{} y_{} in\n", 0, 0, 0).unwrap();
+              write!(&mut s, "\tlet y_{} = unflatten_4d y_{}_s_0 y_{}_s_1 y_{}_s_2 y_{}_s_3 y_{} in\n", 0, 0, 0, 0, 0, 0).unwrap();
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+    }
+    for k in 0 .. self.arityout {
+      let dim = self.spec_dim[(self.arityin + k) as usize];
+      if dim.ndim == 0 {
+        write!(&mut s, "\tlet y_{} = [y_{}] in\n", k, k).unwrap();
+      }
+    }
+    write!(&mut s, "\t").unwrap();
     if self.arityout == 1 {
       write!(&mut s, "y_{}", 0).unwrap();
-    } else {
+    } else if out_mode == CellMode::Aff {
       write!(&mut s, "(").unwrap();
       for k in 0 .. self.arityout {
         write!(&mut s, "y_{}, ", k).unwrap();
       }
       write!(&mut s, " )").unwrap();
+    } else {
+      panic!("bug");
     }
     write!(&mut s, "\n").unwrap();
     let mut config = FutConfig::default();
@@ -631,11 +696,11 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
 impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   //type Cel = SmpInnerCell;
 
-  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     // FIXME
     if self.object.borrow().is_none() {
-      self._try_build_object(ctr, env);
+      self._try_build(ctr, env, CellMode::Aff);
     }
     if self.object.borrow().is_none() {
       panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
@@ -647,20 +712,20 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   //type Cel = GpuInnerCell;
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     if self.object.borrow().is_none() {
-      self._try_build_object(ctr, env);
+      self._try_build(ctr, env, CellMode::Aff);
     }
     if self.object.borrow().is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: build error");
     }
-    assert_eq!(args.len(), self.arityin as usize);
+    assert_eq!(arg.len(), self.arityin as usize);
     let mut arg_ty_ = Vec::with_capacity(self.arityin as usize);
     let mut arg_arr = Vec::with_capacity(self.arityin as usize);
     for k in 0 .. self.arityin as usize {
-      let ty_ = env.lookup_ref(args[k]).unwrap().ty.clone();
-      assert_eq!(self.spectype[k], ty_.to_dim());
-      let a = match self.spectype[k].ndim {
+      let ty_ = env.lookup_ref(arg[k]).unwrap().ty.clone();
+      assert_eq!(self.spec_dim[k], ty_.to_dim());
+      let a = match self.spec_dim[k].ndim {
         0 | 1 => FutArrayDev::alloc_1d(),
         2 => FutArrayDev::alloc_2d(),
         3 => FutArrayDev::alloc_3d(),
@@ -668,7 +733,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         _ => unimplemented!()
       };
       // FIXME FIXME: actually init the array.
-      if self.spectype[k].ndim == 0 {
+      if self.spec_dim[k].ndim == 0 {
         a.set_shape(&[1]);
       } else {
         a.set_shape(&ty_.shape);
@@ -686,7 +751,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let mut out_raw_arr = Vec::with_capacity(self.arityout as usize);
     for k in 0 .. self.arityout as usize {
       let ty_ = &out_ty_[k];
-      assert_eq!(self.spectype[self.arityin as usize + k], ty_.to_dim());
+      assert_eq!(self.spec_dim[self.arityin as usize + k], ty_.to_dim());
       // FIXME FIXME
       out_raw_arr.push(null_mut());
     }
@@ -762,6 +827,93 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     ThunkRet::Success
     //unimplemented!();
   }
+
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    if self.object.borrow().is_none() {
+      self._try_build(ctr, env, CellMode::Init);
+    }
+    if self.object.borrow().is_none() {
+      panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: build error");
+    }
+    assert_eq!(arg.len(), self.arityin as usize);
+    assert_eq!(1, self.arityout);
+    let mut arg_ty_ = Vec::with_capacity((self.arityin + 1) as usize);
+    let mut arg_arr = Vec::with_capacity((self.arityin + 1) as usize);
+    for k in 0 .. self.arityin as usize {
+      let ty_ = env.lookup_ref(arg[k]).unwrap().ty.clone();
+      assert_eq!(self.spec_dim[k], ty_.to_dim());
+      let a = match self.spec_dim[k].ndim {
+        0 | 1 => FutArrayDev::alloc_1d(),
+        2 => FutArrayDev::alloc_2d(),
+        3 => FutArrayDev::alloc_3d(),
+        4 => FutArrayDev::alloc_4d(),
+        _ => unimplemented!()
+      };
+      // FIXME FIXME: actually init the array.
+      if self.spec_dim[k].ndim == 0 {
+        a.set_shape(&[1]);
+      } else {
+        a.set_shape(&ty_.shape);
+      }
+      arg_ty_.push(ty_);
+      arg_arr.push(a);
+    }
+    let mut out_ty_ = Vec::with_capacity(1);
+    match spec_.out_ty_(&arg_ty_) {
+      Err(_) => panic!("BUG: type error"),
+      Ok(ty_) => {
+        let k = self.arityin as usize;
+        assert_eq!(self.spec_dim[k], ty_.to_dim());
+        let a = match self.spec_dim[k].ndim {
+          0 | 1 => FutArrayDev::alloc_1d(),
+          2 => FutArrayDev::alloc_2d(),
+          3 => FutArrayDev::alloc_3d(),
+          4 => FutArrayDev::alloc_4d(),
+          _ => unimplemented!()
+        };
+        // FIXME FIXME: actually init the array.
+        if self.spec_dim[k].ndim == 0 {
+          a.set_shape(&[1]);
+        } else {
+          a.set_shape(&ty_.shape);
+        }
+        arg_ty_.push(ty_.clone());
+        arg_arr.push(a);
+        out_ty_.push(ty_);
+      }
+    }
+    let mut out_raw_arr = Vec::with_capacity(1);
+    for k in 0 .. 1 {
+      let ty_ = &out_ty_[k];
+      assert_eq!(self.spec_dim[self.arityin as usize + k], ty_.to_dim());
+      // FIXME FIXME
+      out_raw_arr.push(null_mut());
+    }
+    let mut obj = self.object.borrow_mut();
+    let obj = obj.as_mut().unwrap();
+    // FIXME FIXME: pre-entry setup.
+    obj.reset();
+    env.reset_tmp();
+    ctr.reset_tmp();
+    let o_ret = obj.enter_kernel(self.arityin + 1, 1, &arg_arr, &mut out_raw_arr);
+    if o_ret.is_err() || (obj.may_fail() && obj.sync().is_err()) {
+      // FIXME FIXME: error handling.
+      panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: runtime error");
+    }
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::accumulate: out={:?}", out);
+    // FIXME: because of uniqueness, the lone output should the same memblock as
+    // the last input; so, make sure not to double free.
+    let mut out_arr = Vec::with_capacity(1);
+    for (k, raw) in out_raw_arr.into_iter().enumerate() {
+      out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
+    }
+    /*assert_eq!(arg_arr[self.arityin as usize].as_ptr(), out_arr[0].as_ptr());*/
+    let (out_ptr, out_ndim) = arg_arr.pop().unwrap().into_raw();
+    assert_eq!(out_ptr, out_arr[0].as_ptr());
+    assert_eq!(out_ndim, out_arr[0].ndim());
+    // FIXME FIXME
+    unimplemented!();
+  }
 }
 
 // TODO
@@ -772,24 +924,20 @@ pub struct PThunk {
   pub clk:      Clock,
   pub arityin:  u16,
   pub arityout: u16,
-  pub spectype: Vec<Dim>,
+  pub spec_dim: Vec<Dim>,
   pub spec_:    Rc<dyn ThunkSpec_>,
   //pub sub:      Vec<ThunkArg>,
   //pub sub:      RefCell<Vec<ThunkArg>>,
   // TODO TODO
-  //pub impl_smp: RefCell<Option<Rc<dyn ThunkImpl_<Cel=SmpInnerCell>>>>,
-  //pub impl_gpu: RefCell<Option<Rc<dyn ThunkImpl_<Cel=GpuInnerCell>>>>,
-  pub impl_smp: RefCell<Option<Rc<dyn ThunkImpl_>>>,
-  pub impl_gpu: RefCell<Option<Rc<dyn ThunkImpl_>>>,
   pub impl_:    RefCell<Vec<(PMach, Rc<dyn ThunkImpl_>)>>,
 }
 
 impl PThunk {
   //pub fn new<Th: ThunkSpec + Any + Copy + Eq>(ptr: ThunkPtr, thunk: Th) -> PThunk {}
-  pub fn new(ptr: ThunkPtr, spectype: Vec<Dim>, spec_: Rc<dyn ThunkSpec_>) -> PThunk {
+  pub fn new(ptr: ThunkPtr, spec_dim: Vec<Dim>, spec_: Rc<dyn ThunkSpec_>) -> PThunk {
     let clk = Clock::default();
     let (arityin, arityout) = spec_.arity();
-    assert_eq!(spectype.len(), (arityin + arityout) as usize);
+    assert_eq!(spec_dim.len(), (arityin + arityout) as usize);
     //let spec_ = Rc::new(thunk);
     //let sub = Vec::new();
     PThunk{
@@ -797,11 +945,9 @@ impl PThunk {
       clk,
       arityin,
       arityout,
-      spectype,
+      spec_dim,
       spec_,
       //sub,
-      impl_smp: RefCell::new(None),
-      impl_gpu: RefCell::new(None),
       impl_: RefCell::new(Vec::new()),
     }
   }
@@ -826,94 +972,12 @@ impl PThunk {
     None
   }
 
-  /*pub fn apply_smp(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {
-    // FIXME FIXME
-    //unimplemented!();
-    //self.spec_.apply_smp(cel)
-    if self.impl_smp.borrow().is_none() {
-      // FIXME FIXME: potentially load from thunk impl cache.
-      *self.impl_smp.borrow_mut() = self.spec_.gen_impl_smp(self.spectype.clone());
-    }
-    match self.impl_smp.borrow().as_ref() {
-      None => panic!("bug"),
-      Some(th) => th.apply(ctr, env, &*self.spec_, args, cel)
-    }
-  }*/
-
-  /*pub fn apply_gpu(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], cel: &mut Option<Weak<dyn InnerCell_>>) -> ThunkRet {
-    // FIXME FIXME
-    //unimplemented!();
-    //self.spec_.apply_gpu(cel)
-    if self.impl_gpu.borrow().is_none() {
-      // FIXME FIXME: potentially load from thunk impl cache.
-      *self.impl_gpu.borrow_mut() = self.spec_.gen_impl_gpu(self.spectype.clone());
-    }
-    match self.impl_gpu.borrow().as_ref() {
-      None => panic!("bug"),
-      Some(th) => th.apply(ctr, env, &*self.spec_, args, cel)
-    }
-  }*/
-
   // FIXME FIXME: think about this api.
   pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], out: CellPtr, /*out_ty: &CellType, out_cel: &mut PCell*/) -> ThunkRet {
-  //pub fn apply(&self, args: &[(CellPtr, &CellType, &PCell)], out: CellPtr, out_ty: &CellType, out_cel: &mut PCell) {}
-    // FIXME FIXME
-    /*match &mut out_cel.compute {
-      &mut InnerCell::Primary => {
-        match &mut out_cel.primary {
-          &mut InnerCell::Gpu(ref mut cel) => {
-            // FIXME FIXME
-            self.apply_gpu(ctr, env, args, cel);
-          }
-          _ => unimplemented!()
-        }
-      }
-      &mut InnerCell::Gpu(ref mut cel) => {
-        // FIXME FIXME
-        self.apply_gpu(ctr, env, args, cel);
-      }
-      _ => unimplemented!()
-    }*/
-    /*match out_cel.lookup_replica(out_cel.primary) {
-      None => {
-        // FIXME FIXME
-        out_cel.push_new_replica(out_cel.primary, PMach::NvGpu, None);
-      }
-      _ => {}
-    }
-    match out_cel.lookup_replica(out_cel.primary) {
-      None => panic!("bug"),
-      Some((PMach::NvGpu, cel)) => {
-        /*self.apply_gpu(ctr, env, args, cel)*/
-        match self.lookup_impl_(PMach::NvGpu) {
-          None => {
-            match self.spec_.gen_impl_(self.spectype.clone(), PMach::NvGpu) {
-              None => {
-                // FIXME: fail stop here.
-              }
-              Some(thimpl_) => {
-                self.push_new_impl_(PMach::NvGpu, thimpl_);
-              }
-            }
-          }
-          _ => {}
-        }
-        match self.lookup_impl_(PMach::NvGpu) {
-          None => panic!("bug"),
-          Some(thimpl_) => {
-            thimpl_.apply(ctr, env, &*self.spec_, args, out, /*out_ty, cel*/)
-          }
-        }
-      }
-      Some(_) => {
-        // FIXME FIXME
-        unimplemented!();
-      }
-    }*/
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
-        match self.spec_.gen_impl_(self.spectype.clone(), PMach::NvGpu) {
+        match self.spec_.gen_impl_(self.spec_dim.clone(), PMach::NvGpu) {
           None => {
             // FIXME: fail stop here.
           }

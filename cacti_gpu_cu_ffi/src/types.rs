@@ -26,6 +26,31 @@ pub const CU_CTX_SCHED_SPIN: CUctx_flags = 1;
 pub const CU_CTX_SCHED_YIELD: CUctx_flags = 2;
 pub const CU_CTX_SCHED_BLOCKING_SYNC: CUctx_flags = 4;
 
+pub const CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK: CUdevice_attribute = 1;
+pub const CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X: CUdevice_attribute = 2;
+pub const CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X: CUdevice_attribute = 5;
+pub const CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK: CUdevice_attribute = 8;
+pub const CU_DEVICE_ATTRIBUTE_WARP_SIZE: CUdevice_attribute = 10;
+pub const CU_DEVICE_ATTRIBUTE_MAX_PITCH: CUdevice_attribute = 11;
+pub const CU_DEVICE_ATTRIBUTE_CLOCK_RATE: CUdevice_attribute = 13;
+pub const CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT: CUdevice_attribute = 16;
+pub const CU_DEVICE_ATTRIBUTE_INTEGRATED: CUdevice_attribute = 18;
+pub const CU_DEVICE_ATTRIBUTE_COMPUTE_MODE: CUdevice_attribute = 20;
+pub const CU_DEVICE_ATTRIBUTE_PCI_BUS_ID: CUdevice_attribute = 33;
+pub const CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID: CUdevice_attribute = 34;
+pub const CU_DEVICE_ATTRIBUTE_MEMORY_CLOCK_RATE: CUdevice_attribute = 36;
+pub const CU_DEVICE_ATTRIBUTE_GLOBAL_MEMORY_BUS_WIDTH: CUdevice_attribute = 37;
+pub const CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR: CUdevice_attribute = 39;
+pub const CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING: CUdevice_attribute = 41;
+pub const CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID: CUdevice_attribute = 50;
+pub const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR: CUdevice_attribute = 75;
+pub const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR: CUdevice_attribute = 76;
+pub const CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY: CUdevice_attribute = 83;
+
+pub const CU_COMPUTEMODE_DEFAULT: i32 = 0;
+pub const CU_COMPUTEMODE_PROHIBITED: i32 = 2;
+pub const CU_COMPUTEMODE_EXCLUSIVE_PROCESS: i32 = 3;
+
 #[repr(C)]
 pub struct CUctx_st([u8; 0]);
 

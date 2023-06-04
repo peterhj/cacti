@@ -2,16 +2,11 @@ use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
 use crate::pctx::{Locus, PMach};
-#[cfg(feature = "gpu")]
-use crate::pctx::nvgpu::*;
-use crate::pctx::smp::*;
-use crate::pctx::swap::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::torch::{TorchDtype};
 
 use std::any::{Any};
-use std::cell::{Cell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of};
@@ -65,6 +60,10 @@ impl CellPtr {
 
   pub fn to_unchecked(&self) -> i32 {
     self.0
+  }
+
+  pub fn is_nil(&self) -> bool {
+    self.0 == 0
   }
 
   pub fn as_bytes_repr(&self) -> &[u8] {
@@ -128,6 +127,7 @@ impl Drop for StableCell {
 
 impl StableCell {
   pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
+    assert!(!ptr.is_nil());
     env.retain(ptr);
     StableCell{ptr}
   }
@@ -170,13 +170,13 @@ impl StableCell {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
+/*#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum CellSpec {
   Primary,
   Compute,
   //Backup,
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
@@ -302,8 +302,10 @@ impl Dtype {
   fn dtype() -> Dtype where Self: Sized;
 }*/
 
-pub trait DtypeExt: Copy {
-  fn dtype() -> Dtype;
+pub trait DtypeExt {
+  fn dtype() -> Dtype where Self: Sized;
+  // FIXME FIXME
+  //fn is_zero(&self) -> bool;
 }
 
 impl DtypeExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Float32 } }
@@ -325,10 +327,20 @@ pub fn dtype<T: DtypeExt>() -> Dtype {
   T::dtype()
 }
 
+pub fn dtype_of<T: DtypeExt>(_: T) -> Dtype {
+  T::dtype()
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Dim {
   pub ndim:     u8,
   pub dtype:    Dtype,
+}
+
+impl Dim {
+  pub fn ndim(&self) -> u8 {
+    self.ndim
+  }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -364,6 +376,10 @@ impl CellType {
     assert!(self.dtype != Dtype::_Top, "bug");
     assert!(self.shape.len() <= u8::max_value() as usize);
     self.shape.len() as u8
+  }
+
+  pub fn is_scalar(&self) -> bool {
+    self.ndim() == 0
   }
 
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
@@ -467,25 +483,25 @@ impl CellLayout {
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CellMode {
-  Top,
+  _Top,
   Aff,
-  Mux,
+  Init,
   //Fin,
 }
 
 impl Default for CellMode {
   fn default() -> CellMode {
-    CellMode::Top
+    CellMode::_Top
   }
 }
 
 impl CellMode {
   pub fn set_aff(&mut self) -> Result<bool, ()> {
     match *self {
-      CellMode::Top => {
+      CellMode::_Top => {
         *self = CellMode::Aff;
         Ok(false)
       }
@@ -500,11 +516,11 @@ impl CellMode {
 
   pub fn set_mux(&mut self) -> Result<bool, ()> {
     match *self {
-      CellMode::Top => {
-        *self = CellMode::Mux;
+      CellMode::_Top => {
+        *self = CellMode::Init;
         Ok(false)
       }
-      CellMode::Mux => {
+      CellMode::Init => {
         Ok(true)
       }
       _ => {
@@ -583,7 +599,6 @@ pub struct CellState {
 pub struct CowCell {
   pub optr: CellPtr,
   pub pcel: CellPtr,
-  //pub cel_: Cell_,
 }
 
 pub struct PCell {
@@ -593,34 +608,13 @@ pub struct PCell {
   //pub optr: Cell<CellPtr>,
   pub ogty: CellType,
   pub olay: CellLayout,
-  //pub cel_: Cell_,
-  /*pub mode: CellMode,
-  pub flag: CellFlag,
-  pub clk:  Clock,*/
-  //pub flag: RefCell<CellFlag>,
-  //pub clk:  Cell<Clock>,
-  // TODO TODO: replica set.
-  //pub primary:  InnerCell,
-  //pub compute:  InnerCell,
   pub primary:  Locus,
   pub replicas: Vec<(Locus, PMach, Option<Weak<dyn InnerCell_>>)>,
 }
 
 impl PCell {
-  /*pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
-    PCell::new_pmach(ptr, ty, None, None)
-  }
-
-  pub fn new_pmach(ptr: CellPtr, ty: CellType, primary: Option<PMachSpec>, compute: Option<PMachSpec>) -> PCell {
-  }*/
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     let lay = CellLayout::new_packed(&ty);
-    let mode = CellMode::default();
-    // FIXME FIXME
-    let flag = CellFlag::default();
-    let clk = Clock::default();
-    //let primary = InnerCell::empty(CellSpec::Primary, primary.unwrap_or_else(|| ctx_cfg_get_default_primary()));
-    //let compute = InnerCell::empty(CellSpec::Compute, compute.unwrap_or_else(|| ctx_cfg_get_default_compute()));
     let primary = Locus::fastest();
     let replicas = Vec::new();
     PCell{
@@ -628,31 +622,10 @@ impl PCell {
       //optr: Cell::new(ptr),
       ogty: ty,
       olay: lay,
-      /*cel_: Cell_{
-              mode,
-              flag,
-              clk,
-            },*/
-      //flag: RefCell::new(CellFlag::default()),
-      //clk:  Cell::new(Clock::default()),
-      //primary,
-      //compute,
       primary,
       replicas,
     }
   }
-
-  /*pub fn push_empty_replica(&mut self, locus: Locus, pmach: PMach) {
-    for &(o_locus, o_pmach, _) in self.replicas.iter() {
-      if (o_locus, o_pmach) == (locus, pmach) {
-        panic!("bug");
-      }
-    }
-    self.replicas.push((locus, pmach, None));
-    self.replicas.sort_by(|&(l_locus, l_pmach, _), &(r_locus, r_pmach, _)| {
-      (r_locus, r_pmach).cmp(&(l_locus, l_pmach))
-    });
-  }*/
 
   pub fn push_new_replica(&mut self, locus: Locus, pmach: PMach, cel: Option<Weak<dyn InnerCell_>>) {
     for &(o_locus, o_pmach, _) in self.replicas.iter() {
@@ -675,196 +648,6 @@ impl PCell {
     None
   }
 }
-
-/*
-pub enum InnerCell {
-  Uninit,
-  Smp(Weak<SmpInnerCell>),
-  Swap(Weak<SwapInnerCell>),
-  #[cfg(feature = "gpu")]
-  Gpu(Weak<GpuInnerCell>),
-  Primary,
-}
-
-impl InnerCell {
-  pub fn empty(spec: CellSpec, pmspec: PMachSpec) -> InnerCell {
-    let pmflag = pmspec.flag();
-    let valid = match spec {
-      CellSpec::Primary => pmflag.primary(),
-      CellSpec::Compute => pmflag.compute(),
-    };
-    if !valid {
-      panic!("bug: InnerCell::empty: PMachSpec::{:?} does not support CellSpec::{:?}",
-          pmspec, spec);
-    }
-    match pmspec {
-      PMachSpec::_Top => panic!("bug"),
-      PMachSpec::Smp  => InnerCell::Smp(Weak::default()),
-      PMachSpec::Swap => InnerCell::Swap(Weak::default()),
-      #[cfg(feature = "gpu")]
-      PMachSpec::Gpu  => InnerCell::Gpu(Weak::default()),
-    }
-  }
-
-  pub fn clk(&self) -> Clock {
-    match self {
-      &InnerCell::Uninit => {
-        panic!("bug");
-      }
-      &InnerCell::Smp(ref cel) => {
-        unimplemented!();
-      }
-      &InnerCell::Gpu(ref cel) => {
-        match Weak::upgrade(cel) {
-          Some(cel) => {
-            cel.clk.get()
-          }
-          None => {
-            unimplemented!();
-          }
-        }
-      }
-      _ => unimplemented!()
-    }
-  }
-
-  /*pub fn advance_clk(&self, rst: u16) {
-    match self.as_ref() {
-      InnerCell::Uninit => {
-        panic!("bug");
-      }
-      _ => unimplemented!()
-    }
-  }
-
-  pub fn update_clk(&self) {
-    match self.as_ref() {
-      InnerCell::Uninit => {
-        panic!("bug");
-      }
-      _ => unimplemented!()
-    }
-  }*/
-
-  pub fn synced(&self, ty: &CellType, clk: Clock) -> bool {
-    match self {
-      &InnerCell::Uninit => false,
-      &InnerCell::Smp(ref cel) => {
-        unimplemented!();
-      }
-      &InnerCell::Gpu(ref cel) => {
-        if Weak::strong_count(cel) <= 0 {
-          return false;
-        }
-        match Weak::upgrade(cel) {
-          None => panic!("bug"),
-          Some(cel) => {
-            unimplemented!();
-          }
-        }
-      }
-      _ => unimplemented!()
-    }
-  }
-
-  pub fn sync_cell(&mut self, x: CellPtr, ty: &CellType, src_cel: &InnerCell, clk: Clock) {
-    if self.synced(ty, clk) {
-      return;
-    }
-    match self {
-      &mut InnerCell::Uninit => {
-        panic!("bug");
-      }
-      &mut InnerCell::Smp(ref cel) => {
-        unimplemented!();
-      }
-      &mut InnerCell::Gpu(ref cel) => {
-        if Weak::strong_count(cel) <= 0 {
-          // FIXME FIXME: alloc a new cel.
-          unimplemented!();
-        }
-        match Weak::upgrade(cel) {
-          None => panic!("bug"),
-          Some(cel) => {
-            unimplemented!();
-          }
-        }
-      }
-      &mut InnerCell::Primary => {
-        panic!("bug");
-      }
-      _ => unimplemented!()
-    }
-  }
-
-  /*pub fn sync_thunk(&mut self, x: CellPtr, ty: &CellType, args: &[CellPtr], pthunk: &PThunk, clk: Clock) {
-    if self.synced(ty, clk) {
-      return;
-    }
-    let ret = match self {
-      &mut InnerCell::Uninit => {
-        panic!("bug");
-      }
-      &mut InnerCell::Smp(ref mut cel) => {
-        unimplemented!();
-        /*
-        if Weak::strong_count(cel) <= 0 {
-          // FIXME FIXME: alloc a new cel.
-          *cel = TL_CTX.with(|ctx| {
-            unimplemented!();
-            match ctx.smp.alloc(_) {
-            }
-          });
-        }
-        match Weak::upgrade(cel) {
-          None => panic!("bug"),
-          Some(cel) => {
-            pthunk.apply_smp(&*cel)
-          }
-        }
-        */
-      }
-      &mut InnerCell::Gpu(ref mut cel) => {
-        if Weak::strong_count(cel) <= 0 {
-          // FIXME FIXME: alloc a new cel.
-          *cel = TL_CTX.with(|ctx| {
-            match ctx.gpu.try_front_pre_alloc(1) {
-              None => panic!("bug: gpu oom"),
-              Some((off, sz, next_off)) => {
-                ctx.gpu.front_alloc(x, off, sz, next_off)
-              }
-            }
-          });
-        }
-        match Weak::upgrade(cel) {
-          None => panic!("bug"),
-          Some(cel) => {
-            pthunk.apply_gpu(&*cel)
-          }
-        }
-      }
-      &mut InnerCell::Primary => {
-        panic!("bug");
-      }
-      _ => unimplemented!()
-    };
-    match ret {
-      ThunkRet::Success => {}
-      ThunkRet::Failure => {
-        // FIXME
-        panic!("bug");
-      }
-      ThunkRet::NotImpl => {
-        panic!("bug: InnerCell::sync_thunk: thunk not implemented");
-      }
-    }
-  }*/
-
-  pub fn unsync(&mut self, clk: Clock) {
-    unimplemented!();
-  }
-}
-*/
 
 pub trait InnerCell {
   // TODO TODO

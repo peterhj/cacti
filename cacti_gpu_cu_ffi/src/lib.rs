@@ -11,6 +11,7 @@ use crate::types::*;
 use libc::{c_void, c_int};
 use once_cell::sync::{Lazy};
 
+use std::convert::{TryFrom};
 use std::ops::{Deref};
 use std::ptr::{null_mut};
 
@@ -126,6 +127,36 @@ impl CudaPrimaryCtx {
 
   pub fn device(&self) -> i32 {
     self.dev
+  }
+}
+
+pub fn cuda_device_attribute_get(dev: i32, key: i32) -> CudaResult<i32> {
+  let mut val = -1;
+  let e = (LIBCUDA.cuDeviceGetAttribute.as_ref().unwrap())(&mut val, key, dev);
+  if e != CUDA_SUCCESS {
+    return Err(e);
+  }
+  Ok(val)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(i32)]
+pub enum CudaComputeMode {
+  Default = CU_COMPUTEMODE_DEFAULT,
+  Prohibited = CU_COMPUTEMODE_PROHIBITED,
+  ExclusiveProcess = CU_COMPUTEMODE_EXCLUSIVE_PROCESS,
+}
+
+impl TryFrom<i32> for CudaComputeMode {
+  type Error = i32;
+
+  fn try_from(val: i32) -> Result<CudaComputeMode, i32> {
+    Ok(match val {
+      CU_COMPUTEMODE_DEFAULT => CudaComputeMode::Default,
+      CU_COMPUTEMODE_PROHIBITED => CudaComputeMode::Prohibited,
+      CU_COMPUTEMODE_EXCLUSIVE_PROCESS => CudaComputeMode::ExclusiveProcess,
+      _ => return Err(val)
+    })
   }
 }
 

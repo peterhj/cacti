@@ -493,11 +493,6 @@ pub trait MathUnaryOps: Into<CellPtr> {
     */
   }
 
-  #[track_caller]
-  fn inner_softmax(self) -> CellPtr {
-    unimplemented!();
-  }
-
   /*fn mean_1d(self, dim: i64) -> CellPtr {
     unimplemented!();
     /*
@@ -519,6 +514,47 @@ pub trait MathUnaryOps: Into<CellPtr> {
     ctx_pop_thunk(op)
     */
   }*/
+
+  #[track_caller]
+  fn inner_softmax(self) -> CellPtr {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn flat_sum(self) -> CellPtr {
+    panick_wrap(|| {
+      let p = self.into();
+      let ty_ = ctx_lookup_type(p);
+      match ty_.ndim() {
+        0 => p,
+        1 => {
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(p);
+          let op = Sum1dFutThunkSpec;
+          ctx_pop_thunk(op)
+        }
+        2 => {
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(p);
+          let op = Sum2dFutThunkSpec;
+          ctx_pop_thunk(op)
+        }
+        3 => {
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(p);
+          let op = Sum3dFutThunkSpec;
+          ctx_pop_thunk(op)
+        }
+        4 => {
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(p);
+          let op = Sum4dFutThunkSpec;
+          ctx_pop_thunk(op)
+        }
+        _ => unimplemented!()
+      }
+    })
+  }
 }
 
 impl<P: Into<CellPtr>> MathUnaryOps for P {}

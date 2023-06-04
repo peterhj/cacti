@@ -1,6 +1,6 @@
 use once_cell::sync::{Lazy};
 
-use std::cell::{Cell, RefCell};
+use std::cell::{RefCell};
 use std::panic::{Location, set_hook, take_hook};
 
 pub static PANICK_ONCE_CTX: Lazy<PanickOnceCtx> = Lazy::new(|| PanickOnceCtx::new());

@@ -1,17 +1,18 @@
-use super::*;
-use crate::algo::{Bitvec64, MergeVecDeque, ExtentVecList, Extent, Region};
+use super::{TL_PCTX, Locus, PMach};
+use crate::algo::{MergeVecDeque, Region};
 use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::*;
-use crate::pctx::{Locus, PMach};
 
 use cacti_gpu_cu_ffi::*;
-use cacti_gpu_cu_ffi::types::{CU_CTX_SCHED_YIELD, cudaErrorCudartUnloading, cudaErrorNotReady};
+//use cacti_gpu_cu_ffi::types::{CU_CTX_SCHED_YIELD, cudaErrorCudartUnloading, cudaErrorNotReady};
+use cacti_gpu_cu_ffi::types::*;
 
 //use std::alloc::{Layout};
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::convert::{TryInto};
 use std::rc::{Rc, Weak};
 use std::ptr::{write};
 
@@ -99,6 +100,76 @@ impl GpuInnerRef {
   }
 }*/
 
+#[derive(Clone, Copy, Debug)]
+pub struct NvGpuInfo {
+  // NB: futhark needs the following.
+  pub capability_major: i32,
+  pub capability_minor: i32,
+  pub compute_mode:     CudaComputeMode,
+  pub mp_count:         i32,
+  pub max_mp_threads:   i32,
+  pub max_blk_threads:  i32,
+  pub max_sharedmem:    i32,
+  pub max_grid_dim_x:   i32,
+  pub warp_size:        i32,
+  // NB: the rest is extra.
+  pub pci_bus_id:       i32,
+  pub pci_device_id:    i32,
+  pub pci_domain_id:    i32,
+  pub max_pitch:        i32,
+  pub integrated:       bool,
+  pub unified_address:  bool,
+  pub managed_memory:   bool,
+}
+
+#[inline]
+fn try_i32_to_bool(v: i32) -> Result<bool, i32> {
+  Ok(match v {
+    0 => false,
+    1 => true,
+    _ => return Err(v)
+  })
+}
+
+impl NvGpuInfo {
+  pub fn new(dev: i32) -> NvGpuInfo {
+    let capability_major = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR).unwrap();
+    let capability_minor = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR).unwrap();
+    let compute_mode = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_MODE).unwrap().try_into().unwrap();
+    let mp_count = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT).unwrap();
+    let max_mp_threads = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_MULTIPROCESSOR).unwrap();
+    let max_blk_threads = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK).unwrap();
+    let max_sharedmem = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK).unwrap();
+    let max_grid_dim_x = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MAX_GRID_DIM_X).unwrap();
+    let warp_size = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_WARP_SIZE).unwrap();
+    let pci_bus_id = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_PCI_BUS_ID).unwrap();
+    let pci_device_id = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_PCI_DEVICE_ID).unwrap();
+    let pci_domain_id = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_PCI_DOMAIN_ID).unwrap();
+    let max_pitch = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MAX_PITCH).unwrap();
+    let integrated = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_INTEGRATED).unwrap()).unwrap();
+    let unified_address = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING).unwrap()).unwrap();
+    let managed_memory = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY).unwrap()).unwrap();
+    NvGpuInfo{
+      capability_major,
+      capability_minor,
+      compute_mode,
+      mp_count,
+      max_mp_threads,
+      max_blk_threads,
+      max_sharedmem,
+      max_grid_dim_x,
+      warp_size,
+      pci_bus_id,
+      pci_device_id,
+      pci_domain_id,
+      max_pitch,
+      integrated,
+      unified_address,
+      managed_memory,
+    }
+  }
+}
+
 pub type NvGpuPCtx = GpuPCtx;
 
 pub struct GpuPCtx {
@@ -106,6 +177,7 @@ pub struct GpuPCtx {
   //pub iref_ctr:     Cell<u32>,
   //pub dev:          i32,
   pub pctx:         CudaPrimaryCtx,
+  pub info:         NvGpuInfo,
   pub main:         CudartStream,
   pub copy_to:      CudartStream,
   pub copy_from:    CudartStream,
@@ -117,7 +189,7 @@ pub struct GpuPCtx {
 
 impl GpuPCtx {
   pub fn new(dev: i32) -> Option<GpuPCtx> {
-    println!("DEBUG: GpuPCtx::new: dev={}", dev);
+    println!("DEBUG: NvGpuPCtx::new: dev={}", dev);
     if LIBCUDA._inner.is_none() {
       return None;
     }
@@ -125,6 +197,8 @@ impl GpuPCtx {
     let pctx = CudaPrimaryCtx::retain(dev).unwrap();
     // FIXME: confirm that SCHED_YIELD is what we really want.
     pctx.set_flags(CU_CTX_SCHED_YIELD).unwrap();
+    let info = NvGpuInfo::new(dev);
+    println!("DEBUG: NvGpuPCtx::new: info={:?}", &info);
     let main = CudartStream::null();
     let copy_to = CudartStream::create_nonblocking().unwrap();
     let copy_from = CudartStream::create_nonblocking().unwrap();
@@ -137,6 +211,7 @@ impl GpuPCtx {
       //iref_ctr:     Cell::new(0),
       //dev,
       pctx,
+      info,
       main,
       copy_to,
       copy_from,
@@ -511,7 +586,7 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
 }
 
 pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
-  TL_PCTX.try_with(|ctx| {
+  TL_PCTX.try_with(|_pctx| {
     // FIXME FIXME
     0
   }).unwrap_or_else(|_| 0)
@@ -519,9 +594,9 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
 
 pub extern "C" fn tl_pctx_gpu_back_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
   assert!(!dptr.is_null());
-  TL_PCTX.with(|ctx| {
+  TL_PCTX.with(|pctx| {
     // FIXME FIXME
-    let x = ctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);
+    let x = pctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);
     unsafe {
       write(dptr, x);
     }
@@ -530,7 +605,7 @@ pub extern "C" fn tl_pctx_gpu_back_alloc_hook(dptr: *mut u64, sz: usize) -> i32 
 }
 
 pub extern "C" fn tl_pctx_gpu_back_free_hook(dptr: u64) -> i32 {
-  TL_PCTX.try_with(|ctx| {
+  TL_PCTX.try_with(|_pctx| {
     // FIXME FIXME
     0
   }).unwrap_or_else(|_| 0)
