@@ -28,6 +28,7 @@ default = ["gpu"]
 gpu = ["cacti_gpu_cu_ffi"]
 
 [dependencies]
+aho_corasick = { path = "../aho_corasick", default-features = false, features = ["std"] }
 byteorder = { path = "../byteorder" }
 cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }

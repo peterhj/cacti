@@ -170,6 +170,10 @@ impl StableCell {
   }
 }
 
+pub struct StableCheckpoint {
+  // TODO TODO
+}
+
 /*#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum CellSpec {
@@ -353,7 +357,7 @@ pub enum ShapeCompat {
   Incompat,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct CellType {
   pub shape:    Vec<i64>,
   pub dtype:    Dtype,
@@ -514,7 +518,7 @@ impl CellMode {
     }
   }
 
-  pub fn set_mux(&mut self) -> Result<bool, ()> {
+  pub fn set_init(&mut self) -> Result<bool, ()> {
     match *self {
       CellMode::_Top => {
         *self = CellMode::Init;
@@ -527,6 +531,10 @@ impl CellMode {
         return Err(());
       }
     }
+  }
+
+  pub fn set_mux(&mut self) -> Result<bool, ()> {
+    self.set_init()
   }
 }
 

@@ -1,3 +1,4 @@
+extern crate aho_corasick;
 extern crate byteorder;
 extern crate cacti_cfg_env;
 #[cfg(feature = "gpu")]

@@ -4,7 +4,7 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Counter {
-  pub rst:  u16,
+  pub rst:  u32,
 }
 
 impl Default for Counter {
@@ -44,17 +44,17 @@ impl Counter {
     if self.rst > 1 {
       r_ctr.rst.wrapping_add(1) == self.rst
     } else if self.rst == 1 {
-      r_ctr.rst == u16::max_value()
+      r_ctr.rst == u32::max_value()
     } else {
       false
     }
   }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Clock {
-  pub rst:  u16,
-  pub tup:  u16,
+  pub rst:  u32,
+  pub tup:  u32,
 }
 
 impl Default for Clock {
@@ -90,13 +90,13 @@ impl Clock {
   }
 
   pub fn finish(&self) -> Clock {
-    assert!(self.tup != u16::max_value());
-    Clock{rst: self.rst, tup: u16::max_value()}
+    assert!(self.tup != u32::max_value());
+    Clock{rst: self.rst, tup: u32::max_value()}
   }
 
   pub fn update(&self) -> Clock {
     let next_tup = self.tup + 1;
-    assert!(next_tup != u16::max_value());
+    assert!(next_tup != u32::max_value());
     Clock{rst: self.rst, tup: next_tup}
   }
 
@@ -136,7 +136,13 @@ impl Clock {
     None
   }
 
-  pub fn partial_cmp<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
+  pub fn partial_cmp_<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
+    self.partial_cmp(&r_clk.into())
+  }
+}
+
+impl PartialOrd for Clock {
+  fn partial_cmp(&self, r_clk: &Clock) -> Option<Ordering> {
     // FIXME FIXME
     unimplemented!();
   }

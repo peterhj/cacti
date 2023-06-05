@@ -12,6 +12,7 @@ use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::{LIBCUDA, LIBCUDART, LIBNVRTC, TL_LIBNVRTC_BUILTINS_BARRIER};
 use cacti_gpu_cu_ffi::{cuda_memcpy_d2h_async, CudartStream, cudart_set_cur_dev};
 
+use aho_corasick::{AhoCorasick};
 use futhark_ffi::{
   Config as FutConfig,
   Object as FutObject,
@@ -543,38 +544,78 @@ impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: Futh
   }
 }
 
-impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  pub fn _to_futhark_entry_type(dim: Dim) -> String {
-    let mut s = String::new();
-    // NB: futhark scalars in entry arg position are always emitted as
-    // pointers to host memory, so we must coerce those to 1-d arrays.
-    if dim.ndim == 0 {
-      s.push_str("[1]");
-    }
-    for _ in 0 .. dim.ndim {
-      s.push_str("[]");
-    }
-    s.push_str(dim.dtype.format_futhark());
-    s
+pub fn _to_futhark_entry_type(dim: Dim) -> String {
+  let mut s = String::new();
+  // NB: futhark scalars in entry arg position are always emitted as
+  // pointers to host memory, so we must coerce those to 1-d arrays.
+  if dim.ndim == 0 {
+    s.push_str("[1]");
   }
+  for _ in 0 .. dim.ndim {
+    s.push_str("[]");
+  }
+  s.push_str(dim.dtype.format_futhark());
+  s
+}
 
-  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, out_mode: CellMode) {
+pub fn _to_futhark_entry_out0_type(dim: Dim) -> String {
+  let mut s = String::new();
+  if dim.ndim == 0 {
+    s.push_str("[1]");
+  }
+  for i in 0 .. dim.ndim {
+    write!(&mut s, "[y_{}_s_{}]", 0, i).unwrap();
+  }
+  s.push_str(dim.dtype.format_futhark());
+  s
+}
+
+#[derive(Clone, Copy)]
+pub struct FutharkThunkBuildConfig {
+  pub emit_out0_shape: bool,
+}
+
+impl Default for FutharkThunkBuildConfig {
+  fn default() -> FutharkThunkBuildConfig {
+    FutharkThunkBuildConfig{
+      emit_out0_shape: false,
+    }
+  }
+}
+
+impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
+  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, out_mode: CellMode, mut cfg: FutharkThunkBuildConfig) {
     let mut s = String::new();
     write!(&mut s, "entry kernel").unwrap();
+    if cfg.emit_out0_shape {
+      assert_eq!(self.arityout, 1);
+      let dim = self.spec_dim[self.arityin as usize];
+      for i in 0 .. dim.ndim {
+        write!(&mut s, " [y_{}_s_{}]", 0, i).unwrap();
+      }
+    }
     for k in 0 .. self.arityin {
       let dim = self.spec_dim[k as usize];
-      write!(&mut s, " (x_{}: {})", k, Self::_to_futhark_entry_type(dim)).unwrap();
+      write!(&mut s, " (x_{}: {})", k, _to_futhark_entry_type(dim)).unwrap();
     }
     if self.arityout == 1 {
       match out_mode {
         CellMode::_Top => panic!("bug"),
         CellMode::Aff => {
           let dim = self.spec_dim[self.arityin as usize];
-          write!(&mut s, " : {}", Self::_to_futhark_entry_type(dim)).unwrap();
+          write!(&mut s, " : {}", _to_futhark_entry_type(dim)).unwrap();
         }
         CellMode::Init => {
           let dim = self.spec_dim[self.arityin as usize];
-          let fty = Self::_to_futhark_entry_type(dim);
+          if dim.ndim >= 2 && !cfg.emit_out0_shape {
+            cfg.emit_out0_shape = true;
+            return self._try_build(ctr, env, out_mode, cfg);
+          }
+          let fty = if cfg.emit_out0_shape {
+            _to_futhark_entry_out0_type(dim)
+          } else {
+            _to_futhark_entry_type(dim)
+          };
           write!(&mut s, " (oy_{}: *{}) : *{}", 0, fty, fty).unwrap();
         }
       }
@@ -582,7 +623,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       write!(&mut s, " : (").unwrap();
       for k in 0 .. self.arityout {
         let dim = self.spec_dim[(self.arityin + k) as usize];
-        write!(&mut s, "{}, ", Self::_to_futhark_entry_type(dim)).unwrap();
+        write!(&mut s, "{}, ", _to_futhark_entry_type(dim)).unwrap();
       }
       write!(&mut s, ")").unwrap();
     } else {
@@ -592,7 +633,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     for k in 0 .. self.arityin {
       let dim = self.spec_dim[k as usize];
       if dim.ndim == 0 {
-        write!(&mut s, "\tlet [x_{}] = x_{} in\n", k, k).unwrap();
+        write!(&mut s, "\tlet x_{} = x_{}[0] in\n", k, k).unwrap();
       }
     }
     if self.arityout == 1 {
@@ -602,22 +643,40 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         CellMode::Init => {
           let dim = self.spec_dim[self.arityin as usize];
           if dim.ndim == 0 {
-            write!(&mut s, "\tlet [oy_{}] = oy_{} in\n", 0, 0).unwrap();
+            write!(&mut s, "\tlet oy_{} = oy_{}[0] in\n", 0, 0).unwrap();
           }
         }
       }
     }
+    // FIXME FIXME: better pattern match/replace.
+    let mut pats = Vec::new();
+    let mut reps = Vec::new();
+    for k in 0 .. self.arityin {
+      pats.push(format!("{{%{}}}", k));
+      reps.push(format!("x_{}", k));
+    }
+    for k in 0 .. self.arityout {
+      pats.push(format!("{{%{}}}", self.arityin + k));
+      reps.push(format!("y_{}", k));
+    }
+    assert_eq!(pats.len(), reps.len());
+    let matcher = AhoCorasick::new(&pats).unwrap();
     for line in self.code.body.iter() {
-      // FIXME FIXME: better pattern match/replace.
-      let mut line = line.clone();
-      for k in 0 .. self.arityin {
+      /*let mut line = line.clone();
+      /*for k in 0 .. self.arityin {
         line = line.replace(&format!("{{%{}}}", k), &format!("x_{}", k));
       }
       for k in 0 .. self.arityout {
         line = line.replace(&format!("{{%{}}}", self.arityin + k), &format!("y_{}", k));
-      }
+      }*/
+      for (pat, rep) in pats.iter().zip(reps.iter()) {
+        line = line.replace(pat, rep);
+      }*/
+      let mut out_buf = Vec::new();
+      matcher.try_stream_replace_all(line.as_bytes(), &mut out_buf, &reps).unwrap();
+      let out_line = String::from_utf8(out_buf).unwrap();
       write!(&mut s, "\t").unwrap();
-      s.push_str(&line);
+      s.push_str(&out_line);
       write!(&mut s, "\n").unwrap();
     }
     if self.arityout == 1 {
@@ -626,6 +685,9 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         CellMode::Aff => {}
         CellMode::Init => {
           let dim = self.spec_dim[self.arityin as usize];
+          if dim.ndim >= 2 {
+            assert!(cfg.emit_out0_shape);
+          }
           match dim.ndim {
             0 => {
               write!(&mut s, "\tlet y_{} = oy_{} + y_{} in\n", 0, 0, 0).unwrap();
@@ -700,7 +762,7 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     // FIXME
     if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Aff);
+      self._try_build(ctr, env, CellMode::Aff, FutharkThunkBuildConfig::default());
     }
     if self.object.borrow().is_none() {
       panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
@@ -714,7 +776,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
 
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Aff);
+      self._try_build(ctr, env, CellMode::Aff, FutharkThunkBuildConfig::default());
     }
     if self.object.borrow().is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: build error");
@@ -830,7 +892,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
     if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Init);
+      self._try_build(ctr, env, CellMode::Init, FutharkThunkBuildConfig::default());
     }
     if self.object.borrow().is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: build error");
@@ -908,7 +970,9 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
     }
     /*assert_eq!(arg_arr[self.arityin as usize].as_ptr(), out_arr[0].as_ptr());*/
-    let (out_ptr, out_ndim) = arg_arr.pop().unwrap().into_raw();
+    /*let (out_ptr, out_ndim) = arg_arr.pop().unwrap().into_raw();*/
+    let out_ndim = arg_arr.last().unwrap().ndim();
+    let out_ptr = arg_arr.last_mut().unwrap().take_ptr();
     assert_eq!(out_ptr, out_arr[0].as_ptr());
     assert_eq!(out_ndim, out_arr[0].ndim());
     // FIXME FIXME
@@ -972,8 +1036,7 @@ impl PThunk {
     None
   }
 
-  // FIXME FIXME: think about this api.
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, args: &[CellPtr], out: CellPtr, /*out_ty: &CellType, out_cel: &mut PCell*/) -> ThunkRet {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
@@ -991,7 +1054,30 @@ impl PThunk {
     match self.lookup_impl_(PMach::NvGpu) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.apply(ctr, env, &*self.spec_, args, out, /*out_ty, cel*/)
+        thimpl_.apply(ctr, env, &*self.spec_, arg, out)
+      }
+    }
+  }
+
+  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    // FIXME FIXME
+    match self.lookup_impl_(PMach::NvGpu) {
+      None => {
+        match self.spec_.gen_impl_(self.spec_dim.clone(), PMach::NvGpu) {
+          None => {
+            // FIXME: fail stop here.
+          }
+          Some(thimpl_) => {
+            self.push_new_impl_(PMach::NvGpu, thimpl_);
+          }
+        }
+      }
+      _ => {}
+    }
+    match self.lookup_impl_(PMach::NvGpu) {
+      None => panic!("bug"),
+      Some(thimpl_) => {
+        thimpl_.accumulate(ctr, env, &*self.spec_, arg, out)
       }
     }
   }
