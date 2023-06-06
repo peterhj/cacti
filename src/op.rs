@@ -3,7 +3,10 @@ use crate::ctx::*;
 use crate::panick::*;
 use crate::thunk::op::*;
 
+use futhark_syntax::*;
+
 use std::convert::{TryInto};
+use std::fmt::{Write};
 use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
 
 /*impl<P: Into<CellPtr> + Sized> Add<P> for f32 {
@@ -716,10 +719,10 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 
   //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
 
-  /*#[track_caller]
-  fn apply_futhark(self, fut_str: &str) -> Self {
-    unimplemented!();
-  }*/
+  #[track_caller]
+  fn apply_futhark(&self, lam_src: &str) -> CellPtr {
+    apply_futhark(lam_src, &[self.as_ref()])
+  }
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
@@ -768,3 +771,32 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 }
 
 impl<P: AsRef<CellPtr> + Sized> Ops for P {}
+
+#[track_caller]
+pub fn apply_futhark(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
+  panick_wrap(|| {
+    let trie = tokenizer_trie();
+    let tokens = Tokenizer::new(&trie, lam_src);
+    let mut parser = ExpParser::new(tokens);
+    match parser.parse() {
+      Ok(Exp::Lam(..)) => {
+        apply_futhark_unverified(lam_src, arg)
+      }
+      Ok(Exp::LamAlt(..)) => {
+        let mut new_src = String::new();
+        write!(&mut new_src, "(").unwrap();
+        new_src.push_str(lam_src);
+        write!(&mut new_src, ")").unwrap();
+        apply_futhark_unverified(&new_src, arg)
+      }
+      Ok(_) => panic!("ERROR: expected futhark lambda"),
+      Err(_) => panic!("ERROR: invalid futhark"),
+    }
+  })
+}
+
+#[track_caller]
+pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
+  // FIXME FIXME
+  unimplemented!();
+}

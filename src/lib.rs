@@ -5,6 +5,7 @@ extern crate cacti_cfg_env;
 extern crate cacti_gpu_cu_ffi;
 extern crate cacti_smp_c_ffi;
 extern crate futhark_ffi;
+extern crate futhark_syntax;
 extern crate half;
 extern crate home;
 extern crate libc;

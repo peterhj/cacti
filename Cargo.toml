@@ -34,6 +34,7 @@ cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 futhark_ffi = { path = "../futhark_ffi" }
+futhark_syntax = { path = "../futhark_syntax" }
 half = { path = "../half" }
 home = { path = "../home" }
 libc = { path = "../libc" }
