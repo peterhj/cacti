@@ -443,7 +443,7 @@ impl Libcublas {
     self.cublasGetVersion = library.get(b"cublasGetVersion_v2").ok();
     self.cublasSetStream = library.get(b"cublasSetStream_v2").ok();
     self.cublasSetPointerMode = library.get(b"cublasSetPointerMode_v2").ok();
-    self.cublasSetAtomicsMode = library.get(b"cublasSetAtomicsMode_v2").ok();
+    self.cublasSetAtomicsMode = library.get(b"cublasSetAtomicsMode").ok();
     self.cublasSetMathMode = library.get(b"cublasSetMathMode").ok();
     self.cublasSgemmEx = library.get(b"cublasSgemmEx").ok();
     self.cublasGemmEx = library.get(b"cublasGemmEx").ok();

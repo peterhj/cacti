@@ -898,6 +898,14 @@ impl CtxEnv {
     }
   }
 
+  pub fn read_ref(&self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryRef_> {
+    unimplemented!();
+  }
+
+  pub fn write_ref(&self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryRef_> {
+    unimplemented!();
+  }
+
   pub fn lookup_ref(&self, x: CellPtr) -> Option<CellEnvEntryRef_> {
     let ty = match self.celtab.get(&x) {
       None => panic!("bug"),

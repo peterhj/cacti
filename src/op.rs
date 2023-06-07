@@ -5,8 +5,8 @@ use crate::thunk::op::*;
 
 use futhark_syntax::*;
 
+use std::borrow::{Cow};
 use std::convert::{TryInto};
-use std::fmt::{Write};
 use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
 
 /*impl<P: Into<CellPtr> + Sized> Add<P> for f32 {
@@ -319,34 +319,51 @@ pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
       let q = rhs.into();
       let p_ty = ctx_lookup_type(p);
       let q_ty = ctx_lookup_type(q);
-      assert_eq!(p_ty.dtype, q_ty.dtype);
-      assert_eq!(p_ty.shape.len(), 2);
-      assert_eq!(q_ty.shape.len(), 2);
+      assert_eq!(p_ty.ndim(), 2);
+      assert_eq!(q_ty.ndim(), 2);
       assert_eq!(p_ty.shape[0] % l_block[0], 0);
       assert_eq!(p_ty.shape[1] % l_block[1], 0);
       assert_eq!(q_ty.shape[0] % r_block[0], 0);
       assert_eq!(q_ty.shape[1] % r_block[1], 0);
-      // FIXME FIXME: transpose block shape checks.
-      let l_nrow = p_ty.shape[0] / l_block[0];
-      let l_ncol = p_ty.shape[1] / l_block[1];
-      let r_nrow = q_ty.shape[0] / r_block[0];
-      let r_ncol = q_ty.shape[1] / r_block[1];
+      let (_m, _n) = match (lt, rt) {
+        (false, false) => {
+          assert_eq!(p_ty.shape[1], q_ty.shape[0]);
+          (p_ty.shape[0], q_ty.shape[1])
+        }
+        (true, false) => {
+          assert_eq!(p_ty.shape[0], q_ty.shape[0]);
+          (p_ty.shape[1], q_ty.shape[1])
+        }
+        (false, true) => {
+          assert_eq!(p_ty.shape[1], q_ty.shape[1]);
+          (p_ty.shape[0], q_ty.shape[0])
+        }
+        (true, true) => {
+          assert_eq!(p_ty.shape[0], q_ty.shape[1]);
+          (p_ty.shape[1], q_ty.shape[0])
+        }
+      };
+      //let l_nrow = p_ty.shape[0] / l_block[0];
+      //let l_ncol = p_ty.shape[1] / l_block[1];
+      //let r_nrow = q_ty.shape[0] / r_block[0];
+      //let r_ncol = q_ty.shape[1] / r_block[1];
+      let o_dtype = p_ty.dtype.max(q_ty.dtype).unwrap();
       let op = BlockMulMatrixThunkSpec{
-        dtype: p_ty.dtype,
-        lt,
-        rt,
-        l_shape: [p_ty.shape[0], p_ty.shape[1]],
-        r_shape: [q_ty.shape[0], q_ty.shape[1]],
+        //l_shape: [p_ty.shape[0], p_ty.shape[1]],
+        //r_shape: [q_ty.shape[0], q_ty.shape[1]],
         l_block,
         r_block,
-        l_nblock: [l_nrow, l_ncol],
-        r_nblock: [r_nrow, r_ncol],
+        //l_nblock: [l_nrow, l_ncol],
+        //r_nblock: [r_nrow, r_ncol],
+        lt,
+        rt,
+        l_dtype: p_ty.dtype,
+        r_dtype: q_ty.dtype,
+        o_dtype,
       };
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(p);
       ctx_push_cell_arg(q);
-      // FIXME FIXME
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -720,7 +737,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
 
   #[track_caller]
-  fn apply_futhark(&self, lam_src: &str) -> CellPtr {
+  fn apply_futhark(&self, lam_src: Cow<'static, str>) -> CellPtr {
     apply_futhark(lam_src, &[self.as_ref()])
   }
 
@@ -773,30 +790,56 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 impl<P: AsRef<CellPtr> + Sized> Ops for P {}
 
 #[track_caller]
-pub fn apply_futhark(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
+pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
   panick_wrap(|| {
     let trie = tokenizer_trie();
-    let tokens = Tokenizer::new(&trie, lam_src);
+    let tokens = Tokenizer::new(&trie, &*lam_src);
     let mut parser = ExpParser::new(tokens);
-    match parser.parse() {
-      Ok(Exp::Lam(..)) => {
-        apply_futhark_unverified(lam_src, arg)
+    let result = parser.parse();
+    let mut wrap_parens = false;
+    match result.as_ref() {
+      Ok(&Exp::Lam(..)) => {}
+      Ok(&Exp::LamAlt(..)) => {
+        wrap_parens = true;
       }
-      Ok(Exp::LamAlt(..)) => {
-        let mut new_src = String::new();
-        write!(&mut new_src, "(").unwrap();
-        new_src.push_str(lam_src);
-        write!(&mut new_src, ")").unwrap();
-        apply_futhark_unverified(&new_src, arg)
-      }
-      Ok(_) => panic!("ERROR: expected futhark lambda"),
+      Ok(_) => panic!("ERROR: expected futhark lambda expression, e.g. (\\x y -> x + y)"),
       Err(_) => panic!("ERROR: invalid futhark"),
     }
+    let lam_exp = result.unwrap();
+    assert!(arg.len() < u16::max_value() as usize);
+    match &lam_exp {
+      &Exp::Lam(ref vars, ..) |
+      &Exp::LamAlt(ref vars, ..) => {
+        assert_eq!(arg.len(), vars.len());
+      }
+      _ => unreachable!()
+    }
+    let ar_in = arg.len() as u16;
+    // NB: arity out must be one because of the type signature (-> CellPtr).
+    let ar_out = 1;
+    assert!(ctx_clean_arg());
+    for &&x in arg.iter() {
+      // FIXME FIXME
+      let xty_ = ctx_lookup_dtype(x);
+      ctx_push_cell_arg(x);
+    }
+    let op = LamFutExpThunkSpec{lam_src, lam_exp, ar_in, ar_out, wrap_parens};
+    // FIXME FIXME: here we have to build the object, because we don't know
+    // the output dim or type. if the lam is annotated, double check the actual
+    // dim/type we read out of the manifest.
+    //let oty_ = _;
+    ctx_pop_thunk(op)
+    //ctx_pop_thunk_(op, oty_)
   })
 }
 
 #[track_caller]
+pub fn apply2_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> (CellPtr, CellPtr) {
+  unimplemented!();
+}
+
+/*#[track_caller]
 pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
   // FIXME FIXME
   unimplemented!();
-}
+}*/

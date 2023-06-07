@@ -1,7 +1,7 @@
 extern crate cacti;
 
 use cacti::cell::Dtype;
-use cacti::util::torch::{TorchFile, TorchDtype};
+use cacti::util::pickle::{PickleFile};
 
 use std::convert::{TryFrom};
 use std::env;
@@ -31,7 +31,7 @@ fn main() {
     return;
   }
   let p = PathBuf::from(&argv[1]);
-  let ckpt = TorchFile::open(p).unwrap();
+  let ckpt = PickleFile::open(p).unwrap();
   for (i, t) in ckpt.tensors().iter().enumerate() {
     println!("DEBUG: tensor i={} dtype={:?} shape={:?} stride={:?} name='{}'",
         i,

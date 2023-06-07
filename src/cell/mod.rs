@@ -4,7 +4,7 @@ use crate::ctx::*;
 use crate::pctx::{Locus, PMach};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
-use crate::util::torch::{TorchDtype};
+use crate::util::pickle::{TorchDtype};
 
 use std::any::{Any};
 use std::convert::{TryFrom, TryInto};
@@ -296,6 +296,18 @@ impl Dtype {
       Dtype::UInt32     => 4,
       Dtype::UInt16     => 2,
       Dtype::UInt8      => 1,
+    }
+  }
+
+  pub fn max(self, rhs: Dtype) -> Option<Dtype> {
+    match (self, rhs) {
+      (Dtype::_Top, _) |
+      (_, Dtype::_Top) => Some(Dtype::_Top),
+      (Dtype::Float32, Dtype::Float32) |
+      (Dtype::Float32, Dtype::Float16) |
+      (Dtype::Float16, Dtype::Float32) => Some(Dtype::Float32),
+      (Dtype::Float16, Dtype::Float16) => Some(Dtype::Float16),
+      _ => None
     }
   }
 }
@@ -654,6 +666,24 @@ impl PCell {
       }
     }
     None
+  }
+
+  pub fn get(&mut self, q_pmach: PMach) -> Option<&mut Weak<dyn InnerCell_>> {
+    let mut key = None;
+    for &mut (locus, pmach, ref mut cel_) in self.replicas.iter_mut() {
+      if pmach == q_pmach {
+        match cel_ {
+          &mut Some(ref mut cel_) => {
+            return Some(cel_);
+          }
+          &mut None => {
+            key = Some(locus);
+          }
+        }
+      }
+    }
+    // FIXME FIXME: if it doesn't exist, then create it.
+    unimplemented!();
   }
 }
 

@@ -178,6 +178,7 @@ pub struct GpuPCtx {
   //pub dev:          i32,
   pub pctx:         CudaPrimaryCtx,
   pub info:         NvGpuInfo,
+  pub blas_ctx:     CublasContext,
   pub main:         CudartStream,
   pub copy_to:      CudartStream,
   pub copy_from:    CudartStream,
@@ -199,6 +200,7 @@ impl GpuPCtx {
     pctx.set_flags(CU_CTX_SCHED_YIELD).unwrap();
     let info = NvGpuInfo::new(dev);
     println!("DEBUG: NvGpuPCtx::new: info={:?}", &info);
+    let blas_ctx = CublasContext::create().unwrap();
     let main = CudartStream::null();
     let copy_to = CudartStream::create_nonblocking().unwrap();
     let copy_from = CudartStream::create_nonblocking().unwrap();
@@ -212,6 +214,7 @@ impl GpuPCtx {
       //dev,
       pctx,
       info,
+      blas_ctx,
       main,
       copy_to,
       copy_from,

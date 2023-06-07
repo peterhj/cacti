@@ -38,6 +38,7 @@ use std::mem::{size_of};
 use std::ptr::{null_mut};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts};
+use std::str::{from_utf8};
 
 pub mod op;
 //pub mod op_gpu;
@@ -121,6 +122,8 @@ pub enum ThunkRet {
 #[derive(Clone, Copy, Debug)]
 pub enum ThunkDimErr {
   // FIXME FIXME
+  Deferred,
+  Immutable,
   _Bot,
 }
 
@@ -133,6 +136,8 @@ impl Default for ThunkDimErr {
 #[derive(Clone, Copy, Debug)]
 pub enum ThunkTypeErr {
   // FIXME FIXME
+  Deferred,
+  Immutable,
   Nondeterministic,
   _Bot,
 }
@@ -170,6 +175,8 @@ pub trait ThunkSpec {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
+  fn set_out_dim(&self, _arg: &[Dim], _out: Dim) -> Result<(), ThunkDimErr> { Err(ThunkDimErr::Immutable) }
+  fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
   fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_impl_(&self, _spec_dim: Vec<Dim>, _pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> { None }
@@ -183,13 +190,15 @@ pub trait ThunkSpec_ {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
+  fn set_out_dim(&self, arg: &[Dim], out: Dim) -> Result<(), ThunkDimErr>;
+  fn set_out_ty_(&self, arg: &[CellType], out: CellType) -> Result<(), ThunkTypeErr>;
   //fn scalar_val(&self) -> Option<&dyn DtypeExt>;
   //fn mode(&self) -> CellMode;
   fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>>;
   fn pop_adj(&self, /*ctr: &CtxCtr, env: &mut CtxEnv, spine: &mut Spine,*/ arg: &[CellPtr], /*out: CellPtr,*/ out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr>;
 }
 
-impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
+impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
   fn as_any(&self) -> &dyn Any {
     self
   }
@@ -215,6 +224,14 @@ impl<T: ThunkSpec + Copy + Eq + Any> ThunkSpec_ for T {
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
     ThunkSpec::out_ty_(self, arg)
+  }
+
+  fn set_out_dim(&self, arg: &[Dim], out: Dim) -> Result<(), ThunkDimErr> {
+    ThunkSpec::set_out_dim(self, arg, out)
+  }
+
+  fn set_out_ty_(&self, arg: &[CellType], out: CellType) -> Result<(), ThunkTypeErr> {
+    ThunkSpec::set_out_ty_(self, arg, out)
   }
 
   /*fn mode(&self) -> CellMode {
@@ -272,10 +289,12 @@ pub trait FutharkThunkSpec {
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
+  fn set_out_dim(&self, _arg: &[Dim], _out: Dim) -> Result<(), ThunkDimErr> { Err(ThunkDimErr::Immutable) }
+  fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
   fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_futhark(&self) -> FutharkThunkCode;
-  //fn gen_adj_futhark(&self, _gen_code: &FutharkThunkCode) -> Option<FutharkThunkCode> { None }
+  //fn pop_adj(&self, _arg: &[CellPtr], _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
@@ -289,6 +308,14 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
     FutharkThunkSpec::out_ty_(self, arg)
+  }
+
+  fn set_out_dim(&self, arg: &[Dim], out: Dim) -> Result<(), ThunkDimErr> {
+    FutharkThunkSpec::set_out_dim(self, arg, out)
+  }
+
+  fn set_out_ty_(&self, arg: &[CellType], out: CellType) -> Result<(), ThunkTypeErr> {
+    FutharkThunkSpec::set_out_ty_(self, arg, out)
   }
 
   /*fn mode(&self) -> CellMode {
@@ -648,7 +675,6 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         }
       }
     }
-    // FIXME FIXME: better pattern match/replace.
     let mut pats = Vec::new();
     let mut reps = Vec::new();
     for k in 0 .. self.arityin {
@@ -661,24 +687,16 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     }
     assert_eq!(pats.len(), reps.len());
     let matcher = AhoCorasick::new(&pats).unwrap();
+    let mut out_buf = Vec::new();
     for line in self.code.body.iter() {
-      /*let mut line = line.clone();
-      /*for k in 0 .. self.arityin {
-        line = line.replace(&format!("{{%{}}}", k), &format!("x_{}", k));
-      }
-      for k in 0 .. self.arityout {
-        line = line.replace(&format!("{{%{}}}", self.arityin + k), &format!("y_{}", k));
-      }*/
-      for (pat, rep) in pats.iter().zip(reps.iter()) {
-        line = line.replace(pat, rep);
-      }*/
-      let mut out_buf = Vec::new();
+      out_buf.clear();
       matcher.try_stream_replace_all(line.as_bytes(), &mut out_buf, &reps).unwrap();
-      let out_line = String::from_utf8(out_buf).unwrap();
+      let out_line = from_utf8(&out_buf).unwrap();
       write!(&mut s, "\t").unwrap();
-      s.push_str(&out_line);
+      s.push_str(out_line);
       write!(&mut s, "\n").unwrap();
     }
+    drop(out_buf);
     if self.arityout == 1 {
       match out_mode {
         CellMode::_Top => panic!("bug"),

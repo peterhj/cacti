@@ -47,9 +47,9 @@ pub const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR: CUdevice_attribute = 75;
 pub const CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR: CUdevice_attribute = 76;
 pub const CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY: CUdevice_attribute = 83;
 
-pub const CU_COMPUTEMODE_DEFAULT: i32 = 0;
-pub const CU_COMPUTEMODE_PROHIBITED: i32 = 2;
-pub const CU_COMPUTEMODE_EXCLUSIVE_PROCESS: i32 = 3;
+pub const CU_COMPUTEMODE_DEFAULT: c_int = 0;
+pub const CU_COMPUTEMODE_PROHIBITED: c_int = 2;
+pub const CU_COMPUTEMODE_EXCLUSIVE_PROCESS: c_int = 3;
 
 #[repr(C)]
 pub struct CUctx_st([u8; 0]);
@@ -90,6 +90,12 @@ pub const cudaMemcpyDeviceToDevice: cudaMemcpyKind = 3;
 pub const cudaMemcpyDefault: cudaMemcpyKind = 4;
 
 pub type cudaDataType_t = c_int;
+
+pub const CUDA_R_16F: cudaDataType_t = 2;
+pub const CUDA_R_16BF: cudaDataType_t = 14;
+pub const CUDA_R_32F: cudaDataType_t = 0;
+pub const CUDA_R_64F: cudaDataType_t = 1;
+// TODO
 
 pub const cudaEventDefault: c_uint = 0;
 pub const cudaEventBlocking: c_uint = 1;

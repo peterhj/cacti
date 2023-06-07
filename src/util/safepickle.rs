@@ -1,6 +1,6 @@
 pub use repugnant_pickle::torch::{
     TensorType as TorchDtype,
-    RepugnantTorchTensor as TorchTensor,
-    RepugnantTorchTensorsIter as TorchTensorsIter,
-    RepugnantTorchFile as TorchFile,
+    RepugnantTorchTensor as PickleTensor,
+    RepugnantTorchTensorsIter as PickleTensorsIter,
+    RepugnantTorchFile as PickleFile,
 };

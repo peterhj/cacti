@@ -1,8 +1,59 @@
 use super::*;
 use crate::algo::fp::{TotalOrd};
 use crate::cell::{DtypeExt, Dim};
+use cacti_gpu_cu_ffi::{cublas_gemm_batched};
+use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F};
 
+use futhark_syntax::{Exp as FutExp};
+
+use std::borrow::{Cow};
+use std::cell::{Cell};
 //use std::io::{Write};
+
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct LamFutExpThunkSpec {
+  pub lam_src: Cow<'static, str>,
+  pub lam_exp: FutExp,
+  pub ar_in: u16,
+  pub ar_out: u16,
+  // FIXME FIXME
+  //pub arg_dim: Vec<Dim>,
+  //pub out_dim: RefCell<Option<Vec<Dim>>>,
+  pub wrap_parens: bool,
+}
+
+impl FutharkThunkSpec for LamFutExpThunkSpec {
+  fn arity(&self) -> (u16, u16) {
+    (self.ar_in, self.ar_out)
+  }
+
+  fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    // FIXME FIXME
+    //Ok(Dim{ndim: 0, dtype: T::dtype()})
+    unimplemented!();
+  }
+
+  fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    // FIXME FIXME
+    //Ok(CellType{shape: Vec::new(), dtype: T::dtype()})
+    unimplemented!();
+  }
+
+  fn gen_futhark(&self, ) -> FutharkThunkCode {
+    let mut s = String::new();
+    if self.wrap_parens {
+      write!(&mut s, "({})", &self.lam_src).unwrap();
+    } else {
+      s.push_str(&self.lam_src);
+    }
+    for k in 0 .. self.ar_in {
+      write!(&mut s, " {{%{}}}", k).unwrap();
+    }
+    FutharkThunkCode{
+      body: vec![s],
+    }
+  }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct SetScalarFutThunkSpec<T> { pub val: T }
@@ -732,24 +783,25 @@ impl FutharkThunkSpec for Sum4dFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct DotThunkSpec;
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct DotThunkSpec;*/
 
 /*impl CustomThunk_ for AddScalarF32ThunkSpec {
 }*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BlockMulMatrixThunkSpec {
-  pub dtype:    Dtype,
-  pub lt:       bool,
-  pub rt:       bool,
-  // FIXME FIXME
-  pub l_shape:  [i64; 2],
-  pub r_shape:  [i64; 2],
+  //pub l_shape:  [i64; 2],
+  //pub r_shape:  [i64; 2],
   pub l_block:  [i64; 2],
   pub r_block:  [i64; 2],
-  pub l_nblock: [i64; 2],
-  pub r_nblock: [i64; 2],
+  //pub l_nblock: [i64; 2],
+  //pub r_nblock: [i64; 2],
+  pub lt:       bool,
+  pub rt:       bool,
+  pub l_dtype:  Dtype,
+  pub r_dtype:  Dtype,
+  pub o_dtype:  Dtype,
 }
 
 impl ThunkSpec for BlockMulMatrixThunkSpec {
@@ -758,38 +810,200 @@ impl ThunkSpec for BlockMulMatrixThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    // FIXME FIXME
-    if arg[0].ndim != 2 {
+    if arg[0].ndim() != 2 {
       return Err(ThunkDimErr::_Bot);
     }
-    if arg[1].ndim != 2 {
+    if arg[1].ndim() != 2 {
       return Err(ThunkDimErr::_Bot);
     }
-    if arg[0].dtype != arg[1].dtype {
+    if self.l_dtype != arg[0].dtype {
       return Err(ThunkDimErr::_Bot);
     }
-    Ok(Dim{ndim: 2, dtype: arg[0].dtype})
+    if self.r_dtype != arg[1].dtype {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: 2, dtype: self.o_dtype})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    // FIXME FIXME
-    if arg[0].shape.len() != 2 {
+    if arg[0].ndim() != 2 {
       return Err(ThunkTypeErr::_Bot);
     }
-    if arg[1].shape.len() != 2 {
+    if arg[1].ndim() != 2 {
       return Err(ThunkTypeErr::_Bot);
     }
-    if arg[0].shape[1] != arg[1].shape[0] {
+    let (m, n) = match (self.lt, self.rt) {
+      (false, false) => {
+        if arg[0].shape[1] != arg[1].shape[0] {
+          return Err(ThunkTypeErr::_Bot);
+        }
+        (arg[0].shape[0], arg[1].shape[1])
+      }
+      (true, false) => {
+        if arg[0].shape[0] != arg[1].shape[0] {
+          return Err(ThunkTypeErr::_Bot);
+        }
+        (arg[0].shape[1], arg[1].shape[1])
+      }
+      (false, true) => {
+        if arg[0].shape[1] != arg[1].shape[1] {
+          return Err(ThunkTypeErr::_Bot);
+        }
+        (arg[0].shape[0], arg[1].shape[0])
+      }
+      (true, true) => {
+        if arg[0].shape[0] != arg[1].shape[1] {
+          return Err(ThunkTypeErr::_Bot);
+        }
+        (arg[0].shape[1], arg[1].shape[0])
+      }
+    };
+    if arg[0].shape[0] % self.l_block[0] != 0 {
       return Err(ThunkTypeErr::_Bot);
     }
-    if arg[0].dtype != arg[1].dtype {
+    if arg[0].shape[1] % self.l_block[1] != 0 {
       return Err(ThunkTypeErr::_Bot);
     }
-    Ok(CellType{shape: vec![arg[0].shape[0], arg[1].shape[1]], dtype: arg[0].dtype})
+    if arg[1].shape[0] % self.r_block[0] != 0 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[1].shape[1] % self.r_block[1] != 0 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if self.l_dtype != arg[0].dtype {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if self.r_dtype != arg[1].dtype {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: vec![m, n], dtype: self.o_dtype})
   }
 
-  // FIXME FIXME
+  fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    // FIXME FIXME
+    unimplemented!();
+  }
 }
 
 pub struct BlockMulMatrixGpuThunkImpl {
+  // TODO
+  alpha: Cell<f32>,
+  beta: Cell<f32>,
+  tmp_a: RefCell<Vec<u64>>,
+  tmp_b: RefCell<Vec<u64>>,
+  tmp_c: RefCell<Vec<u64>>,
+}
+
+impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
+    self.alpha.set(1.0);
+    self.beta.set(0.0);
+    let mut arg_ty_ = Vec::with_capacity(arg.len());
+    for &x in arg.iter() {
+      match env.lookup_ref(x) {
+        None => panic!("bug"),
+        Some(e) => {
+          arg_ty_.push(e.ty.clone());
+        }
+      }
+    }
+    let out_ty_ = ThunkSpec::out_ty_(spec, &arg_ty_).unwrap();
+    // FIXME FIXME: correct transposes, shapes, arg order for row major v col major.
+    let m = out_ty_.shape[0];
+    assert!(m <= i32::max_value() as _);
+    let n = out_ty_.shape[1];
+    assert!(n <= i32::max_value() as _);
+    let inner_len = if spec.lt { arg_ty_[0].shape[0] } else { arg_ty_[0].shape[1] };
+    assert_eq!(inner_len, if spec.rt { arg_ty_[1].shape[1] } else { arg_ty_[1].shape[0] });
+    assert!(inner_len <= i32::max_value() as _);
+    // FIXME FIXME: load dptrs to blocks.
+    /*
+    let a_nrowblk = arg_ty_[0].shape[0] / self.l_block[0];
+    let a_ncolblk = arg_ty_[0].shape[1] / self.l_block[1];
+    match env.read_ref(arg[0]) {
+      None => panic!("bug"),
+      Some(e) => {
+        match e.cel_ {
+          &mut Cell::Phy(ref _state, ref mut pcel) => {
+            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
+            let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
+            //gpu_cel.dptr
+            // FIXME FIXME
+            //self.tmp_a.borrow_mut()...;
+          }
+          _ => panic!("bug")
+        }
+      }
+    }
+    // TODO TODO
+    match env.write_ref(out) {
+      None => panic!("bug"),
+      Some(e) => {
+        match e.cel_ {
+          &mut Cell::Phy(ref _state, ref mut pcel) => {
+            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
+            let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
+            //gpu_cel.dptr
+            // FIXME FIXME
+            //self.tmp_c.borrow_mut()...;
+          }
+          _ => panic!("bug")
+        }
+      }
+    }
+    */
+    let lda = arg_ty_[0].shape[1];
+    assert!(lda <= i32::max_value() as _);
+    let ldb = arg_ty_[1].shape[1];
+    assert!(ldb <= i32::max_value() as _);
+    let ldc = out_ty_.shape[1];
+    assert!(ldc <= i32::max_value() as _);
+    let a_gputy = match spec.l_dtype {
+      Dtype::Float32 => CUDA_R_32F,
+      Dtype::Float16 => CUDA_R_16F,
+      _ => unimplemented!()
+    };
+    let b_gputy = match spec.r_dtype {
+      Dtype::Float32 => CUDA_R_32F,
+      Dtype::Float16 => CUDA_R_16F,
+      _ => unimplemented!()
+    };
+    let c_gputy = match spec.o_dtype {
+      Dtype::Float32 => CUDA_R_32F,
+      Dtype::Float16 => CUDA_R_16F,
+      _ => unimplemented!()
+    };
+    TL_PCTX.with(|pctx| {
+      // FIXME FIXME
+      let gpu = &pctx.nvgpu.as_ref().unwrap();
+      let ret = cublas_gemm_batched(
+          &gpu.blas_ctx,
+          spec.lt, spec.rt,
+          m as _, n as _, inner_len as _,
+          self.alpha.as_ptr() as *const _,
+          &*self.tmp_a.borrow(), a_gputy, lda as _,
+          &*self.tmp_b.borrow(), b_gputy, ldb as _,
+          self.beta.as_ptr() as *const _,
+          &*self.tmp_c.borrow(), c_gputy, ldc as _,
+          &gpu.main,
+      );
+      match ret {
+        Err(_) => ThunkRet::Failure,
+        Ok(_) => ThunkRet::Success
+      }
+    })
+  }
+
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
+    self.alpha.set(1.0);
+    self.beta.set(1.0);
+    unimplemented!();
+    /*
+    TL_PCTX.with(|pctx| {
+      // FIXME FIXME
+    })
+    */
+  }
 }

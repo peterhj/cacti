@@ -452,3 +452,164 @@ impl CudartStream {
     self.dev
   }
 }
+
+pub type CublasResult<T=()> = Result<T, cublasStatus_t>;
+
+#[derive(Clone, Copy, Debug)]
+#[repr(i32)]
+pub enum CublasPointerMode {
+  Host = CUBLAS_POINTER_MODE_HOST,
+  Device = CUBLAS_POINTER_MODE_DEVICE,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(i32)]
+pub enum CublasAtomicsMode {
+  NotAllowed = CUBLAS_ATOMICS_NOT_ALLOWED,
+  Allowed = CUBLAS_ATOMICS_ALLOWED,
+}
+
+#[repr(C)]
+pub struct CublasContext {
+  raw:  cublasHandle_t,
+  //dev:  i32,
+}
+
+impl Drop for CublasContext {
+  fn drop(&mut self) {
+    if self.raw.is_null() {
+      return;
+    }
+    /*assert!(self.dev >= 0);
+    match cudart_set_cur_dev(self.dev) {
+      Ok(_) | Err(cudaErrorCudartUnloading) => {}
+      _ => panic!("bug")
+    }*/
+    let e = (LIBCUBLAS.cublasDestroy.as_ref().unwrap())(self.raw);
+    match e {
+      CUBLAS_STATUS_SUCCESS => {}
+      _ => panic!("bug")
+    }
+  }
+}
+
+impl CublasContext {
+  pub fn create() -> CublasResult<CublasContext> {
+    //let dev = cudart_get_cur_dev()?;
+    let mut raw: cublasHandle_t = null_mut();
+    let e = (LIBCUBLAS.cublasCreate.as_ref().unwrap())(&mut raw);
+    if e != CUBLAS_STATUS_SUCCESS {
+      return Err(e);
+    }
+    assert!(!raw.is_null());
+    Ok(CublasContext{raw, /*dev*/})
+  }
+
+  pub fn set_stream(&self, stream_raw: &CUstream) -> CublasResult {
+    let e = (LIBCUBLAS.cublasSetStream.as_ref().unwrap())(self.raw, *stream_raw);
+    if e != CUBLAS_STATUS_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn set_pointer_mode(&self, mode: CublasPointerMode) -> CublasResult {
+    let e = (LIBCUBLAS.cublasSetPointerMode.as_ref().unwrap())(self.raw, mode as _);
+    if e != CUBLAS_STATUS_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn set_atomics_mode(&self, mode: CublasAtomicsMode) -> CublasResult {
+    let e = (LIBCUBLAS.cublasSetAtomicsMode.as_ref().unwrap())(self.raw, mode as _);
+    if e != CUBLAS_STATUS_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn set_math_mode(&self, flags: u32) -> CublasResult {
+    let e = (LIBCUBLAS.cublasSetMathMode.as_ref().unwrap())(self.raw, flags);
+    if e != CUBLAS_STATUS_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn as_ptr(&self) -> cublasHandle_t {
+    self.raw
+  }
+}
+
+pub fn cublas_gemm_batched(
+    ctx: &CublasContext,
+    tr_a: bool,
+    tr_b: bool,
+    m: i32,
+    n: i32,
+    k: i32,
+    alpha: *const f32,
+    a: &[CUdeviceptr],
+    a_ty: cudaDataType_t,
+    lda: i32,
+    b: &[CUdeviceptr],
+    b_ty: cudaDataType_t,
+    ldb: i32,
+    beta: *const f32,
+    c: &[CUdeviceptr],
+    c_ty: cudaDataType_t,
+    ldc: i32,
+    // TODO TODO
+    stream_raw: &CUstream,
+) -> CublasResult {
+  assert_eq!(a.len(), b.len());
+  assert_eq!(b.len(), c.len());
+  assert!(c.len() <= i32::max_value() as usize);
+  ctx.set_stream(stream_raw).unwrap();
+  ctx.set_pointer_mode(CublasPointerMode::Host).unwrap();
+  let mut flags = CUBLAS_DEFAULT_MATH;
+  let e = match (a_ty, b_ty, c_ty) {
+    (CUDA_R_32F, CUDA_R_32F, CUDA_R_32F) => {
+      ctx.set_math_mode(flags).unwrap();
+      (LIBCUBLAS.cublasSgemmBatched.as_ref().unwrap())(
+        ctx.raw,
+        if tr_a { CUBLAS_OP_T } else { CUBLAS_OP_N },
+        if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
+        m, n, k,
+        alpha,
+        a.as_ptr() as *const usize as *const *const _, lda,
+        b.as_ptr() as *const usize as *const *const _, ldb,
+        beta,
+        c.as_ptr() as *const usize as *const *mut _, ldc,
+        c.len() as i32,
+      )
+    }
+    (CUDA_R_16F, CUDA_R_16F, CUDA_R_16F) |
+    (CUDA_R_16F, CUDA_R_32F, CUDA_R_32F) |
+    (CUDA_R_32F, CUDA_R_16F, CUDA_R_32F) => {
+      flags |= CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION;
+      ctx.set_math_mode(flags).unwrap();
+      (LIBCUBLAS.cublasGemmBatchedEx.as_ref().unwrap())(
+        ctx.raw,
+        if tr_a { CUBLAS_OP_T } else { CUBLAS_OP_N },
+        if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
+        m, n, k,
+        alpha as *const _,
+        a.as_ptr() as *const usize as *const *const _, a_ty, lda,
+        b.as_ptr() as *const usize as *const *const _, b_ty, ldb,
+        beta as *const _,
+        c.as_ptr() as *const usize as *const *mut _, c_ty, ldc,
+        c.len() as i32,
+        // TODO: check these parameters.
+        CUBLAS_COMPUTE_32F,
+        CUBLAS_GEMM_DEFAULT,
+      )
+    }
+    _ => unimplemented!()
+  };
+  if e != CUBLAS_STATUS_SUCCESS {
+    return Err(e);
+  }
+  Ok(())
+}
