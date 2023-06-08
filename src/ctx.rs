@@ -5,6 +5,9 @@ use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 
+use futhark_syntax::{Token as FutToken};
+use futhark_syntax::re::{ReTrie};
+
 use std::cell::{Cell, RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem::{swap};
@@ -12,7 +15,11 @@ use std::rc::{Rc};
 
 thread_local! {
   pub static TL_CTX_CFG: CtxCfg = CtxCfg::default();
-  pub static TL_CTX: Ctx = Ctx::new();
+  pub static TL_CTX: Ctx = {
+    let ctx = Ctx::new();
+    TL_CTX_CFG.with(|cfg| cfg._seal.set(true));
+    ctx
+  };
 }
 
 pub struct CtxCfg {
@@ -86,33 +93,25 @@ pub fn ctx_cfg_set_gpu_workspace_mem_per_10k(m: u16) {
 }
 
 pub struct Ctx {
-  //pub panick:   PanickCtx,
   pub ctr:      CtxCtr,
-  // FIXME
-  pub arg:      RefCell<Vec<CellPtr>>,
-  //pub out:      Cell<Option<CellPtr>>,
-  //pub out:      RefCell<Vec<CellPtr>>,
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
+  pub arg:      RefCell<Vec<CellPtr>>,
+  pub fut_trie: RefCell<Option<ReTrie<FutToken>>>,
 }
 
 impl Ctx {
   pub fn new() -> Ctx {
     println!("DEBUG: Ctx::new");
-    let ctx = Ctx{
-      //panick:   PanickCtx::new(),
+    Ctx{
       ctr:      CtxCtr::new(),
-      // FIXME
-      arg:      RefCell::new(Vec::new()),
-      //out:      Cell::new(None),
-      //out:      RefCell::new(Vec::new()),
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
-    };
-    TL_CTX_CFG.with(|cfg| cfg._seal.set(true));
-    ctx
+      arg:      RefCell::new(Vec::new()),
+      fut_trie: RefCell::new(None),
+    }
   }
 }
 
@@ -125,6 +124,58 @@ pub fn reset() {
     ctx.spine.borrow_mut()._reset();
   }))
 }
+
+#[track_caller]
+pub fn compile() {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    ctx.spine.borrow_mut()._compile();
+  }))
+}
+
+#[track_caller]
+pub fn resume() -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default()*/)
+  }))
+}
+
+#[track_caller]
+pub fn eval(x: CellPtr) -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    // FIXME FIXME: observe the arg clock.
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*x, _*/)
+  }))
+}
+
+/*#[track_caller]
+pub fn yield_() {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut spine = ctx.spine.borrow_mut();
+    // FIXME FIXME
+    unimplemented!();
+    /*spine.curp += 1;
+    //spine.env._;
+    spine.log.push(SpineEntry::Yield_);*/
+  }))
+}
+
+#[track_caller]
+pub fn break_() {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut spine = ctx.spine.borrow_mut();
+    // FIXME FIXME
+    unimplemented!();
+    /*spine.curp += 1;
+    //spine.env._;
+    spine.log.push(SpineEntry::Break_);*/
+  }))
+}*/
 
 pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
   TL_CTX.with(f)
@@ -533,7 +584,7 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
     let x = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(x, oty_);
     let mut spine = ctx.spine.borrow_mut();
-    spine.init_mux(tp, x);
+    spine.initialize(tp, x);
     x
   })
 }
@@ -875,6 +926,9 @@ impl CtxEnv {
   }
 
   pub fn retain(&self, x: CellPtr) {
+    if x.is_nil() {
+      return;
+    }
     match self.lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
@@ -887,6 +941,9 @@ impl CtxEnv {
   }
 
   pub fn release(&self, x: CellPtr) {
+    if x.is_nil() {
+      return;
+    }
     match self.lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
@@ -896,14 +953,6 @@ impl CtxEnv {
         e.stablect.set(next);
       }
     }
-  }
-
-  pub fn read_ref(&self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryRef_> {
-    unimplemented!();
-  }
-
-  pub fn write_ref(&self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryRef_> {
-    unimplemented!();
   }
 
   pub fn lookup_ref(&self, x: CellPtr) -> Option<CellEnvEntryRef_> {
@@ -1071,6 +1120,14 @@ impl CtxEnv {
     }
   }
 
+  pub fn read_ref(&mut self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryMutRef> {
+    unimplemented!();
+  }
+
+  pub fn write_ref(&mut self, x: CellPtr, /*pmach: PMach*/) -> Option<CellEnvEntryMutRef> {
+    unimplemented!();
+  }
+
   pub fn insert_top(&mut self, x: CellPtr, ty: CellType) {
     match self.celtab.get(&x) {
       None => {}
@@ -1089,7 +1146,7 @@ impl CtxEnv {
     self.celtab.insert(x, e);
   }
 
-  pub fn insert_phy(&mut self, x: CellPtr, ty: CellType, cel: PCell) {
+  pub fn insert_phy(&mut self, x: CellPtr, ty: CellType, pcel: PCell) {
     match self.celtab.get(&x) {
       None => {}
       Some(_) => panic!("bug")
@@ -1102,12 +1159,12 @@ impl CtxEnv {
       ithunk:   None,
       thunk:    Vec::new(),
       eflag:    CellEFlag::default(),
-      cel_:     Cell_::Phy(RefCell::new(CellState::default()), cel),
+      cel_:     Cell_::Phy(RefCell::new(CellState::default()), pcel),
     };
     self.celtab.insert(x, e);
   }
 
-  pub fn insert_cow(&mut self, x: CellPtr, ty: CellType, og: CellPtr) {
+  pub fn insert_cow(&mut self, x: CellPtr, ty: CellType, pcel: CellPtr) {
     match self.celtab.get(&x) {
       None => {}
       Some(_) => panic!("bug")
@@ -1120,7 +1177,7 @@ impl CtxEnv {
       ithunk:   None,
       thunk:    Vec::new(),
       eflag:    CellEFlag::default(),
-      cel_:     Cell_::Cow(RefCell::new(CellState::default()), CowCell{optr: x, pcel: og}),
+      cel_:     Cell_::Cow(RefCell::new(CellState::default()), CowCell{optr: x, pcel}),
     };
     self.celtab.insert(x, e);
   }

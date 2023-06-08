@@ -72,10 +72,11 @@ impl PMachSpec {
 #[repr(u8)]
 pub enum Locus {
   // TODO TODO
-  _Top  = 0,
-  Swap  = 4,
-  Mem   = 16,
-  VMem  = 64,
+  _Top = 0,
+  Swap = 31,
+  Mem  = 63,
+  VMem = 127,
+  _Bot = 255,
 }
 
 impl Locus {
@@ -88,9 +89,10 @@ impl Locus {
 #[repr(u8)]
 pub enum PMach {
   // TODO TODO
-  _Top,
+  _Top = 0,
   Smp,
   NvGpu,
+  _Bot = 255,
 }
 
 thread_local! {

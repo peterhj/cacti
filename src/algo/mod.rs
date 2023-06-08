@@ -1,4 +1,7 @@
+use std::cell::{Cell};
 use std::cmp::{Ordering};
+use std::fmt::{Debug};
+use std::mem::{swap};
 
 pub mod fp;
 //pub mod int;
@@ -297,6 +300,209 @@ impl Region {
     Region{
       off:  self.off,
       sz:   self.sz + rhs.sz,
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(transparent)]
+pub struct RevOrd<T>(pub T);
+
+impl<T> From<T> for RevOrd<T> {
+  fn from(inner: T) -> RevOrd<T> {
+    RevOrd(inner)
+  }
+}
+
+impl<T> AsRef<T> for RevOrd<T> {
+  fn as_ref(&self) -> &T {
+    &(self.0)
+  }
+}
+
+impl<T: PartialOrd> PartialOrd for RevOrd<T> {
+  fn partial_cmp(&self, rhs: &RevOrd<T>) -> Option<Ordering> {
+    match (&(self.0)).partial_cmp(&(rhs.0)) {
+      Some(Ordering::Greater) => Some(Ordering::Less),
+      Some(Ordering::Less) => Some(Ordering::Greater),
+      Some(Ordering::Equal) => Some(Ordering::Equal),
+      None => None,
+    }
+  }
+}
+
+impl<T: Ord> Ord for RevOrd<T> {
+  fn cmp(&self, rhs: &RevOrd<T>) -> Ordering {
+    match (self.0).cmp(&(rhs.0)) {
+      Ordering::Greater => Ordering::Less,
+      Ordering::Less => Ordering::Greater,
+      Ordering::Equal => Ordering::Equal
+    }
+  }
+}
+
+pub type RevSortKey8<K> = SortKey8<RevOrd<K>>;
+pub type RevSortMap8<K, V> = SortMap8<RevOrd<K>, V>;
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SortKey8<K> {
+  pub key: K,
+  pub probe: Cell<u8>,
+}
+
+impl<K> AsRef<SortKey8<K>> for SortKey8<K> {
+  fn as_ref(&self) -> &SortKey8<K> {
+    self
+  }
+}
+
+impl<K> AsRef<K> for SortKey8<K> {
+  fn as_ref(&self) -> &K {
+    &self.key
+  }
+}
+
+#[derive(Clone)]
+pub struct SortMap8<K, V> {
+  pub buf:  Vec<(K, V)>,
+}
+
+impl<K: Copy, V> Default for SortMap8<K, V> {
+  fn default() -> SortMap8<K, V> {
+    SortMap8::new()
+  }
+}
+
+impl<K: Copy, V> SortMap8<K, V> {
+  pub fn new() -> SortMap8<K, V> {
+    SortMap8{buf: Vec::new()}
+  }
+
+  pub fn clear(&mut self) {
+    self.buf.clear();
+  }
+}
+
+impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
+  pub fn probe(&self, query: &SortKey8<K>) -> u8 {
+    let mut p = query.probe.get();
+    let len = self.buf.len();
+    if (p as usize) < len &&
+       &query.key == &self.buf[p as usize].0
+    {
+      return p;
+    }
+    let mut q = p;
+    p += 1;
+    loop {
+      let mut t = false;
+      if (p as usize) < len {
+        t = true;
+        if &query.key == &self.buf[p as usize].0 {
+          query.probe.set(p);
+          return p;
+        }
+        p += 1;
+      }
+      if q > 0 {
+        t = true;
+        q -= 1;
+        if &query.key == &self.buf[q as usize].0 {
+          query.probe.set(q);
+          return q;
+        }
+      }
+      if !t {
+        panic!("bug: SortMap8::probe: not found: key={:?}", &query.key);
+      }
+    }
+  }
+
+  pub fn find<K2: Into<K>>(&self, key: K2) -> Option<(SortKey8<K>, &V)> {
+    let key = key.into();
+    for (i, (k, v)) in self.buf.iter().enumerate() {
+      if &key == k {
+        assert!(i <= 255);
+        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+      }
+    }
+    None
+  }
+
+  pub fn find_mut<K2: Into<K>>(&mut self, key: K2) -> Option<(SortKey8<K>, &mut V)> {
+    let key = key.into();
+    for (i, (k, v)) in self.buf.iter_mut().enumerate() {
+      if &key == k {
+        assert!(i <= 255);
+        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+      }
+    }
+    None
+  }
+
+  pub fn find_lub<K2: Into<K>>(&self, key: K2) -> Option<(SortKey8<K>, &V)> {
+    let key = key.into();
+    for (i, (k, v)) in self.buf.iter().enumerate() {
+      if &key <= k {
+        assert!(i <= 255);
+        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+      }
+    }
+    None
+  }
+
+  pub fn find_lub_mut<K2: Into<K>>(&mut self, key: K2) -> Option<(SortKey8<K>, &mut V)> {
+    let key = key.into();
+    for (i, (k, v)) in self.buf.iter_mut().enumerate() {
+      if &key <= k {
+        assert!(i <= 255);
+        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+      }
+    }
+    None
+  }
+
+  pub fn get<Q: AsRef<SortKey8<K>>>(&self, query: Q) -> &V {
+    let p = self.probe(query.as_ref());
+    &(self.buf[p as usize].1)
+  }
+
+  pub fn get_mut<Q: AsRef<SortKey8<K>>>(&mut self, query: Q) -> &mut V {
+    let p = self.probe(query.as_ref());
+    &mut (self.buf[p as usize].1)
+  }
+
+  pub fn swap<Q: AsRef<SortKey8<K>>>(&mut self, query: Q, val: &mut V) {
+    let p = self.probe(query.as_ref());
+    swap(&mut (self.buf[p as usize].1), val);
+  }
+
+  pub fn insert<K2: Into<K>>(&mut self, key: K2, val: V) -> SortKey8<K> {
+    let olen = self.buf.len();
+    if olen > 255 {
+      panic!("bug: SortMap8::insert: overcapacity: len={}", olen);
+    }
+    let key = key.into();
+    let mut p = olen as u8;
+    self.buf.push((key, val));
+    loop {
+      if p > 0 {
+        let q = p - 1;
+        match key.cmp(&self.buf[q as usize].0) {
+          Ordering::Equal => {
+            panic!("bug: SortMap8::insert: duplicate: key={:?}", &key);
+          }
+          Ordering::Less => {
+            self.buf.swap(p as usize, q as usize);
+            p = q;
+          }
+          Ordering::Greater => {
+            return SortKey8{key, probe: Cell::new(p)};
+          }
+        }
+        continue;
+      }
+      return SortKey8{key, probe: Cell::new(p)};
     }
   }
 }

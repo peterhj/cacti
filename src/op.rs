@@ -1,6 +1,7 @@
 use crate::cell::{CellPtr, StableCell, CellType, Dtype};
 use crate::ctx::*;
 use crate::panick::*;
+use crate::spine::{SpineRet};
 use crate::thunk::op::*;
 
 use futhark_syntax::*;
@@ -704,6 +705,11 @@ pub trait CtlOps: AsRef<CellPtr> + Sized {
   fn opaque(self) -> CellPtr {
     panick_wrap(|| ctx_opaque(*self.as_ref()))
   }
+
+  #[track_caller]
+  fn const_(self) -> CellPtr {
+    unimplemented!();
+  }
 }
 
 impl<P: AsRef<CellPtr> + Sized> CtlOps for P {}
@@ -780,10 +786,22 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 
   #[track_caller]
   fn eval(self) -> Self {
-    // FIXME FIXME
-    unimplemented!();
-    /*ctx_set_eval(*self.as_ref());
-    self*/
+    let ret = eval(*self.as_ref());
+    match ret {
+      SpineRet::Bot => panic!("EXCEPTION"),
+      _ => {}
+    }
+    self
+  }
+
+  #[track_caller]
+  fn try_eval(self) -> Result<Self, ()> {
+    let ret = eval(*self.as_ref());
+    match ret {
+      SpineRet::Bot => return Err(()),
+      _ => {}
+    }
+    Ok(self)
   }
 }
 
@@ -792,10 +810,16 @@ impl<P: AsRef<CellPtr> + Sized> Ops for P {}
 #[track_caller]
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
   panick_wrap(|| {
-    let trie = tokenizer_trie();
-    let tokens = Tokenizer::new(&trie, &*lam_src);
-    let mut parser = ExpParser::new(tokens);
-    let result = parser.parse();
+    let result = TL_CTX.with(|ctx| {
+      let mut fut_trie = ctx.fut_trie.borrow_mut();
+      if fut_trie.is_none() {
+        *fut_trie = Some(tokenizer_trie());
+      }
+      let fut_trie = fut_trie.as_ref().unwrap();
+      let tokens = Tokenizer::new(fut_trie, &*lam_src);
+      let mut parser = ExpParser::new(tokens);
+      parser.parse()
+    });
     let mut wrap_parens = false;
     match result.as_ref() {
       Ok(&Exp::Lam(..)) => {}

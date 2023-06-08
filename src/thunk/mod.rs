@@ -1,3 +1,4 @@
+use crate::algo::{SortKey8, SortMap8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::*;
@@ -25,13 +26,13 @@ use futhark_ffi::{
 };
 //use futhark_ffi::types::*;
 use home::{home_dir};
-use libc::{c_void};
 //use smol_str::{SmolStr};
 
 use std::any::{Any};
 use std::cell::{RefCell};
 use std::cmp::{max};
 //use std::convert::{TryFrom};
+use std::ffi::{c_void};
 use std::fmt::{Debug, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::hash::{Hash, Hasher};
 use std::mem::{size_of};
@@ -45,7 +46,7 @@ pub mod op;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct ThunkPtr(i32);
+pub struct ThunkPtr(pub i32);
 
 impl Debug for ThunkPtr {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -79,23 +80,13 @@ impl ThunkPtr {
   }
 }
 
-/*#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[repr(u8)]
-pub enum ThunkArgMode {
-  _Top,
-  I,
-  O,
-  IO,
+pub enum ThunkMode {
+  Initialize = 0,
+  Apply = 1,
+  Accumulate = 2,
 }
-
-#[derive(Clone)]
-pub struct ThunkArg {
-  pub ptr:  CellPtr,
-  //pub mode: CellMode,
-  //pub ty_:  CellType,
-  pub amod: ThunkArgMode,
-  // TODO
-}*/
 
 pub trait ThunkValExt: DtypeExt {
   type Val: DtypeExt + Copy + Eq + Any;
@@ -247,41 +238,34 @@ impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
   }
 }
 
-//pub type ThunkSmpImpl_ = ThunkImpl_<Cel=SmpInnerCell>;
-//pub type ThunkGpuImpl_ = ThunkImpl_<Cel=GpuInnerCell>;
-
 pub trait ThunkImpl {
-  //type Cel;
-
-  //fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _cel: &mut Weak<Self::Cel>) -> ThunkRet {}
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr, /*_cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet { ThunkRet::NotImpl }
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
   fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
+  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
 }
 
 pub trait ThunkImpl_ {
-  //type Cel;
-
   fn as_any(&self) -> &dyn Any;
-  //fn thunk_eq(&self, other: &dyn ThunkImpl_) -> Option<bool>;
-  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet;
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet;
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr) -> ThunkRet;
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet;
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
-  //type Cel = <T as ThunkImpl>::Cel;
-
   fn as_any(&self) -> &dyn Any {
     self
   }
 
-  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<Self::Cel>) -> ThunkRet {}
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     ThunkImpl::apply(self, ctr, env, spec_, arg, out, /*cel*/)
   }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
     ThunkImpl::accumulate(self, ctr, env, spec_, arg, out)
+  }
+
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    unimplemented!();
   }
 }
 
@@ -332,8 +316,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           arityout,
           spec_dim,
           code,
-          object: RefCell::new(None),
-          consts: RefCell::new(Vec::new()),
+          //object: RefCell::new(None),
+          //consts: RefCell::new(Vec::new()),
+          modekeys: RefCell::new(Vec::new()),
+          object: RefCell::new(SortMap8::new()),
+          consts: RefCell::new(SortMap8::new()),
         })
       }
       PMach::NvGpu => {
@@ -342,8 +329,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           arityout,
           spec_dim,
           code,
-          object: RefCell::new(None),
-          consts: RefCell::new(Vec::new()),
+          //object: RefCell::new(None),
+          //consts: RefCell::new(Vec::new()),
+          modekeys: RefCell::new(Vec::new()),
+          object: RefCell::new(SortMap8::new()),
+          consts: RefCell::new(SortMap8::new()),
         })
       }
       _ => unimplemented!()
@@ -411,16 +401,16 @@ pub trait FutharkThunkImpl_<B: FutBackend> {
 }
 
 pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  // TODO
-  //pub f_decl:   Vec<u8>,
-  //pub f_body:   Vec<u8>,
-  //pub f_hash:   _,
   pub arityin:  u16,
   pub arityout: u16,
   pub spec_dim: Vec<Dim>,
   pub code:     FutharkThunkCode,
-  pub object:   RefCell<Option<FutObject<B>>>,
-  pub consts:   RefCell<Vec<StableCell>>,
+  // FIXME FIXME
+  //pub object:   RefCell<Option<FutObject<B>>>,
+  //pub consts:   RefCell<Vec<StableCell>>,
+  pub modekeys: RefCell<Vec<SortKey8<ThunkMode>>>,
+  pub object:   RefCell<SortMap8<ThunkMode, FutObject<B>>>,
+  pub consts:   RefCell<SortMap8<ThunkMode, Vec<StableCell>>>,
 }
 
 impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> {
@@ -560,7 +550,9 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
 
 impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   fn drop(&mut self) {
-    *self.object.borrow_mut() = None;
+    //*self.object.borrow_mut() = None;
+    self.object.borrow_mut().clear();
+    self.consts.borrow_mut().clear();
     /*// FIXME FIXME: in case of custom dropck that takes &mut CtxEnv.
     let mut consts = Vec::new();
     swap(&mut *self.consts.borrow_mut(), &mut consts);
@@ -611,7 +603,7 @@ impl Default for FutharkThunkBuildConfig {
 }
 
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, out_mode: CellMode, mut cfg: FutharkThunkBuildConfig) {
+  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, mut cfg: FutharkThunkBuildConfig) {
     let mut s = String::new();
     write!(&mut s, "entry kernel").unwrap();
     if cfg.emit_out0_shape {
@@ -626,17 +618,16 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       write!(&mut s, " (x_{}: {})", k, _to_futhark_entry_type(dim)).unwrap();
     }
     if self.arityout == 1 {
-      match out_mode {
-        CellMode::_Top => panic!("bug"),
-        CellMode::Aff => {
+      match mode {
+        ThunkMode::Apply => {
           let dim = self.spec_dim[self.arityin as usize];
           write!(&mut s, " : {}", _to_futhark_entry_type(dim)).unwrap();
         }
-        CellMode::Init => {
+        ThunkMode::Accumulate => {
           let dim = self.spec_dim[self.arityin as usize];
           if dim.ndim >= 2 && !cfg.emit_out0_shape {
             cfg.emit_out0_shape = true;
-            return self._try_build(ctr, env, out_mode, cfg);
+            return self._try_build(ctr, env, mode, cfg);
           }
           let fty = if cfg.emit_out0_shape {
             _to_futhark_entry_out0_type(dim)
@@ -645,8 +636,9 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
           };
           write!(&mut s, " (oy_{}: *{}) : *{}", 0, fty, fty).unwrap();
         }
+        _ => unimplemented!()
       }
-    } else if out_mode == CellMode::Aff {
+    } else if mode == ThunkMode::Apply {
       write!(&mut s, " : (").unwrap();
       for k in 0 .. self.arityout {
         let dim = self.spec_dim[(self.arityin + k) as usize];
@@ -664,15 +656,15 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       }
     }
     if self.arityout == 1 {
-      match out_mode {
-        CellMode::_Top => panic!("bug"),
-        CellMode::Aff => {}
-        CellMode::Init => {
+      match mode {
+        ThunkMode::Apply => {}
+        ThunkMode::Accumulate => {
           let dim = self.spec_dim[self.arityin as usize];
           if dim.ndim == 0 {
             write!(&mut s, "\tlet oy_{} = oy_{}[0] in\n", 0, 0).unwrap();
           }
         }
+        _ => unimplemented!()
       }
     }
     let mut pats = Vec::new();
@@ -698,10 +690,9 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     }
     drop(out_buf);
     if self.arityout == 1 {
-      match out_mode {
-        CellMode::_Top => panic!("bug"),
-        CellMode::Aff => {}
-        CellMode::Init => {
+      match mode {
+        ThunkMode::Apply => {}
+        ThunkMode::Accumulate => {
           let dim = self.spec_dim[self.arityin as usize];
           if dim.ndim >= 2 {
             assert!(cfg.emit_out0_shape);
@@ -734,6 +725,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
             _ => unimplemented!()
           }
         }
+        _ => unimplemented!()
       }
     }
     for k in 0 .. self.arityout {
@@ -745,7 +737,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     write!(&mut s, "\t").unwrap();
     if self.arityout == 1 {
       write!(&mut s, "y_{}", 0).unwrap();
-    } else if out_mode == CellMode::Aff {
+    } else if mode == ThunkMode::Apply {
       write!(&mut s, "(").unwrap();
       for k in 0 .. self.arityout {
         write!(&mut s, "y_{}, ", k).unwrap();
@@ -766,9 +758,22 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         config.include = prefix.join("include");
       }
     });
-    if let Some((obj, consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, &s) {
-      *self.object.borrow_mut() = Some(obj);
-      *self.consts.borrow_mut() = consts;
+    if let Some((mut obj, mut consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, &s) {
+      //*self.object.borrow_mut() = Some(obj);
+      //*self.consts.borrow_mut() = consts;
+      for key in self.modekeys.borrow().iter() {
+        if key.key == mode {
+          let key2 = key.clone();
+          self.object.borrow_mut().swap(&key2, &mut obj);
+          self.consts.borrow_mut().swap(key, &mut consts);
+          assert_eq!(key, &key2);
+          return;
+        }
+      }
+      let key2 = self.object.borrow_mut().insert(mode, obj);
+      let key = self.consts.borrow_mut().insert(mode, consts);
+      assert_eq!(&key, &key2);
+      self.modekeys.borrow_mut().push(key);
     }
   }
 }
@@ -779,10 +784,12 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     // FIXME
-    if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Aff, FutharkThunkBuildConfig::default());
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(ThunkMode::Apply).is_none() {
+      self._try_build(ctr, env, ThunkMode::Apply, FutharkThunkBuildConfig::default());
     }
-    if self.object.borrow().is_none() {
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(ThunkMode::Apply).is_none() {
       panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
     }
     unimplemented!();
@@ -793,10 +800,13 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   //type Cel = GpuInnerCell;
 
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
-    if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Aff, FutharkThunkBuildConfig::default());
+    let mode = ThunkMode::Apply;
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(mode).is_none() {
+      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
     }
-    if self.object.borrow().is_none() {
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: build error");
     }
     assert_eq!(arg.len(), self.arityin as usize);
@@ -835,8 +845,10 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       // FIXME FIXME
       out_raw_arr.push(null_mut());
     }
-    let mut obj = self.object.borrow_mut();
-    let obj = obj.as_mut().unwrap();
+    /*let mut obj = self.object.borrow_mut();
+    let obj = obj.as_mut().unwrap();*/
+    let mut objs = self.object.borrow_mut();
+    let obj = objs.find_mut(mode).unwrap().1;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
     env.reset_tmp();
@@ -871,7 +883,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         Some((region, p)) => {
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: region={:?} p={:?}", region, p);
           if let Some(p) = p {
-            for k in self.consts.borrow().iter() {
+            //for k in self.consts.borrow().iter() {}
+            for k in self.consts.borrow().find(mode).unwrap().1.iter() {
               if k.as_ref() == &p {
                 println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   is const");
                 match env.lookup_mut_ref(out) {
@@ -909,10 +922,13 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
-    if self.object.borrow().is_none() {
-      self._try_build(ctr, env, CellMode::Init, FutharkThunkBuildConfig::default());
+    let mode = ThunkMode::Accumulate;
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(mode).is_none() {
+      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
     }
-    if self.object.borrow().is_none() {
+    //if self.object.borrow().is_none() {}
+    if self.object.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: build error");
     }
     assert_eq!(arg.len(), self.arityin as usize);
@@ -969,8 +985,10 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       // FIXME FIXME
       out_raw_arr.push(null_mut());
     }
-    let mut obj = self.object.borrow_mut();
-    let obj = obj.as_mut().unwrap();
+    /*let mut obj = self.object.borrow_mut();
+    let obj = obj.as_mut().unwrap();*/
+    let mut objs = self.object.borrow_mut();
+    let obj = objs.find_mut(mode).unwrap().1;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
     env.reset_tmp();
@@ -1001,27 +1019,23 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
 // TODO
 
 pub struct PThunk {
-  // FIXME
   pub ptr:      ThunkPtr,
   pub clk:      Clock,
   pub arityin:  u16,
   pub arityout: u16,
   pub spec_dim: Vec<Dim>,
   pub spec_:    Rc<dyn ThunkSpec_>,
-  //pub sub:      Vec<ThunkArg>,
-  //pub sub:      RefCell<Vec<ThunkArg>>,
   // TODO TODO
-  pub impl_:    RefCell<Vec<(PMach, Rc<dyn ThunkImpl_>)>>,
+  //pub impl_:    RefCell<Vec<(PMach, Rc<dyn ThunkImpl_>)>>,
+  pub impl_:    RefCell<RevSortMap8<PMach, Rc<dyn ThunkImpl_>>>,
 }
 
 impl PThunk {
-  //pub fn new<Th: ThunkSpec + Any + Copy + Eq>(ptr: ThunkPtr, thunk: Th) -> PThunk {}
   pub fn new(ptr: ThunkPtr, spec_dim: Vec<Dim>, spec_: Rc<dyn ThunkSpec_>) -> PThunk {
     let clk = Clock::default();
     let (arityin, arityout) = spec_.arity();
     assert_eq!(spec_dim.len(), (arityin + arityout) as usize);
-    //let spec_ = Rc::new(thunk);
-    //let sub = Vec::new();
+    let impl_ = RefCell::new(RevSortMap8::new());
     PThunk{
       ptr,
       clk,
@@ -1029,29 +1043,38 @@ impl PThunk {
       arityout,
       spec_dim,
       spec_,
-      //sub,
-      impl_: RefCell::new(Vec::new()),
+      //impl_: RefCell::new(Vec::new()),
+      impl_,
     }
   }
 
-  pub fn push_new_impl_(&self, pmach: PMach, thunk: Rc<dyn ThunkImpl_>) {
-    for &(o_pmach, _) in self.impl_.borrow().iter() {
+  pub fn push_new_impl_(&self, pmach: PMach, thimpl_: Rc<dyn ThunkImpl_>) {
+    /*for &(o_pmach, _) in self.impl_.borrow().iter() {
       if o_pmach == pmach {
         panic!("bug");
       }
     }
     let mut impl_ = self.impl_.borrow_mut();
-    impl_.push((pmach, thunk));
-    impl_.sort_by(|&(l_pmach, _), &(r_pmach, _)| r_pmach.cmp(&l_pmach));
+    impl_.push((pmach, thimpl_));
+    impl_.sort_by(|&(l_pmach, _), &(r_pmach, _)| r_pmach.cmp(&l_pmach));*/
+    match self.impl_.borrow().find(pmach) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    self.impl_.borrow_mut().insert(pmach, thimpl_);
   }
 
   pub fn lookup_impl_(&self, q_pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
-    for &(pmach, ref thimpl_) in self.impl_.borrow().iter() {
+    /*for &(pmach, ref thimpl_) in self.impl_.borrow().iter() {
       if pmach == q_pmach {
         return Some(thimpl_.clone());
       }
     }
-    None
+    None*/
+    match self.impl_.borrow().find(q_pmach) {
+      None => None,
+      Some((_, thimpl_)) => Some(thimpl_.clone())
+    }
   }
 
   pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
@@ -1098,5 +1121,9 @@ impl PThunk {
         thimpl_.accumulate(ctr, env, &*self.spec_, arg, out)
       }
     }
+  }
+
+  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+    unimplemented!();
   }
 }

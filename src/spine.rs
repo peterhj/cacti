@@ -23,13 +23,13 @@ pub enum SpineEntry {
   ICacheMux(CellPtr),
   OIntro(CellPtr, CellPtr),
   Intro(CellPtr),
-  Init(CellPtr, ThunkPtr),
   Uninit(CellPtr),
   //IntroFin(CellPtr),
-  Seal(CellPtr),
-  Unseal(CellPtr),
+  Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
   Accumulate(CellPtr, ThunkPtr),
+  Seal(CellPtr),
+  Unseal(CellPtr),
   Eval(CellPtr),
   //Uneval(CellPtr),
   Unsync(CellPtr),
@@ -53,12 +53,12 @@ impl SpineEntry {
       &SpineEntry::ICacheMux(..)  => SpineEntryName::ICacheMux,
       &SpineEntry::OIntro(..)     => SpineEntryName::OIntro,
       &SpineEntry::Intro(..)      => SpineEntryName::Intro,
-      &SpineEntry::Init(..)       => SpineEntryName::Init,
       &SpineEntry::Uninit(..)     => SpineEntryName::Uninit,
-      &SpineEntry::Seal(..)       => SpineEntryName::Seal,
-      &SpineEntry::Unseal(..)     => SpineEntryName::Unseal,
+      &SpineEntry::Initialize(..) => SpineEntryName::Initialize,
       &SpineEntry::Apply(..)      => SpineEntryName::Apply,
       &SpineEntry::Accumulate(..) => SpineEntryName::Accumulate,
+      &SpineEntry::Seal(..)       => SpineEntryName::Seal,
+      &SpineEntry::Unseal(..)     => SpineEntryName::Unseal,
       &SpineEntry::Eval(..)       => SpineEntryName::Eval,
       &SpineEntry::Unsync(..)     => SpineEntryName::Unsync,
       &SpineEntry::Bot            => SpineEntryName::Bot,
@@ -79,12 +79,12 @@ pub enum SpineEntryName {
   ICacheMux,
   OIntro,
   Intro,
-  Init,
   Uninit,
-  Seal,
-  Unseal,
+  Initialize,
   Apply,
   Accumulate,
+  Seal,
+  Unseal,
   Eval,
   //Uneval,
   Unsync,
@@ -97,6 +97,7 @@ pub enum SpineEntryName {
 pub enum SpineRet {
   _Top,
   Halt,
+  Pause,
   Yield_,
   Break_,
   Bot,
@@ -215,25 +216,6 @@ impl SpineEnv {
           }
         }
       }
-      &SpineEntry::Init(x, ith) => {
-        /*// FIXME FIXME
-        self.intro.insert(x, sp);
-        self.init.insert(x, (sp, ith));*/
-        match self.state.get_mut(&x) {
-          None => panic!("bug"),
-          Some(state) => {
-            assert_eq!(state.mode, CellMode::_Top);
-            assert!(!state.flag.intro());
-            assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.tup, 0);*/
-            state.mode.set_init();
-            state.flag.set_intro();
-            let next_clk = self.ctr.into();
-            assert!(self.iapply.insert(x, (sp, ith, next_clk)).is_none());
-            state.clk = next_clk;
-          }
-        }
-      }
       &SpineEntry::Uninit(x) => {
         match self.state.get_mut(&x) {
           None => panic!("bug"),
@@ -249,32 +231,22 @@ impl SpineEnv {
           }
         }
       }
-      &SpineEntry::Seal(x) => {
-        /*// TODO: idempotent seal?
-        /*assert!(!self.seal.contains_key(&x));*/
-        assert!(self.init.contains_key(&x));
-        self.seal.insert(x, sp);*/
+      &SpineEntry::Initialize(x, ith) => {
+        /*// FIXME FIXME
+        self.intro.insert(x, sp);
+        self.init.insert(x, (sp, ith));*/
         match self.state.get_mut(&x) {
           None => panic!("bug"),
           Some(state) => {
-            assert!(state.mode != CellMode::_Top);
-            assert!(state.flag.intro());
+            assert_eq!(state.mode, CellMode::_Top);
+            assert!(!state.flag.intro());
             assert!(!state.flag.seal());
-            state.flag.set_seal();
-          }
-        }
-      }
-      &SpineEntry::Unseal(x) => {
-        /*// TODO: idempotent seal?
-        /*assert!(self.seal.contains_key(&x));*/
-        assert!(self.init.contains_key(&x));
-        self.seal.remove(&x);*/
-        match self.state.get_mut(&x) {
-          None => panic!("bug"),
-          Some(state) => {
-            assert!(state.mode != CellMode::_Top);
-            assert!(state.flag.seal());
-            state.flag.unset_seal();
+            /*assert_eq!(state.clk.tup, 0);*/
+            state.mode.set_init();
+            state.flag.set_intro();
+            let next_clk = self.ctr.into();
+            assert!(self.iapply.insert(x, (sp, ith, next_clk)).is_none());
+            state.clk = next_clk;
           }
         }
       }
@@ -338,6 +310,35 @@ impl SpineEnv {
               }
             }
             state.clk = next_clk;
+          }
+        }
+      }
+      &SpineEntry::Seal(x) => {
+        /*// TODO: idempotent seal?
+        /*assert!(!self.seal.contains_key(&x));*/
+        assert!(self.init.contains_key(&x));
+        self.seal.insert(x, sp);*/
+        match self.state.get_mut(&x) {
+          None => panic!("bug"),
+          Some(state) => {
+            assert!(state.mode != CellMode::_Top);
+            assert!(state.flag.intro());
+            assert!(!state.flag.seal());
+            state.flag.set_seal();
+          }
+        }
+      }
+      &SpineEntry::Unseal(x) => {
+        /*// TODO: idempotent seal?
+        /*assert!(self.seal.contains_key(&x));*/
+        assert!(self.init.contains_key(&x));
+        self.seal.remove(&x);*/
+        match self.state.get_mut(&x) {
+          None => panic!("bug"),
+          Some(state) => {
+            assert!(state.mode != CellMode::_Top);
+            assert!(state.flag.seal());
+            state.flag.unset_seal();
           }
         }
       }
@@ -421,32 +422,16 @@ impl Spine {
     self.log.push(e);
   }
 
-  pub fn init_mux(&mut self, ith: ThunkPtr, x: CellPtr) {
+  pub fn initialize(&mut self, ith: ThunkPtr, x: CellPtr) {
     // FIXME FIXME
     unimplemented!();
     /*
     let sp = self.curp;
     self.curp += 1;
-    let e = SpineEntry::Init(x, ith);
+    let e = SpineEntry::Initialize(x, ith);
     self.env.step(sp, &e);
     self.log.push(e);
     */
-  }
-
-  pub fn seal(&mut self, x: CellPtr) {
-    let sp = self.curp;
-    self.curp += 1;
-    let e = SpineEntry::Seal(x);
-    self.env.step(sp, &e);
-    self.log.push(e);
-  }
-
-  pub fn unseal_mux(&mut self, x: CellPtr) {
-    let sp = self.curp;
-    self.curp += 1;
-    let e = SpineEntry::Unseal(x);
-    self.env.step(sp, &e);
-    self.log.push(e);
   }
 
   pub fn apply(&mut self, th: ThunkPtr, y: CellPtr) {
@@ -461,6 +446,22 @@ impl Spine {
     let sp = self.curp;
     self.curp += 1;
     let e = SpineEntry::Accumulate(y, th);
+    self.env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn seal(&mut self, x: CellPtr) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::Seal(x);
+    self.env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn unseal_mux(&mut self, x: CellPtr) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::Unseal(x);
     self.env.step(sp, &e);
     self.log.push(e);
   }
@@ -485,7 +486,7 @@ impl Spine {
     self.hltp = self.curp;
   }*/
 
-  pub fn _resume(&mut self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineRet {
+  pub fn _resume(&mut self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock*/) -> SpineRet {
     //self._start();
     println!("DEBUG: Spine::_resume: ctr={:?} ctlp={} hltp={} curp={}",
         self.ctr, self.ctlp, self.hltp, self.curp);
@@ -508,7 +509,6 @@ impl Spine {
         _ => {}
       }
     }
-    unreachable!();
   }
 
   pub fn _step(&self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineRet {
@@ -517,20 +517,20 @@ impl Spine {
           self.ctr, self.ctlp, self.hltp, self.curp);
       return SpineRet::Halt;
     }
-    let mut state = SpineRet::_Top;
+    let mut ret = SpineRet::_Top;
     let entry = &self.log[self.ctlp as usize];
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} entry={:?}",
         self.ctr, self.ctlp, self.hltp, self.curp, entry.name());
     match entry {
       // TODO
       &SpineEntry::Yield_ => {
-        state = SpineRet::Yield_;
+        ret = SpineRet::Yield_;
       }
       &SpineEntry::YieldV(_, _) => {
         unimplemented!();
       }
       &SpineEntry::Break_ => {
-        state = SpineRet::Break_;
+        ret = SpineRet::Break_;
       }
       &SpineEntry::BreakV(_, _) => {
         unimplemented!();
@@ -651,7 +651,7 @@ impl Spine {
           }
         }
       }
-      &SpineEntry::Init(x, ith) => {
+      &SpineEntry::Initialize(x, ith) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
@@ -695,24 +695,6 @@ impl Spine {
             }
             /*e.state().flag.reset();*/
             e.state().flag.set_intro();
-          }
-        }
-      }
-      &SpineEntry::Seal(x) => {
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
-            match e.state().mode {
-              CellMode::_Top => panic!("bug"),
-              _ => {}
-            }
-            assert_eq!(e.state().clk.ctr(), self.ctr);
-            /*assert!(e.state().clk.tup > 0);*/
-            assert!(e.state().clk.tup != u32::max_value());
-            assert!(e.state().flag.intro());
-            assert!(!e.state().flag.seal());
-            /*e.state().flag.reset();*/
-            e.state().flag.set_seal();
           }
         }
       }
@@ -787,6 +769,24 @@ impl Spine {
           te.thunk.accumulate(ctr, env, &te.arg, x);
         }
       }
+      &SpineEntry::Seal(x) => {
+        match env.lookup_ref(x) {
+          None => panic!("bug"),
+          Some(e) => {
+            match e.state().mode {
+              CellMode::_Top => panic!("bug"),
+              _ => {}
+            }
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            /*assert!(e.state().clk.tup > 0);*/
+            assert!(e.state().clk.tup != u32::max_value());
+            assert!(e.state().flag.intro());
+            assert!(!e.state().flag.seal());
+            /*e.state().flag.reset();*/
+            e.state().flag.set_seal();
+          }
+        }
+      }
       &SpineEntry::Eval(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
@@ -850,11 +850,11 @@ impl Spine {
         unimplemented!();
       }*/
       &SpineEntry::Bot => {
-        state = SpineRet::Bot;
+        ret = SpineRet::Bot;
       }
       _ => unimplemented!()
     }
-    state
+    ret
   }
 
   pub fn _debug_dump(&self) {
@@ -864,41 +864,6 @@ impl Spine {
       println!("DEBUG: Spine::_debug_dump: log[{}]={:?}", i, e);
     }
   }
-}
-
-#[track_caller]
-pub fn compile() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    ctx.spine.borrow_mut()._compile();
-  }))
-}
-
-#[track_caller]
-pub fn resume() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut env = ctx.env.borrow_mut();
-    let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv);
-  }))
-}
-
-#[track_caller]
-pub fn yield_() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut spine = ctx.spine.borrow_mut();
-    spine.curp += 1;
-    spine.log.push(SpineEntry::Yield_);
-  }))
-}
-
-#[track_caller]
-pub fn break_() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut spine = ctx.spine.borrow_mut();
-    spine.curp += 1;
-    spine.log.push(SpineEntry::Break_);
-  }))
 }
 
 pub struct Backward {
@@ -931,17 +896,11 @@ impl Backward {
           self.frontier_set.remove(&y);
           self.complete_set.insert(y);
         }
-        &SpineEntry::Init(y, ith) => {
+        &SpineEntry::Initialize(y, ith) => {
           assert!(!self.complete_set.contains(&y));
           if !self.frontier_set.contains(&y) {
             continue;
           }
-          unimplemented!();
-        }
-        &SpineEntry::Seal(..) => {
-          unimplemented!();
-        }
-        &SpineEntry::Unseal(..) => {
           unimplemented!();
         }
         &SpineEntry::Apply(y, th) => {
@@ -1000,6 +959,12 @@ impl Backward {
             Some(&dy) => dy
           };
           drop(spine);
+          unimplemented!();
+        }
+        &SpineEntry::Seal(..) => {
+          unimplemented!();
+        }
+        &SpineEntry::Unseal(..) => {
           unimplemented!();
         }
         _ => {}
@@ -1177,14 +1142,10 @@ impl DrySpine {
           self.env[0].intro.insert(x, self.ctlp);
           self.env[0].aff.insert(x);
         }
-        &SpineEntry::Init(x, _ith) => {
+        &SpineEntry::Initialize(x, _ith) => {
           // FIXME FIXME
           self.env[0].intro.insert(x, self.ctlp);
           self.env[0].semi.insert(x);
-        }
-        &SpineEntry::Seal(x) => {
-          assert!(self.env[0].semi.contains(&x));
-          self.env[0].seal.insert(x, self.ctlp);
         }
         &SpineEntry::Apply(x, th) => {
           assert!(self.env[0].intro.contains_key(&x));
@@ -1211,6 +1172,10 @@ impl DrySpine {
               ap.push((self.ctlp, th));
             }
           }
+        }
+        &SpineEntry::Seal(x) => {
+          assert!(self.env[0].semi.contains(&x));
+          self.env[0].seal.insert(x, self.ctlp);
         }
         _ => unimplemented!()
       }

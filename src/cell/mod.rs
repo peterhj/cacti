@@ -1,3 +1,4 @@
+use crate::algo::{RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
@@ -9,7 +10,7 @@ use crate::util::pickle::{TorchDtype};
 use std::any::{Any};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::mem::{size_of};
+use std::mem::{size_of, swap};
 use std::ops::{Deref};
 use std::rc::{Weak};
 use std::slice::{from_raw_parts};
@@ -17,7 +18,7 @@ use std::str::{FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct CellPtr(i32);
+pub struct CellPtr(pub i32);
 
 impl From<StableCell> for CellPtr {
   fn from(x: StableCell) -> CellPtr {
@@ -77,13 +78,13 @@ impl CellPtr {
 
 #[repr(transparent)]
 pub struct StableCell {
-  ptr:  CellPtr,
+  pub _ptr: CellPtr,
 }
 
 impl From<CellPtr> for StableCell {
   fn from(ptr: CellPtr) -> StableCell {
     ctx_retain(ptr);
-    StableCell{ptr}
+    StableCell{_ptr: ptr}
   }
 }
 
@@ -109,19 +110,19 @@ impl Deref for StableCell {
 
 impl Debug for StableCell {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "StableCell({})", self.ptr.0)
+    write!(f, "StableCell({})", self._ptr.0)
   }
 }
 
 impl Clone for StableCell {
   fn clone(&self) -> StableCell {
-    StableCell::from(self.ptr)
+    StableCell::from(self._ptr)
   }
 }
 
 impl Drop for StableCell {
   fn drop(&mut self) {
-    ctx_release(self.ptr);
+    ctx_release(self._ptr);
   }
 }
 
@@ -129,7 +130,7 @@ impl StableCell {
   pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
     assert!(!ptr.is_nil());
     env.retain(ptr);
-    StableCell{ptr}
+    StableCell{_ptr: ptr}
   }
 
   pub fn scalar<T: ThunkValExt>(value: T) -> StableCell {
@@ -146,20 +147,21 @@ impl StableCell {
     ctx_insert(ty).into()
   }
 
-  pub fn release(self, env: &CtxEnv) -> CellPtr {
-    let StableCell{ptr} = self;
+  pub fn release(mut self, env: &CtxEnv) -> CellPtr {
+    let mut ptr = CellPtr::nil();
+    swap(&mut ptr, &mut self._ptr);
     env.release(ptr);
     ptr
   }
 
   #[inline]
   pub fn into_ptr(self) -> CellPtr {
-    self.ptr
+    self._ptr
   }
 
   #[inline]
   pub fn as_ptr(&self) -> CellPtr {
-    self.ptr
+    self._ptr
   }
 
   #[inline]
@@ -173,14 +175,6 @@ impl StableCell {
 pub struct StableCheckpoint {
   // TODO TODO
 }
-
-/*#[derive(Clone, Copy, Debug)]
-#[repr(u8)]
-pub enum CellSpec {
-  Primary,
-  Compute,
-  //Backup,
-}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
@@ -551,6 +545,7 @@ impl CellMode {
 }
 
 #[derive(Clone, Copy, Default)]
+#[repr(transparent)]
 pub struct CellFlag {
   bits: u8,
 }
@@ -629,26 +624,31 @@ pub struct PCell {
   pub ogty: CellType,
   pub olay: CellLayout,
   pub primary:  Locus,
-  pub replicas: Vec<(Locus, PMach, Option<Weak<dyn InnerCell_>>)>,
+  //pub replicas: Vec<(Locus, PMach, Option<Weak<dyn InnerCell_>>)>,
+  pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
+  pub replicas: RevSortMap8<(Locus, PMach), Option<Weak<dyn InnerCell_>>>,
 }
 
 impl PCell {
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     let lay = CellLayout::new_packed(&ty);
     let primary = Locus::fastest();
-    let replicas = Vec::new();
+    //let replicas = Vec::new();
+    let pm_index = RevSortMap8::new();
+    let replicas = RevSortMap8::new();
     PCell{
       optr: ptr,
       //optr: Cell::new(ptr),
       ogty: ty,
       olay: lay,
       primary,
+      pm_index,
       replicas,
     }
   }
 
   pub fn push_new_replica(&mut self, locus: Locus, pmach: PMach, cel: Option<Weak<dyn InnerCell_>>) {
-    for &(o_locus, o_pmach, _) in self.replicas.iter() {
+    /*for &(o_locus, o_pmach, _) in self.replicas.iter() {
       if (o_locus, o_pmach) == (locus, pmach) {
         panic!("bug");
       }
@@ -656,20 +656,37 @@ impl PCell {
     self.replicas.push((locus, pmach, cel));
     self.replicas.sort_by(|&(l_locus, l_pmach, _), &(r_locus, r_pmach, _)| {
       (r_locus, r_pmach).cmp(&(l_locus, l_pmach))
-    });
+    });*/
+    match self.replicas.find((locus, pmach)) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    let key = self.replicas.insert((locus, pmach), cel);
+    self.pm_index.insert((pmach, locus), key);
   }
 
   pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, &mut Option<Weak<dyn InnerCell_>>)> {
-    for &mut (locus, pmach, ref mut cel) in self.replicas.iter_mut() {
+    /*for &mut (locus, pmach, ref mut cel) in self.replicas.iter_mut() {
       if locus == q_locus {
         return Some((pmach, cel));
       }
     }
-    None
+    None*/
+    match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {
+      None => None,
+      Some((key, cel)) => {
+        let key = key.key.as_ref();
+        if key.0 != q_locus {
+          None
+        } else {
+          Some((key.1, cel))
+        }
+      }
+    }
   }
 
   pub fn get(&mut self, q_pmach: PMach) -> Option<&mut Weak<dyn InnerCell_>> {
-    let mut key = None;
+    /*let mut key = None;
     for &mut (locus, pmach, ref mut cel_) in self.replicas.iter_mut() {
       if pmach == q_pmach {
         match cel_ {
@@ -678,6 +695,19 @@ impl PCell {
           }
           &mut None => {
             key = Some(locus);
+          }
+        }
+      }
+    }*/
+    match self.pm_index.find_lub((q_pmach, Locus::_Bot)) {
+      None => {}
+      Some((_, key)) => {
+        if key.key.as_ref().1 == q_pmach {
+          match self.replicas.get_mut(key) {
+            None => {}
+            Some(cel) => {
+              return Some(cel);
+            }
           }
         }
       }
