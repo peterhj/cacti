@@ -895,12 +895,12 @@ pub struct BlockMulMatrixGpuThunkImpl {
 }
 
 impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
     self.alpha.set(1.0);
     self.beta.set(0.0);
     let mut arg_ty_ = Vec::with_capacity(arg.len());
-    for &x in arg.iter() {
+    for &(x, _) in arg.iter() {
       match env.lookup_ref(x) {
         None => panic!("bug"),
         Some(e) => {
@@ -921,7 +921,7 @@ impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
     /*
     let a_nrowblk = arg_ty_[0].shape[0] / self.l_block[0];
     let a_ncolblk = arg_ty_[0].shape[1] / self.l_block[1];
-    match env.read_ref(arg[0]) {
+    match env.pread_ref(arg[0]) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -937,7 +937,7 @@ impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
       }
     }
     // TODO TODO
-    match env.write_ref(out) {
+    match env.pwrite_ref(out) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -995,7 +995,7 @@ impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
     })
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
     self.alpha.set(1.0);
     self.beta.set(1.0);

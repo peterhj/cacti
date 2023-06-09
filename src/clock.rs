@@ -1,6 +1,36 @@
 use std::cmp::{Ordering};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
+pub fn rst_signed_distance(a: u32, b: u32) -> Option<i32> {
+  match (a, b) {
+    (0, 0) => return None,
+    (0, _) => return Some(i32::min_value()),
+    (_, 0) => return Some(i32::max_value()),
+    _ => {}
+  }
+  if a == b {
+    return Some(0);
+  }
+  let a = a - 1;
+  let b = b - 1;
+  let ab = a.wrapping_sub(b);
+  let ba = b.wrapping_sub(a);
+  let (ab, ba) = if a > b {
+    (ab, ba - 1)
+  } else {
+    (ab - 1, ba)
+  };
+  let cutoff = (i32::max_value() as u32) >> 1;
+  if ab > cutoff && ba > cutoff {
+    return None;
+  }
+  Some(if ab < ba {
+    ab as i32
+  } else {
+    -(ba as i32)
+  })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Counter {
@@ -100,7 +130,7 @@ impl Clock {
     Clock{rst: self.rst, tup: next_tup}
   }
 
-  pub fn happens_after<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<bool> {
+  /*pub fn happens_after<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<bool> {
     let r_clk = r_clk.into();
     let diff = self.rst.wrapping_sub(r_clk.rst);
     if diff == 0 {
@@ -134,7 +164,7 @@ impl Clock {
       return Some(false);
     }
     None
-  }
+  }*/
 
   pub fn partial_cmp_<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
     self.partial_cmp(&r_clk.into())
@@ -143,7 +173,18 @@ impl Clock {
 
 impl PartialOrd for Clock {
   fn partial_cmp(&self, r_clk: &Clock) -> Option<Ordering> {
-    // FIXME FIXME
-    unimplemented!();
+    match rst_signed_distance(self.rst, r_clk.rst) {
+      None => None,
+      Some(0) => {
+        Some(self.tup.cmp(&r_clk.tup))
+      }
+      Some(d) => {
+        if d > 0 {
+          Some(Ordering::Greater)
+        } else {
+          Some(Ordering::Less)
+        }
+      }
+    }
   }
 }

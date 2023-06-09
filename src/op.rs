@@ -1,4 +1,5 @@
-use crate::cell::{CellPtr, StableCell, CellType, Dtype};
+use crate::cell::{CellPtr, StableCell, CellMap, CellSet, CellType, Dtype};
+use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
 use crate::spine::{SpineRet};
@@ -715,11 +716,6 @@ pub trait CtlOps: AsRef<CellPtr> + Sized {
 impl<P: AsRef<CellPtr> + Sized> CtlOps for P {}
 
 pub trait Ops: AsRef<CellPtr> + Sized {
-  #[track_caller]
-  fn tag(self, /*_: ???*/) -> Self {
-    unimplemented!();
-  }
-
   /*fn bar(self) -> Self {
     unimplemented!();
   }*/
@@ -803,9 +799,45 @@ pub trait Ops: AsRef<CellPtr> + Sized {
     }
     Ok(self)
   }
+
+  #[track_caller]
+  fn tag(self, /*_: ???*/) -> Self {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn version(&self) -> Clock {
+    unimplemented!();
+  }
 }
 
 impl<P: AsRef<CellPtr> + Sized> Ops for P {}
+
+pub trait SetOps: AsRef<CellSet> + Sized {
+  #[track_caller]
+  fn add<X: AsRef<CellPtr>>(&self, x: X) {
+    unimplemented!();
+  }
+}
+
+impl<S: AsRef<CellSet> + Sized> SetOps for S {}
+
+pub trait MapOps: AsRef<CellMap> + Sized {
+  #[track_caller]
+  fn add<K: AsRef<CellPtr>, V: AsRef<CellPtr>>(&self, k: K, v: V) {
+    unimplemented!();
+  }
+}
+
+impl<M: AsRef<CellMap> + Sized> MapOps for M {}
+
+pub fn vjp(y_dy: &CellMap, x: &CellSet) -> CellMap {
+  unimplemented!();
+}
+
+pub fn jvp(y: &CellSet, x_dx: &CellMap) -> CellMap {
+  unimplemented!();
+}
 
 #[track_caller]
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {

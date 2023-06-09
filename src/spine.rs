@@ -1,6 +1,6 @@
 use crate::cell::*;
 use crate::clock::{Counter, Clock};
-use crate::ctx::{TL_CTX, Ctx, CtxCtr, CtxEnv, CtxThunkEnv, ctx_lookup_type, ctx_lookup_or_insert_gradr, ctx_accumulate_gradr, ctx_init_zeros, ctx_set_ones, ctx_pop_thunk};
+use crate::ctx::{TL_CTX, Ctx, CtxCtr, CtxEnv, CtxThunkEnv, MCellSet, MCellMap, ctx_lookup_type, ctx_lookup_or_insert_gradr, ctx_accumulate_gradr, ctx_init_zeros, ctx_set_ones, ctx_pop_thunk};
 use crate::panick::{panick_wrap};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -104,6 +104,8 @@ pub enum SpineRet {
 }
 
 pub type SpineCellState = CellState;
+pub type SpineCellSet = MCellSet;
+pub type SpineCellMap = MCellMap;
 
 /*pub struct SpineCellState {
   // FIXME FIXME
@@ -129,6 +131,8 @@ pub struct SpineEnv {
   // TODO TODO
   pub ctr:      Counter,
   pub state:    HashMap<CellPtr, SpineCellState>,
+  pub set:      HashMap<CellPtr, SpineCellSet>,
+  pub map:      HashMap<CellPtr, SpineCellMap>,
   //pub aliases:  HashMap<(CellPtr, Clock), HashSet<CellPtr>>,
   //pub alias_of: HashMap<CellPtr, (CellPtr, Clock)>,
   pub iapply:   HashMap<CellPtr, (u32, ThunkPtr, Clock)>,
@@ -149,6 +153,8 @@ impl SpineEnv {
     //self.eval.clear();*/
     self.ctr = ctr;
     self.state.clear();
+    self.set.clear();
+    self.map.clear();
     self.iapply.clear();
     self.apply_.clear();
     self.bwd.clear();
@@ -591,42 +597,6 @@ impl Spine {
           }
         }
       }
-      /*
-      &SpineEntry::IntroFin(x) => {
-        match env.lookup_mut(x) {
-          None => panic!("bug"),
-          Some(e) => {
-            match e.cel.mode {
-              CellMode::_Top => {
-                e.cel.mode = CellMode::Fin;
-              }
-              CellMode::Fin => {}
-              _ => panic!("bug")
-            }
-            if !e.cel.clk.happens_before(self.ctr).unwrap() {
-              panic!("bug");
-            }
-            assert!(!e.cel.flag.intro());
-            assert!(!e.cel.flag.seal());
-            // FIXME
-            e.cel.clk = self.ctr.into();
-            match &e.cel.compute {
-              &InnerCell::Uninit => panic!("bug"),
-              &InnerCell::Primary => {
-                assert!(e.cel.primary.synced(&e.ty, e.cel.clk));
-              }
-              _ => {
-                e.cel.compute.sync_cell(&e.ty, &e.cel.primary, e.cel.clk);
-              }
-            }
-            // FIXME: first, wait for primary sync.
-            //e.cel._;
-            e.cel.flag.reset();
-            e.cel.flag.set_intro();
-          }
-        }
-      }
-      */
       &SpineEntry::Intro(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
@@ -639,8 +609,10 @@ impl Spine {
               _ => panic!("bug")
             }
             e.state().mode = CellMode::Aff;
-            if !e.state().clk.happens_before(self.ctr).unwrap() {
-              panic!("bug");
+            //if !e.state().clk.happens_before(self.ctr).unwrap() {}
+            match e.state().clk.partial_cmp_(self.ctr) {
+              Some(Ordering::Less) => {}
+              _ => panic!("bug")
             }
             assert!(!e.state().flag.intro());
             assert!(!e.state().flag.seal());
@@ -662,8 +634,10 @@ impl Spine {
               CellMode::Init => {}
               _ => panic!("bug")
             }
-            if !e.state().clk.happens_before(self.ctr).unwrap() {
-              panic!("bug");
+            //if !e.state().clk.happens_before(self.ctr).unwrap() {}
+            match e.state().clk.partial_cmp_(self.ctr) {
+              Some(Ordering::Less) => {}
+              _ => panic!("bug")
             }
             assert!(!e.state().flag.intro());
             assert!(!e.state().flag.seal());
@@ -728,7 +702,7 @@ impl Spine {
             None => panic!("bug"),
             Some(thunk) => thunk
           };
-          te.thunk.apply(ctr, env, &te.arg, x);
+          te.pthunk.apply(ctr, env, &te.arg, x);
         }
         /*match env.lookup_ref(x) {
           None => panic!("bug"),
@@ -766,7 +740,7 @@ impl Spine {
             None => panic!("bug"),
             Some(thunk) => thunk
           };
-          te.thunk.accumulate(ctr, env, &te.arg, x);
+          te.pthunk.accumulate(ctr, env, &te.arg, x);
         }
       }
       &SpineEntry::Seal(x) => {
@@ -920,18 +894,19 @@ impl Backward {
             None => panic!("bug"),
             Some(te) => {
               let arg = te.arg.clone();
-              let spec_ = te.thunk.spec_.clone();
+              let spec_ = te.pthunk.spec_.clone();
               drop(te);
               drop(thunkenv);
+              // FIXME FIXME: clocks.
               let mut arg_adj = Vec::with_capacity(arg.len());
-              for &x in arg.iter() {
+              for &(x, _) in arg.iter() {
                 assert!(!self.complete_set.contains(&x));
                 self.frontier_set.insert(x);
                 let ty_ = ctx_lookup_type(x);
                 arg_adj.push(ctx_init_zeros(ty_));
               }
               let mut spine = ctx.spine.borrow_mut();
-              for (&x, &dx) in arg.iter().zip(arg_adj.iter()) {
+              for (&(x, _), &dx) in arg.iter().zip(arg_adj.iter()) {
                 match spine.env.gradr.insert((tg, x, tg_clk), dx) {
                   None => {}
                   Some(o_dx) => {
@@ -1037,18 +1012,19 @@ pub fn backward(tg: CellPtr) {
               None => panic!("bug"),
               Some(te) => {
                 let arg = te.arg.clone();
-                let spec_ = te.thunk.spec_.clone();
+                let spec_ = te.pthunk.spec_.clone();
                 drop(te);
                 drop(thunkenv);
+                // FIXME FIXME: clocks.
                 let mut frontier_set = HashSet::new();
                 let mut arg_adj = Vec::with_capacity(arg.len());
-                for &x in arg.iter() {
+                for &(x, _) in arg.iter() {
                   frontier_set.insert(x);
                   let ty_ = ctx_lookup_type(x);
                   arg_adj.push(ctx_init_zeros(ty_));
                 }
                 let mut spine = ctx.spine.borrow_mut();
-                for (&x, &dx) in arg.iter().zip(arg_adj.iter()) {
+                for (&(x, _), &dx) in arg.iter().zip(arg_adj.iter()) {
                   assert!(spine.env.gradr.insert((tg, x, tg_clk), dx).is_none());
                 }
                 drop(spine);

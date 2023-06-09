@@ -171,7 +171,7 @@ pub trait ThunkSpec {
   fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_impl_(&self, _spec_dim: Vec<Dim>, _pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> { None }
-  fn pop_adj(&self, /*_ctr: &CtxCtr, _env: &mut CtxEnv, _spine: &mut Spine,*/ _arg: &[CellPtr], /*_out: CellPtr,*/ _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> { Err(ThunkAdjErr::NotImpl) }
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], /*_out: CellPtr,*/ _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> { Err(ThunkAdjErr::NotImpl) }
 }
 
 pub trait ThunkSpec_ {
@@ -186,7 +186,7 @@ pub trait ThunkSpec_ {
   //fn scalar_val(&self) -> Option<&dyn DtypeExt>;
   //fn mode(&self) -> CellMode;
   fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>>;
-  fn pop_adj(&self, /*ctr: &CtxCtr, env: &mut CtxEnv, spine: &mut Spine,*/ arg: &[CellPtr], /*out: CellPtr,*/ out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr>;
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], /*out: CellPtr,*/ out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr>;
 }
 
 impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
@@ -233,22 +233,22 @@ impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
     ThunkSpec::gen_impl_(self, spec_dim, pmach)
   }
 
-  fn pop_adj(&self, /*ctr: &CtxCtr, env: &mut CtxEnv, spine: &mut Spine,*/ arg: &[CellPtr], out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out_adj: CellPtr, arg_adj: &[CellPtr]) -> Result<(), ThunkAdjErr> {
     ThunkSpec::pop_adj(self, /*ctr, env, spine,*/ arg, out_adj, arg_adj)
   }
 }
 
 pub trait ThunkImpl {
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
-  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
-  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[CellPtr], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
+  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
+  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
 }
 
 pub trait ThunkImpl_ {
   fn as_any(&self) -> &dyn Any;
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[CellPtr], out: CellPtr) -> ThunkRet;
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet;
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet;
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
@@ -256,15 +256,15 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
     self
   }
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     ThunkImpl::apply(self, ctr, env, spec_, arg, out, /*cel*/)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     ThunkImpl::accumulate(self, ctr, env, spec_, arg, out)
   }
 
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     unimplemented!();
   }
 }
@@ -278,7 +278,7 @@ pub trait FutharkThunkSpec {
   fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_futhark(&self) -> FutharkThunkCode;
-  //fn pop_adj(&self, _arg: &[CellPtr], _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
+  //fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
@@ -782,7 +782,7 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   //type Cel = SmpInnerCell;
 
   //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     // FIXME
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(ThunkMode::Apply).is_none() {
@@ -799,7 +799,7 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   //type Cel = GpuInnerCell;
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
     let mode = ThunkMode::Apply;
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(mode).is_none() {
@@ -813,7 +813,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let mut arg_ty_ = Vec::with_capacity(self.arityin as usize);
     let mut arg_arr = Vec::with_capacity(self.arityin as usize);
     for k in 0 .. self.arityin as usize {
-      let ty_ = env.lookup_ref(arg[k]).unwrap().ty.clone();
+      let ty_ = env.lookup_ref(arg[k].0).unwrap().ty.clone();
       assert_eq!(self.spec_dim[k], ty_.to_dim());
       let a = match self.spec_dim[k].ndim {
         0 | 1 => FutArrayDev::alloc_1d(),
@@ -921,7 +921,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     //unimplemented!();
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     let mode = ThunkMode::Accumulate;
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(mode).is_none() {
@@ -936,7 +936,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let mut arg_ty_ = Vec::with_capacity((self.arityin + 1) as usize);
     let mut arg_arr = Vec::with_capacity((self.arityin + 1) as usize);
     for k in 0 .. self.arityin as usize {
-      let ty_ = env.lookup_ref(arg[k]).unwrap().ty.clone();
+      let ty_ = env.lookup_ref(arg[k].0).unwrap().ty.clone();
       assert_eq!(self.spec_dim[k], ty_.to_dim());
       let a = match self.spec_dim[k].ndim {
         0 | 1 => FutArrayDev::alloc_1d(),
@@ -1077,7 +1077,7 @@ impl PThunk {
     }
   }
 
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
@@ -1100,7 +1100,7 @@ impl PThunk {
     }
   }
 
-  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
@@ -1123,7 +1123,7 @@ impl PThunk {
     }
   }
 
-  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[CellPtr], out: CellPtr) -> ThunkRet {
+  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
     unimplemented!();
   }
 }

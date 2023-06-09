@@ -172,6 +172,16 @@ impl StableCell {
   }
 }
 
+pub struct CellSet {
+  // TODO TODO
+  pub _ptr: CellPtr,
+}
+
+pub struct CellMap {
+  // TODO TODO
+  pub _ptr: CellPtr,
+}
+
 pub struct StableCheckpoint {
   // TODO TODO
 }
@@ -713,6 +723,11 @@ impl PCell {
       }
     }
     // FIXME FIXME: if it doesn't exist, then create it.
+    unimplemented!();
+  }
+
+  pub fn hardcopy(&self) -> PCell {
+    // FIXME FIXME
     unimplemented!();
   }
 }
