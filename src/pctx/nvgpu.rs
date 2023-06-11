@@ -224,8 +224,13 @@ impl GpuPCtx {
     })
   }
 
-  pub fn dev(&self) -> i32 {
-    self.pctx.device()
+  pub fn pmach(&self) -> PMach {
+    PMach::NvGpu
+  }
+
+  pub fn fastest_locus(&self) -> Locus {
+    // FIXME: query device/driver capabilities.
+    Locus::VMem
   }
 
   pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {
@@ -234,9 +239,8 @@ impl GpuPCtx {
     pl.push((PMach::NvGpu, Locus::VMem));
   }
 
-  pub fn fastest_locus(&self) -> Locus {
-    // FIXME: query device/driver capabilities.
-    Locus::VMem
+  pub fn dev(&self) -> i32 {
+    self.pctx.device()
   }
 
   /*fn _fresh_inner_ref(&self) -> GpuInnerRef {

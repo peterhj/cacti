@@ -2,7 +2,7 @@ use crate::algo::{SortKey8, SortMap8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::*;
-use crate::ctx::{CtxCtr, CtxEnv, Cell_};
+use crate::ctx::{CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 //use crate::op::*;
 use crate::pctx::{TL_PCTX, Locus, PMach};
 #[cfg(feature = "gpu")]
@@ -10,7 +10,9 @@ use crate::pctx::nvgpu::*;
 //use crate::pctx::smp::*;
 //use crate::spine::{Spine};
 use cacti_cfg_env::*;
+#[cfg(feature = "gpu")]
 use cacti_gpu_cu_ffi::{LIBCUDA, LIBCUDART, LIBNVRTC, TL_LIBNVRTC_BUILTINS_BARRIER};
+#[cfg(feature = "gpu")]
 use cacti_gpu_cu_ffi::{cuda_memcpy_d2h_async, CudartStream, cudart_set_cur_dev};
 
 use aho_corasick::{AhoCorasick};
@@ -20,11 +22,13 @@ use futhark_ffi::{
   ObjectExt,
   Backend as FutBackend,
   MulticoreBackend,
-  CudaBackend,
-  ArrayDev as FutArrayDev,
   FutharkFloatFormatter,
 };
-//use futhark_ffi::types::*;
+#[cfg(feature = "gpu")]
+use futhark_ffi::{
+  CudaBackend,
+  ArrayDev as FutArrayDev,
+};
 use home::{home_dir};
 //use smol_str::{SmolStr};
 
@@ -111,6 +115,7 @@ pub enum ThunkRet {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum ThunkDimErr {
   // FIXME FIXME
   Deferred,
@@ -125,6 +130,7 @@ impl Default for ThunkDimErr {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum ThunkTypeErr {
   // FIXME FIXME
   Deferred,
@@ -140,9 +146,11 @@ impl Default for ThunkTypeErr {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[repr(u8)]
 pub enum ThunkAdjErr {
   // FIXME FIXME
   NotImpl,
+  _Bot,
 }
 
 #[derive(Clone)]
@@ -239,16 +247,16 @@ impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
 }
 
 pub trait ThunkImpl {
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
-  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
-  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _out: CellPtr) -> ThunkRet { ThunkRet::NotImpl }
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _oclk: Clock) -> ThunkRet { ThunkRet::NotImpl }
+  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _oclk: Clock) -> ThunkRet { ThunkRet::NotImpl }
+  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _oclk: Clock) -> ThunkRet { ThunkRet::NotImpl }
 }
 
 pub trait ThunkImpl_ {
   fn as_any(&self) -> &dyn Any;
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet;
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet;
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet;
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
@@ -256,20 +264,35 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
     self
   }
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
-    ThunkImpl::apply(self, ctr, env, spec_, arg, out, /*cel*/)
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
+    ThunkImpl::apply(self, ctr, env, spec_, arg, th, out, oclk)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
-    ThunkImpl::accumulate(self, ctr, env, spec_, arg, out)
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
+    ThunkImpl::accumulate(self, ctr, env, spec_, arg, th, out, oclk)
   }
 
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     unimplemented!();
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum FutharkGenErr {
+  NotImpl,
+  _Bot,
+}
+
+impl From<FutharkThunkCode> for Result<FutharkThunkCode, FutharkGenErr> {
+  #[inline]
+  fn from(code: FutharkThunkCode) -> Result<FutharkThunkCode, FutharkGenErr> {
+    Ok(code)
+  }
+}
+
 pub trait FutharkThunkSpec {
+  //fn tag(&self) -> Option<&'static str> { None }
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
@@ -277,11 +300,15 @@ pub trait FutharkThunkSpec {
   fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
   fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   //fn mode(&self) -> CellMode { CellMode::Aff }
-  fn gen_futhark(&self) -> FutharkThunkCode;
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr>;
   //fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
+  /*fn tag(&self) -> Option<&'static str> {
+    FutharkThunkSpec::tag(self)
+  }*/
+
   fn arity(&self) -> (u16, u16) {
     FutharkThunkSpec::arity(self)
   }
@@ -308,7 +335,10 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
 
   fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
     let (arityin, arityout) = self.arity();
-    let code = self.gen_futhark();
+    let code = match self.gen_futhark(&spec_dim) {
+      Err(e) => panic!("ERROR: failed to generate futhark thunk code: {:?}", e),
+      Ok(code) => code
+    };
     Some(match pmach {
       PMach::Smp => {
         Rc::new(FutharkThunkImpl::<MulticoreBackend>{
@@ -324,17 +354,21 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         })
       }
       PMach::NvGpu => {
-        Rc::new(FutharkThunkImpl::<CudaBackend>{
-          arityin,
-          arityout,
-          spec_dim,
-          code,
-          //object: RefCell::new(None),
-          //consts: RefCell::new(Vec::new()),
-          modekeys: RefCell::new(Vec::new()),
-          object: RefCell::new(SortMap8::new()),
-          consts: RefCell::new(SortMap8::new()),
-        })
+        if cfg!(feature = "gpu") {
+          Rc::new(FutharkThunkImpl::<CudaBackend>{
+            arityin,
+            arityout,
+            spec_dim,
+            code,
+            //object: RefCell::new(None),
+            //consts: RefCell::new(Vec::new()),
+            modekeys: RefCell::new(Vec::new()),
+            object: RefCell::new(SortMap8::new()),
+            consts: RefCell::new(SortMap8::new()),
+          })
+        } else {
+          panic!("ERROR: not compiled with gpu support");
+        }
       }
       _ => unimplemented!()
     })
@@ -425,6 +459,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
   }
 }
 
+#[cfg(feature = "gpu")]
 impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
   fn _dropck(&mut self) {
     assert!(LIBCUDA._inner.is_some());
@@ -497,8 +532,10 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
 
   fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str) -> Option<(FutObject<CudaBackend>, Vec<StableCell>)> {
     assert!(TL_LIBNVRTC_BUILTINS_BARRIER.with(|&bar| bar));
-    // FIXME FIXME: get the correct dev from pctx.
-    cudart_set_cur_dev(0).unwrap();
+    TL_PCTX.with(|pctx| {
+      let dev = pctx.nvgpu.as_ref().unwrap().dev();
+      cudart_set_cur_dev(dev).unwrap();
+    });
     match config.cached_or_new_object::<CudaBackend>(source.as_bytes()) {
       Err(e) => {
         println!("WARNING: FutharkThunkImpl::<CudaBackend>::_build_object: build error: {:?}", e);
@@ -521,13 +558,15 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           TL_PCTX.with(|pctx| {
             match pctx.nvgpu.as_ref().unwrap().cel_map.borrow().get(&x) {
               None => panic!("bug"),
-              Some(cel) => {
+              Some(gpu_cel) => {
+                // FIXME: the type of the constant could probably be inferred,
+                // but easier to defer it until unification.
                 let ty = CellType::top();
-                let cel = Rc::downgrade(cel);
                 let mut pcel = PCell::new(x, ty.clone());
-                // FIXME FIXME
-                /*pcel.compute = InnerCell::Gpu(cel);*/
-                pcel.push_new_replica(Locus::VMem, PMach::NvGpu, Some(cel));
+                let pmach = PMach::NvGpu;
+                let locus = pctx.nvgpu.as_ref().unwrap().fastest_locus();
+                let icel = Rc::downgrade(gpu_cel);
+                pcel.push_new_replica(locus, pmach, Some(icel));
                 env.insert_phy(x, ty, pcel);
               }
             }
@@ -779,10 +818,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
 }
 
 impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
-  //type Cel = SmpInnerCell;
-
-  //fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[CellPtr], cel: &mut Weak<SmpInnerCell>) -> ThunkRet {}
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     // FIXME
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(ThunkMode::Apply).is_none() {
@@ -796,10 +832,9 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   }
 }
 
+#[cfg(feature = "gpu")]
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
-  //type Cel = GpuInnerCell;
-
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr, /*cel: &mut Option<Weak<dyn InnerCell_>>*/) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let mode = ThunkMode::Apply;
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(mode).is_none() {
@@ -879,6 +914,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       match gpu.mem_pool.lookup_dptr(mem_dptr) {
         None => {
+          // FIXME FIXME
+          panic!("bug");
         }
         Some((region, p)) => {
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: region={:?} p={:?}", region, p);
@@ -892,8 +929,10 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
                   Some(e) => {
                     match e.cel_ {
                       &mut Cell_::Top(ref state, optr) => {
+                        // FIXME: defaults below are placeholders for...?
                         let state = RefCell::new(state.borrow().clone());
-                        *e.cel_ = Cell_::Cow(state, CowCell{optr, pcel: p});
+                        let clo = RefCell::new(CellClosure::default());
+                        *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: p, pclk: Clock::default()});
                         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: cow {:?} -> {:?}", out, p);
                       }
                       // FIXME FIXME
@@ -921,7 +960,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     //unimplemented!();
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let mode = ThunkMode::Accumulate;
     //if self.object.borrow().is_none() {}
     if self.object.borrow().find(mode).is_none() {
@@ -1077,7 +1116,7 @@ impl PThunk {
     }
   }
 
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
@@ -1095,12 +1134,12 @@ impl PThunk {
     match self.lookup_impl_(PMach::NvGpu) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.apply(ctr, env, &*self.spec_, arg, out)
+        thimpl_.apply(ctr, env, &*self.spec_, arg, th, out, oclk)
       }
     }
   }
 
-  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
+  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     // FIXME FIXME
     match self.lookup_impl_(PMach::NvGpu) {
       None => {
@@ -1118,12 +1157,12 @@ impl PThunk {
     match self.lookup_impl_(PMach::NvGpu) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.accumulate(ctr, env, &*self.spec_, arg, out)
+        thimpl_.accumulate(ctr, env, &*self.spec_, arg, th, out, oclk)
       }
     }
   }
 
-  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], out: CellPtr) -> ThunkRet {
+  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     unimplemented!();
   }
 }

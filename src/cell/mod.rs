@@ -8,6 +8,8 @@ use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::pickle::{TorchDtype};
 
 use std::any::{Any};
+use std::cell::{Cell};
+use std::collections::{HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of, swap};
@@ -78,13 +80,13 @@ impl CellPtr {
 
 #[repr(transparent)]
 pub struct StableCell {
-  pub _ptr: CellPtr,
+  pub ptr_: CellPtr,
 }
 
 impl From<CellPtr> for StableCell {
   fn from(ptr: CellPtr) -> StableCell {
     ctx_retain(ptr);
-    StableCell{_ptr: ptr}
+    StableCell{ptr_: ptr}
   }
 }
 
@@ -110,19 +112,19 @@ impl Deref for StableCell {
 
 impl Debug for StableCell {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "StableCell({})", self._ptr.0)
+    write!(f, "StableCell({})", self.ptr_.0)
   }
 }
 
 impl Clone for StableCell {
   fn clone(&self) -> StableCell {
-    StableCell::from(self._ptr)
+    StableCell::from(self.ptr_)
   }
 }
 
 impl Drop for StableCell {
   fn drop(&mut self) {
-    ctx_release(self._ptr);
+    ctx_release(self.ptr_);
   }
 }
 
@@ -130,7 +132,7 @@ impl StableCell {
   pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
     assert!(!ptr.is_nil());
     env.retain(ptr);
-    StableCell{_ptr: ptr}
+    StableCell{ptr_: ptr}
   }
 
   pub fn scalar<T: ThunkValExt>(value: T) -> StableCell {
@@ -149,19 +151,19 @@ impl StableCell {
 
   pub fn release(mut self, env: &CtxEnv) -> CellPtr {
     let mut ptr = CellPtr::nil();
-    swap(&mut ptr, &mut self._ptr);
+    swap(&mut ptr, &mut self.ptr_);
     env.release(ptr);
     ptr
   }
 
   #[inline]
   pub fn into_ptr(self) -> CellPtr {
-    self._ptr
+    self.ptr_
   }
 
   #[inline]
   pub fn as_ptr(&self) -> CellPtr {
-    self._ptr
+    self.ptr_
   }
 
   #[inline]
@@ -172,18 +174,61 @@ impl StableCell {
   }
 }
 
-pub struct CellSet {
-  // TODO TODO
-  pub _ptr: CellPtr,
+/*pub struct Snapshot {
+  pub ptr_: CellPtr,
+  pub clk:  Clock,
 }
 
-pub struct CellMap {
-  // TODO TODO
-  pub _ptr: CellPtr,
+pub struct StableSnapshot {
+}*/
+
+/*pub struct Checkpoint {
 }
 
-pub struct StableCheckpoint {
-  // TODO TODO
+pub type StableCheckpoint = Checkpoint;*/
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct Atom(pub i32);
+
+impl Atom {
+  pub fn nil() -> Atom {
+    Atom(0)
+  }
+
+  pub fn from_unchecked(p: i32) -> Atom {
+    Atom(p)
+  }
+
+  pub fn to_unchecked(&self) -> i32 {
+    self.0
+  }
+
+  pub fn is_nil(&self) -> bool {
+    self.0 == 0
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct MCellPtr(pub i32);
+
+impl MCellPtr {
+  pub fn nil() -> MCellPtr {
+    MCellPtr(0)
+  }
+
+  pub fn from_unchecked(p: i32) -> MCellPtr {
+    MCellPtr(p)
+  }
+
+  pub fn to_unchecked(&self) -> i32 {
+    self.0
+  }
+
+  pub fn is_nil(&self) -> bool {
+    self.0 == 0
+  }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -301,6 +346,40 @@ impl Dtype {
       Dtype::UInt16     => 2,
       Dtype::UInt8      => 1,
     }
+  }
+
+  pub fn is_float(self) -> bool {
+    match self {
+      Dtype::Float64    |
+      Dtype::Float32    |
+      Dtype::Float16    |
+      Dtype::BFloat16   => true,
+      _ => false
+    }
+  }
+
+  pub fn is_signed_int(self) -> bool {
+    match self {
+      Dtype::Int64      |
+      Dtype::Int32      |
+      Dtype::Int16      |
+      Dtype::Int8       => true,
+      _ => false
+    }
+  }
+
+  pub fn is_unsigned_int(self) -> bool {
+    match self {
+      Dtype::UInt64     |
+      Dtype::UInt32     |
+      Dtype::UInt16     |
+      Dtype::UInt8      => true,
+      _ => false
+    }
+  }
+
+  pub fn is_uint(self) -> bool {
+    self.is_unsigned_int()
   }
 
   pub fn max(self, rhs: Dtype) -> Option<Dtype> {
@@ -603,7 +682,7 @@ impl CellFlag {
     prev
   }
 
-  pub fn eval(&self) -> bool {
+  /*pub fn eval(&self) -> bool {
     (self.bits & 8) != 0
   }
 
@@ -611,7 +690,7 @@ impl CellFlag {
     let prev = self.eval();
     self.bits |= 8;
     prev
-  }
+  }*/
 }
 
 #[derive(Clone, Default)]
@@ -619,11 +698,6 @@ pub struct CellState {
   pub mode: CellMode,
   pub flag: CellFlag,
   pub clk:  Clock,
-}
-
-pub struct CowCell {
-  pub optr: CellPtr,
-  pub pcel: CellPtr,
 }
 
 pub struct PCell {
@@ -744,5 +818,127 @@ pub trait InnerCell_ {
 impl<C: InnerCell + Any> InnerCell_ for C {
   fn as_any(&self) -> &dyn Any {
     self
+  }
+}
+
+/*pub struct CellSet {
+  // TODO TODO
+  pub ptr_: CellPtr,
+}
+
+pub struct CellMap {
+  // TODO TODO
+  pub ptr_: CellPtr,
+}*/
+
+pub struct MSet {
+  // TODO TODO
+  pub ptr_: MCellPtr,
+}
+
+pub struct MMap {
+  // TODO TODO
+  pub ptr_: MCellPtr,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MValue {
+  Cell(CellPtr),
+  /*Atom(Atom),*/
+  // FIXME FIXME: recursive MCell.
+  /*MCel(MCellPtr),*/
+}
+
+#[derive(Clone, Copy)]
+pub enum MValueRef<'a> {
+  Cell(&'a CellPtr),
+}
+
+impl<'p, P: AsRef<CellPtr>> From<&'p P> for MValueRef<'p> {
+  fn from(p: &'p P) -> MValueRef<'p> {
+    MValueRef::Cell(p.as_ref())
+  }
+}
+
+#[derive(Clone)]
+pub struct MCellSetEntry {
+  pub item: MValue,
+  pub clk:  Clock,
+  pub rev_: Cell<bool>,
+}
+
+#[derive(Clone)]
+pub struct MCellSet {
+  // FIXME
+  pub idx:  HashMap<(MValue, Clock), u32>,
+  pub log:  Vec<MCellSetEntry>,
+}
+
+impl Default for MCellSet {
+  fn default() -> MCellSet {
+    MCellSet{
+      idx:  HashMap::new(),
+      log:  Vec::new(),
+    }
+  }
+}
+
+impl MCellSet {
+  pub fn add(&mut self, item: MValue, clk: Clock) {
+    match self.idx.get(&(item, clk)) {
+      None => {}
+      Some(&idx) => {
+        assert!((idx as usize) < self.log.len());
+        assert!(!self.log[idx as usize].rev_.get());
+        self.log[idx as usize].rev_.set(true);
+      }
+    }
+    assert!(self.log.len() < u32::max_value() as usize);
+    let idx = self.log.len() as u32;
+    self.idx.insert((item, clk), idx);
+    self.log.push(MCellSetEntry{item, clk, rev_: Cell::new(false)});
+  }
+}
+
+#[derive(Clone)]
+pub struct MCellMapEntry {
+  pub key:  MValue,
+  pub val:  MValue,
+  pub kclk: Clock,
+  pub vclk: Clock,
+  pub rev_: Cell<bool>,
+}
+
+#[derive(Clone)]
+pub struct MCellMap {
+  // FIXME
+  pub kidx: HashMap<(MValue, Clock), u32>,
+  pub log:  Vec<MCellMapEntry>,
+}
+
+impl Default for MCellMap {
+  fn default() -> MCellMap {
+    MCellMap{
+      kidx: HashMap::new(),
+      log:  Vec::new(),
+    }
+  }
+}
+
+impl MCellMap {
+  pub fn add(&mut self, key: MValue, kclk: Clock, val: MValue, vclk: Clock) {
+    match self.kidx.get(&(key, kclk)) {
+      None => {}
+      Some(&idx) => {
+        assert!((idx as usize) < self.log.len());
+        assert!(!self.log[idx as usize].rev_.get());
+        assert!(self.log[idx as usize].vclk <= vclk);
+        self.log[idx as usize].rev_.set(true);
+      }
+    }
+    assert!(self.log.len() < u32::max_value() as usize);
+    let idx = self.log.len() as u32;
+    self.kidx.insert((key, kclk), idx);
+    self.log.push(MCellMapEntry{key, val, kclk, vclk, rev_: Cell::new(false)});
   }
 }

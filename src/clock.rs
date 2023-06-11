@@ -84,25 +84,25 @@ impl Counter {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Clock {
   pub rst:  u32,
-  pub tup:  u32,
+  pub up:   u32,
 }
 
 impl Default for Clock {
   fn default() -> Clock {
-    Clock{rst: 0, tup: 0}
+    Clock{rst: 0, up: 0}
   }
 }
 
 impl From<Counter> for Clock {
   #[inline(always)]
   fn from(ctr: Counter) -> Clock {
-    Clock{rst: ctr.rst, tup: 0}
+    Clock{rst: ctr.rst, up: 0}
   }
 }
 
 impl Debug for Clock {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "Clock(rst={}, tup={})", self.rst, self.tup)
+    write!(f, "Clock(rst={}, up={})", self.rst, self.up)
   }
 }
 
@@ -116,25 +116,25 @@ impl Clock {
     if next_rst == 0 {
       next_rst = next_rst.wrapping_add(1);
     }
-    Clock{rst: next_rst, tup: 0}
+    Clock{rst: next_rst, up: 0}
   }
 
   pub fn finish(&self) -> Clock {
-    assert!(self.tup != u32::max_value());
-    Clock{rst: self.rst, tup: u32::max_value()}
+    assert!(self.up != u32::max_value());
+    Clock{rst: self.rst, up: u32::max_value()}
   }
 
   pub fn update(&self) -> Clock {
-    let next_tup = self.tup + 1;
-    assert!(next_tup != u32::max_value());
-    Clock{rst: self.rst, tup: next_tup}
+    let next_up = self.up + 1;
+    assert!(next_up != u32::max_value());
+    Clock{rst: self.rst, up: next_up}
   }
 
   /*pub fn happens_after<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<bool> {
     let r_clk = r_clk.into();
     let diff = self.rst.wrapping_sub(r_clk.rst);
     if diff == 0 {
-      if self.tup > r_clk.tup {
+      if self.up > r_clk.up {
         return Some(true);
       } else {
         return Some(false);
@@ -152,7 +152,7 @@ impl Clock {
     let r_clk = r_clk.into();
     let diff = r_clk.rst.wrapping_sub(self.rst);
     if diff == 0 {
-      if r_clk.tup > self.tup {
+      if r_clk.up > self.up {
         return Some(true);
       } else {
         return Some(false);
@@ -176,7 +176,7 @@ impl PartialOrd for Clock {
     match rst_signed_distance(self.rst, r_clk.rst) {
       None => None,
       Some(0) => {
-        Some(self.tup.cmp(&r_clk.tup))
+        Some(self.up.cmp(&r_clk.up))
       }
       Some(d) => {
         if d > 0 {

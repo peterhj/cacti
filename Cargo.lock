@@ -171,6 +171,9 @@ dependencies = [
 [[package]]
 name = "rustc_serialize"
 version = "0.4.0-devel"
+dependencies = [
+ "smol_str",
+]
 
 [[package]]
 name = "ryu"

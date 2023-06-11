@@ -1,4 +1,4 @@
-use crate::cell::{CellPtr, StableCell, CellMap, CellSet, CellType, Dtype};
+use crate::cell::{CellPtr, StableCell, CellType, Dtype, MSet, MMap, MValueRef};
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
@@ -589,7 +589,7 @@ pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   unimplemented!();
 }
 
-pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
+pub trait CastOps: AsRef<CellPtr> {
   /*fn upcast_f32(self) -> CellPtr {
     unimplemented!();
   }
@@ -599,20 +599,19 @@ pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
   }*/
 
   #[track_caller]
-  fn cast(self, new_dtype: Dtype) -> CellPtr {
+  fn cast(&self, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
-      let org_dtype = ctx_lookup_dtype(*self.as_ref());
+      let x = *self.as_ref();
+      let org_dtype = ctx_lookup_dtype(x);
       if org_dtype == new_dtype {
-        return self.into();
+        return x;
       }
       match (org_dtype, new_dtype) {
         (Dtype::Float32, Dtype::Float16) |
         (Dtype::Float16, Dtype::Float32) => {
           let op = CastFutThunkSpec{org_dtype, new_dtype};
           assert!(ctx_clean_arg());
-          ctx_push_cell_arg(self.into());
-          // FIXME
-          /*ctx_push_cell_tmp_out();*/
+          ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
         _ => unimplemented!()
@@ -621,21 +620,28 @@ pub trait CastOps: AsRef<CellPtr> + Into<CellPtr> {
   }
 }
 
-impl<P: AsRef<CellPtr> + Into<CellPtr>> CastOps for P {}
+impl<P: AsRef<CellPtr>> CastOps for P {}
 
-pub trait GradOps<Q: Into<CellPtr>>: Into<CellPtr> {
+pub trait GradOps<Q: AsRef<CellPtr>>: AsRef<CellPtr> {
   #[track_caller]
-  fn gradl(self, tg: Q) -> CellPtr {
-    ctx_lookup_or_insert_gradl(self.into(), tg.into())
+  fn grad(&self, x: Q) -> CellPtr { self.gradr(x) }
+
+  #[track_caller]
+  fn gradr(&self, x: Q) -> CellPtr {
+    // FIXME FIXME
+    //ctx_lookup_or_insert_gradr(self.into(), x.into())
+    unimplemented!();
   }
 
   #[track_caller]
-  fn gradr(self, x: Q) -> CellPtr {
-    ctx_lookup_or_insert_gradr(self.into(), x.into())
+  fn gradl(&self, y: Q) -> CellPtr {
+    // FIXME FIXME
+    //ctx_lookup_or_insert_gradl(self.into(), tg.into())
+    unimplemented!();
   }
 }
 
-impl<P: Into<CellPtr>, Q: Into<CellPtr>> GradOps<Q> for P {}
+impl<P: AsRef<CellPtr>, Q: AsRef<CellPtr>> GradOps<Q> for P {}
 
 pub trait ArrayOps: AsRef<CellPtr> + Sized {
   /*
@@ -647,32 +653,49 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
   */
 
   #[track_caller]
-  fn type_(self) -> CellType {
+  fn type_(&self) -> CellType {
     ctx_lookup_type(*self.as_ref())
   }
 
   #[track_caller]
-  fn dtype(self) -> Dtype {
+  fn dtype(&self) -> Dtype {
     self.type_().dtype
   }
 
   #[track_caller]
-  fn shape(self) -> Vec<i64> {
+  fn shape(&self) -> Vec<i64> {
     self.type_().shape
   }
 
   #[track_caller]
-  fn bit_alias(self, new_dtype: Dtype) -> CellPtr {
+  fn bit_alias(&self, new_dtype: Dtype) -> CellPtr {
     ctx_alias_bits(*self.as_ref(), new_dtype)
   }
 
   #[track_caller]
-  fn new_shape(self, new_shape: Vec<i64>) -> CellPtr {
+  fn new_shape(&self, new_shape: Vec<i64>) -> CellPtr {
     ctx_alias_new_shape(*self.as_ref(), new_shape)
   }
 
   #[track_caller]
-  fn reshape(self, new_shape: Vec<i64>) -> CellPtr { self.new_shape(new_shape) }
+  fn reshape(&self, new_shape: Vec<i64>) -> CellPtr { self.new_shape(new_shape) }
+
+  #[track_caller]
+  fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
+    panick_wrap(|| {
+      if !(inner_len > 0) {
+        panic!("ERROR: inner_one_hot: invalid parameter: expected inner_len > 0, actual {:?}", inner_len);
+      }
+      let x = *self.as_ref();
+      let org_dtype = ctx_lookup_dtype(x);
+      if !org_dtype.is_uint() {
+        panic!("ERROR: inner_one_hot: invalid argument: expected dtype uint, actual {:?}", org_dtype);
+      }
+      let op = InnerOneHotFutThunkSpec{inner_len, org_dtype, new_dtype};
+      // FIXME FIXME
+      unimplemented!();
+    })
+  }
 }
 
 impl<P: AsRef<CellPtr> + Sized> ArrayOps for P {}
@@ -772,7 +795,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   }*/
 
   #[track_caller]
-  fn unseal_init(self) -> Self {
+  fn override_unseal_init(self) -> Self {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
       spine.unseal_mux(*self.as_ref());
@@ -809,33 +832,42 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   fn version(&self) -> Clock {
     unimplemented!();
   }
+
+  #[track_caller]
+  fn snapshot(&self) -> CellPtr {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut env = ctx.env.borrow_mut();
+      env.snapshot(&ctx.ctr, *self.as_ref())
+    }))
+  }
+
+  /*#[track_caller]
+  fn checkpoint(self) -> CellPtr {
+    unimplemented!();
+  }*/
 }
 
 impl<P: AsRef<CellPtr> + Sized> Ops for P {}
 
-pub trait SetOps: AsRef<CellSet> + Sized {
+impl MSet {
   #[track_caller]
-  fn add<X: AsRef<CellPtr>>(&self, x: X) {
+  pub fn add<'x, X: Into<MValueRef<'x>>>(&self, x: X) {
     unimplemented!();
   }
 }
 
-impl<S: AsRef<CellSet> + Sized> SetOps for S {}
-
-pub trait MapOps: AsRef<CellMap> + Sized {
+impl MMap {
   #[track_caller]
-  fn add<K: AsRef<CellPtr>, V: AsRef<CellPtr>>(&self, k: K, v: V) {
+  pub fn add<'k, 'v, K: Into<MValueRef<'k>>, V: Into<MValueRef<'v>>>(&self, k: K, v: V) {
     unimplemented!();
   }
 }
 
-impl<M: AsRef<CellMap> + Sized> MapOps for M {}
-
-pub fn vjp(y_dy: &CellMap, x: &CellSet) -> CellMap {
+pub fn vjp(y_dy: &MMap, x: &MSet) -> MMap {
   unimplemented!();
 }
 
-pub fn jvp(y: &CellSet, x_dx: &CellMap) -> CellMap {
+pub fn jvp(y: &MSet, x_dx: &MMap) -> MMap {
   unimplemented!();
 }
 
