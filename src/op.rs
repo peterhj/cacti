@@ -2,6 +2,7 @@ use crate::cell::{CellPtr, StableCell, CellType, Dtype, MSet, MMap, MValueRef};
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
+use crate::pctx::{Locus};
 use crate::spine::{SpineRet};
 use crate::thunk::op::*;
 
@@ -644,37 +645,39 @@ pub trait GradOps<Q: AsRef<CellPtr>>: AsRef<CellPtr> {
 impl<P: AsRef<CellPtr>, Q: AsRef<CellPtr>> GradOps<Q> for P {}
 
 pub trait ArrayOps: AsRef<CellPtr> + Sized {
-  /*
-  fn dtype(&self) -> Dtype;
-  fn shape(&self) -> Vec<i64>;
-  fn bit_alias(self, new_dtype: Dtype) -> Self;
-  fn new_shape(self, new_shape: Vec<i64>) -> Self;
-  fn reshape(self, new_shape: Vec<i64>) -> Self { self.new_shape(new_shape) }
-  */
-
   #[track_caller]
   fn type_(&self) -> CellType {
-    ctx_lookup_type(*self.as_ref())
-  }
-
-  #[track_caller]
-  fn dtype(&self) -> Dtype {
-    self.type_().dtype
+    panick_wrap(|| {
+      ctx_lookup_type(*self.as_ref())
+    })
   }
 
   #[track_caller]
   fn shape(&self) -> Vec<i64> {
-    self.type_().shape
+    panick_wrap(|| {
+      self.type_().shape
+    })
+  }
+
+  #[track_caller]
+  fn dtype(&self) -> Dtype {
+    panick_wrap(|| {
+      ctx_lookup_dtype(*self.as_ref())
+    })
   }
 
   #[track_caller]
   fn bit_alias(&self, new_dtype: Dtype) -> CellPtr {
-    ctx_alias_bits(*self.as_ref(), new_dtype)
+    panick_wrap(|| {
+      ctx_alias_bits(*self.as_ref(), new_dtype)
+    })
   }
 
   #[track_caller]
   fn new_shape(&self, new_shape: Vec<i64>) -> CellPtr {
-    ctx_alias_new_shape(*self.as_ref(), new_shape)
+    panick_wrap(|| {
+      ctx_alias_new_shape(*self.as_ref(), new_shape)
+    })
   }
 
   #[track_caller]
@@ -691,9 +694,10 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
       if !org_dtype.is_uint() {
         panic!("ERROR: inner_one_hot: invalid argument: expected dtype uint, actual {:?}", org_dtype);
       }
-      let op = InnerOneHotFutThunkSpec{inner_len, org_dtype, new_dtype};
-      // FIXME FIXME
-      unimplemented!();
+      let op = InnerOneHotFutThunkSpec{inner_len, /*org_dtype,*/ new_dtype};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(op)
     })
   }
 }
@@ -803,34 +807,74 @@ pub trait Ops: AsRef<CellPtr> + Sized {
     }))
   }
 
+  /*#[track_caller]
+  fn yield_get_and_set(self) -> Self {
+    panick_wrap(|| {
+      // FIXME
+      unimplemented!();
+    })
+  }*/
+
+  #[track_caller]
+  fn mem_set_yield_(&self) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.yield_set(*self.as_ref(), Locus::Mem);
+    }))
+  }
+
+  #[track_caller]
+  fn mem_set_yield_with(&self, _: ()) {
+    panick_wrap(|| self.mem_set_yield_())
+  }
+
+  #[track_caller]
+  fn mem_init_yield_(&self) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.yield_init(*self.as_ref(), Locus::Mem);
+    }))
+  }
+
+  #[track_caller]
+  fn mem_init_yield_with(&self, _: ()) {
+    panick_wrap(|| self.mem_init_yield_())
+  }
+
   #[track_caller]
   fn eval(self) -> Self {
-    let ret = eval(*self.as_ref());
-    match ret {
-      SpineRet::Bot => panic!("EXCEPTION"),
-      _ => {}
-    }
-    self
+    panick_wrap(|| {
+      let ret = eval(*self.as_ref());
+      match ret {
+        SpineRet::Bot => panic!("EXCEPTION"),
+        _ => {}
+      }
+      self
+    })
   }
 
   #[track_caller]
   fn try_eval(self) -> Result<Self, ()> {
-    let ret = eval(*self.as_ref());
-    match ret {
-      SpineRet::Bot => return Err(()),
-      _ => {}
-    }
-    Ok(self)
+    panick_wrap(|| {
+      let ret = eval(*self.as_ref());
+      match ret {
+        SpineRet::Bot => return Err(()),
+        _ => {}
+      }
+      Ok(self)
+    })
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn tag(self, /*_: ???*/) -> Self {
     unimplemented!();
-  }
+  }*/
 
   #[track_caller]
   fn version(&self) -> Clock {
-    unimplemented!();
+    panick_wrap(|| {
+      ctx_lookup_clk(*self.as_ref())
+    })
   }
 
   #[track_caller]

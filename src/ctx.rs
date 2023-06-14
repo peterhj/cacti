@@ -1,6 +1,7 @@
 use crate::cell::*;
 use crate::clock::{Clock};
 use crate::panick::{panick_wrap};
+use crate::pctx::smp::{MemReg};
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -8,6 +9,7 @@ use crate::thunk::op::{SetScalarFutThunkSpec};
 use futhark_syntax::{Token as FutToken};
 use futhark_syntax::re::{ReTrie};
 
+use std::any::{Any};
 use std::cell::{Cell, RefCell, Ref, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem::{swap};
@@ -138,7 +140,28 @@ pub fn resume() -> SpineRet {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default()*/)
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::_Top)
+  }))
+}
+
+#[track_caller]
+pub fn resume_put_mem<K: AsRef<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemV(*key.as_ref(), val))
+  }))
+}
+
+#[track_caller]
+pub fn resume_put_mem_fun<K: AsRef<CellPtr>, F: Fn(MemReg)>(key: K, fun: &F) -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    // FIXME FIXME
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(*key.as_ref(), fun as _))
   }))
 }
 
@@ -149,7 +172,7 @@ pub fn eval(x: CellPtr) -> SpineRet {
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
     // FIXME FIXME: observe the arg clock.
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*x, _*/)
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*x, _,*/ SpineResume::_Top)
   }))
 }
 
@@ -287,6 +310,25 @@ pub fn ctx_lookup_eflag(x: CellPtr) -> CellEFlag {
       None => panic!("bug"),
       Some(e) => {
         e.eflag
+      }
+    }
+  })
+}
+
+pub fn ctx_lookup_clk(x: CellPtr) -> Clock {
+  TL_CTX.with(|ctx| {
+    match ctx.env.borrow().lookup_ref(x) {
+      None => panic!("bug"),
+      Some(e) => {
+        match e.cel_ {
+          &Cell_::Top(ref state, ..) |
+          &Cell_::Phy(ref state, ..) |
+          &Cell_::Cow(ref state, ..) => {
+            state.borrow().clk
+          }
+          &Cell_::Bot => panic!("bug"),
+          _ => panic!("bug")
+        }
       }
     }
   })
@@ -1070,20 +1112,30 @@ impl CtxEnv {
   }
 
   pub fn lookup_ref(&self, x: CellPtr) -> Option<CellEnvEntryRef> {
-    let ty = match self.celtab.get(&x) {
+    let query = x;
+    let ty = match self.celtab.get(&query) {
       None => panic!("bug"),
       Some(e) => {
         match &e.cel_ {
-          &Cell_::Phy(.., ref cel) => {
-            assert_eq!(x, cel.optr);
+          &Cell_::Top(.., optr) => {
+            assert_eq!(query, optr);
           }
-          _ => {}
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Cow(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Alias(..) => {}
+          &Cell_::Bot => {
+            panic!("bug");
+          }
+          _ => unimplemented!()
         }
         match &e.cel_ {
           &Cell_::Top(..) |
           &Cell_::Phy(..) |
-          &Cell_::Cow(..) |
-          &Cell_::Bot => {
+          &Cell_::Cow(..) => {
             return Some(CellEnvEntryRef{
               stablect: &e.stablect,
               //snapshot: &e.snapshot,
@@ -1093,12 +1145,12 @@ impl CtxEnv {
             });
           }
           &Cell_::Alias(..) => {}
-          _ => unimplemented!()
+          _ => unreachable!()
         }
         &e.ty
       }
     };
-    let root = self.probe(x);
+    let root = self.probe(query);
     match self.celtab.get(&root) {
       None => panic!("bug"),
       Some(e) => {
@@ -1118,7 +1170,7 @@ impl CtxEnv {
           }
           _ => unimplemented!()
         }
-        // FIXME FIXME
+        // FIXME: type compat.
         if e.ty.dtype != Dtype::_Top {
           assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
           assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
@@ -1135,8 +1187,9 @@ impl CtxEnv {
   }
 
   pub fn lookup_mut_ref(&mut self, x: CellPtr) -> Option<CellEnvEntryMutRef> {
+    let query = x;
     let mut noalias = false;
-    let ty = match self.celtab.get(&x) {
+    let ty = match self.celtab.get(&query) {
       None => panic!("bug"),
       Some(e) => {
         match &e.cel_ {
@@ -1152,7 +1205,7 @@ impl CtxEnv {
         e.ty.clone()
       }
     };
-    let root = if !noalias { self.probe(x) } else { x };
+    let root = if !noalias { self.probe(query) } else { query };
     match self.celtab.get_mut(&root) {
       None => panic!("bug"),
       Some(e) => {
@@ -1172,6 +1225,7 @@ impl CtxEnv {
           }
           _ => unimplemented!()
         }
+        // FIXME: type compat.
         if e.ty.dtype != Dtype::_Top {
           assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
           assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
@@ -1188,104 +1242,128 @@ impl CtxEnv {
   }
 
   pub fn pread_ref(&mut self, x: CellPtr, xclk: Clock, /*emode: CellEMode,*/ /*pmach: PMach,*/) -> Option<CellEnvEntryMutRef> {
-    let mut noalias = false;
-    let ty = match self.celtab.get(&x) {
-      None => panic!("bug"),
-      Some(e) => {
-        match &e.cel_ {
-          &Cell_::Top(..) |
-          &Cell_::Phy(..) |
-          &Cell_::Cow(..) |
-          &Cell_::Bot => {
-            noalias = true;
+    let mut query = x;
+    let mut ty = None;
+    loop {
+      let mut noalias = false;
+      match self.celtab.get(&query) {
+        None => panic!("bug"),
+        Some(e) => {
+          match &e.cel_ {
+            &Cell_::Top(..) |
+            &Cell_::Phy(..) |
+            &Cell_::Cow(..) |
+            &Cell_::Bot => {
+              noalias = true;
+            }
+            &Cell_::Alias(..) => {}
+            _ => unimplemented!()
           }
-          &Cell_::Alias(..) => {}
-          _ => unimplemented!()
+          if ty.is_none() {
+            ty = Some(e.ty.clone());
+          }
         }
-        e.ty.clone()
       }
-    };
-    let root = if !noalias { self.probe(x) } else { x };
-    match self.celtab.get(&root) {
-      None => panic!("bug"),
-      Some(e) => {
-        match &e.cel_ {
-          &Cell_::Top(.., optr) => {
-            assert_eq!(root, optr);
-            panic!("ERROR: runtime error: attempted to read an uninitialized cell");
-          }
-          &Cell_::Phy(.., ref cel) => {
-            assert_eq!(root, cel.optr);
-            match self.celtab.get_mut(&root) {
-              None => panic!("bug"),
-              Some(e) => {
-                let ty = e.ty.clone();
-                // FIXME: type compat.
-                /*// FIXME FIXME
-                match emode {
-                  CellEMode::Read => {
-                    assert!(!e.eflag.mutex());
-                    assert!(!e.eflag.rwlock());
-                    e.eflag.set_read();
-                  }
-                  CellEMode::Rwlock => {
-                    assert!(!e.eflag.mutex());
-                    assert!(!e.eflag.read());
-                    e.eflag.set_rwlock();
-                  }
-                  _ => panic!("bug")
-                }*/
-                return Some(CellEnvEntryMutRef{
-                  stablect: &e.stablect,
-                  //snapshot: &e.snapshot,
-                  ty,
-                  eflag: &mut e.eflag,
-                  cel_: &mut e.cel_,
-                });
-              }
+      let root = if !noalias { self.probe(query) } else { query };
+      match self.celtab.get(&root) {
+        None => panic!("bug"),
+        Some(e) => {
+          match &e.cel_ {
+            &Cell_::Top(.., optr) => {
+              assert_eq!(root, optr);
+              panic!("ERROR: runtime error: attempted to read an uninitialized cell");
             }
-          }
-          &Cell_::Cow(.., ref cel) => {
-            assert_eq!(root, cel.optr);
-            // FIXME FIXME: we now have a tree of cows for snapshots,
-            // so need to find the root.
-            let pcel = cel.pcel;
-            match self.celtab.get_mut(&pcel) {
-              None => panic!("bug"),
-              Some(e) => {
-                match &e.cel_ {
-                  &Cell_::Phy(..) => {}
-                  _ => panic!("bug")
+            &Cell_::Phy(.., ref cel) => {
+              assert_eq!(root, cel.optr);
+              match self.celtab.get_mut(&root) {
+                None => panic!("bug"),
+                Some(e) => {
+                  // FIXME: type compat.
+                  /*// FIXME FIXME
+                  match emode {
+                    CellEMode::Read => {
+                      assert!(!e.eflag.mutex());
+                      assert!(!e.eflag.rwlock());
+                      e.eflag.set_read();
+                    }
+                    CellEMode::Rwlock => {
+                      assert!(!e.eflag.mutex());
+                      assert!(!e.eflag.read());
+                      e.eflag.set_rwlock();
+                    }
+                    _ => panic!("bug")
+                  }*/
+                  return Some(CellEnvEntryMutRef{
+                    stablect: &e.stablect,
+                    //snapshot: &e.snapshot,
+                    ty: ty.unwrap(),
+                    eflag: &mut e.eflag,
+                    cel_: &mut e.cel_,
+                  });
                 }
-                let ty = e.ty.clone();
-                // FIXME: type compat.
-                return Some(CellEnvEntryMutRef{
-                  stablect: &e.stablect,
-                  //snapshot: &e.snapshot,
-                  ty,
-                  eflag: &mut e.eflag,
-                  cel_: &mut e.cel_,
-                });
               }
             }
+            &Cell_::Cow(.., ref cel) => {
+              assert_eq!(root, cel.optr);
+              let pcel = cel.pcel;
+              match self.celtab.get(&pcel) {
+                None => panic!("bug"),
+                Some(e) => {
+                  match &e.cel_ {
+                    &Cell_::Phy(..) => {}
+                    &Cell_::Cow(.., ref cow_cel) => {
+                      query = cow_cel.pcel;
+                      // FIXME FIXME
+                      /*let cow_root = self.cow_root.borrow();
+                      match cow_root.get(&pcel) {
+                        None => panic!("bug"),
+                        Some(&(root_cel, root_clk)) => {
+                          match self.snapshot.get(&(root_cel, root_clk)) {
+                            None => panic!("bug"),
+                            Some(list) => {
+                              assert!(list.len() > 0);
+                              query = list[0];
+                            }
+                          }
+                        }
+                      }*/
+                      continue;
+                    }
+                    _ => panic!("bug")
+                  }
+                }
+              }
+              match self.celtab.get_mut(&pcel) {
+                None => panic!("bug"),
+                Some(e) => {
+                  // FIXME: type compat.
+                  return Some(CellEnvEntryMutRef{
+                    stablect: &e.stablect,
+                    //snapshot: &e.snapshot,
+                    ty: ty.unwrap(),
+                    eflag: &mut e.eflag,
+                    cel_: &mut e.cel_,
+                  });
+                }
+              }
+            }
+            &Cell_::Bot => {
+              panic!("bug");
+            }
+            &Cell_::Alias(..) => {
+              panic!("bug");
+            }
+            _ => unimplemented!()
           }
-          &Cell_::Bot => {
-            panic!("bug");
-          }
-          &Cell_::Alias(..) => {
-            panic!("bug");
-          }
-          _ => unimplemented!()
         }
       }
     }
   }
 
   pub fn pwrite_ref(&mut self, x: CellPtr, /*old_xclk: Clock,*/ new_xclk: Clock, /*emode: CellEMode,*/ /*pmach: PMach,*/) -> Option<CellEnvEntryMutRef> {
-    // FIXME: this is the part where the zeroth snapshot cow
-    // is upgraded into a full pcell.
+    let query = x;
     let mut noalias = false;
-    let ty = match self.celtab.get(&x) {
+    let ty = match self.celtab.get(&query) {
       None => panic!("bug"),
       Some(e) => {
         match &e.cel_ {
@@ -1301,7 +1379,7 @@ impl CtxEnv {
         e.ty.clone()
       }
     };
-    let root = if !noalias { self.probe(x) } else { x };
+    let root = if !noalias { self.probe(query) } else { query };
     match self.celtab.get(&root) {
       None => panic!("bug"),
       Some(e) => {
@@ -1318,7 +1396,6 @@ impl CtxEnv {
             match self.celtab.get_mut(&root) {
               None => panic!("bug"),
               Some(e) => {
-                let ty = e.ty.clone();
                 // FIXME: type compat.
                 return Some(CellEnvEntryMutRef{
                   stablect: &e.stablect,
@@ -1349,6 +1426,25 @@ impl CtxEnv {
                   None => panic!("bug"),
                   Some(e) => {
                     e.cel_ = Cell_::Phy(state2, clo2, pcel2);
+                    /*let mut cow_root = self.cow_root.borrow_mut();
+                    match cow_root.remove(&root) {
+                      None => panic!("bug"),
+                      Some((root_cel, root_clk)) => {
+                        // FIXME FIXME: after cow upgrades to phy,
+                        // we can gc the snapshot.
+                        /*match self.snapshot.get(&(root_cel, root_clk)) {
+                          None => panic!("bug"),
+                          Some(list) => {
+                            assert!(list.len() > 0);
+                            match (&list[1 .. ]).remove(&root) {
+                              None => panic!("bug"),
+                              Some(_) => {}
+                            }
+                            // FIXME
+                          }
+                        }*/
+                      }
+                    }*/
                     // FIXME: type compat.
                     return Some(CellEnvEntryMutRef{
                       stablect: &e.stablect,
@@ -1394,6 +1490,7 @@ impl CtxEnv {
       None => {}
       Some(_) => panic!("bug")
     }
+    assert_eq!(x, pcel.optr);
     let e = CellEnvEntry{
       stablect: Cell::new(0),
       //snapshot: Cell::new(0),
@@ -1418,10 +1515,12 @@ impl CtxEnv {
       Some(e) => {
         match &e.cel_ {
           &Cell_::Top(ref state, ..) => {
+            assert_eq!(state.borrow().clk, pclk);
             (state.clone(), RefCell::new(CellClosure::default()))
           }
           &Cell_::Phy(ref state, ref clo, ..) |
           &Cell_::Cow(ref state, ref clo, ..) => {
+            assert_eq!(state.borrow().clk, pclk);
             (state.clone(), clo.clone())
           }
           _ => panic!("bug")
@@ -1434,8 +1533,6 @@ impl CtxEnv {
       ty,
       eflag:    CellEFlag::default(),
       cel_:     Cell_::Cow(
-                    //RefCell::new(CellState::default()),
-                    //RefCell::new(CellClosure::default()),
                     state,
                     clo,
                     CowCell{optr: x, pcel, pclk},

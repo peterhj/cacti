@@ -259,7 +259,7 @@ impl FutharkThunkSpec for CastFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct InnerOneHotFutThunkSpec { pub inner_len: i64, pub org_dtype: Dtype, pub new_dtype: Dtype }
+pub struct InnerOneHotFutThunkSpec { pub inner_len: i64, /*pub org_dtype: Dtype,*/ pub new_dtype: Dtype }
 
 impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
   fn arity(&self) -> (u16, u16) {
@@ -267,24 +267,81 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].dtype != self.org_dtype {
+    /*if arg[0].dtype != self.org_dtype {
       return Err(ThunkDimErr::_Bot);
-    }
+    }*/
     Ok(Dim{ndim: arg[0].ndim + 1, dtype: self.new_dtype})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].dtype != self.org_dtype {
+    /*if arg[0].dtype != self.org_dtype {
       return Err(ThunkTypeErr::_Bot);
-    }
+    }*/
     let mut shape = arg[0].shape.clone();
     shape.push(self.inner_len);
     Ok(CellType{shape, dtype: self.new_dtype})
   }
 
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    // FIXME FIXME
-    unimplemented!();
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
+    let fmt = FutharkNumFormatter::default();
+    match (out.ndim, out.dtype) {
+      (1, Dtype::Float32) => {
+        unimplemented!();
+      }
+      (2, Dtype::Float32) => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t_oidx = {{%0}} in"),
+                        format!("let t_iota = indices t_oidx in"),
+                        format!("let t_key = map (\\(i,k) -> ({}.{} k) + {} * i) (zip t_iota t_oidx) in",
+                            Dtype::Int64.format_futhark(),
+                            arg[0].dtype.format_futhark(),
+                            self.inner_len,
+                        ),
+                        format!("let t_val = replicate {{%0.s[0]}} {} in",
+                            fmt.format(&TotalOrd::from(1.0_f32)),
+                        ),
+                        format!("let t0 = replicate ({{%0.s[0]}} * {}) {} in",
+                            self.inner_len,
+                            fmt.format(&TotalOrd::from(0.0_f32)),
+                        ),
+                        format!("let t1 = scatter t0 t_key t_val in"),
+                        format!("let {{%1}} = unflatten {{%0.s[0]}} {} t1 in",
+                            self.inner_len,
+                        ),
+                    ],
+        }.into()
+      }
+      (3, Dtype::Float32) => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t_oidx = flatten {{%0}} in"),
+                        format!("let t_iota = indices t_oidx in"),
+                        format!("let t_key = map (\\(i,k) -> ({}.{} k) + {} * i) (zip t_iota t_oidx) in",
+                            Dtype::Int64.format_futhark(),
+                            arg[0].dtype.format_futhark(),
+                            self.inner_len,
+                        ),
+                        format!("let t_val = replicate ({{%0.s[0]}} * {{%0.s[1]}}) {} in",
+                            fmt.format(&TotalOrd::from(1.0_f32)),
+                        ),
+                        format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {}) {} in",
+                            self.inner_len,
+                            fmt.format(&TotalOrd::from(0.0_f32)),
+                        ),
+                        format!("let t1 = scatter t0 t_key t_val in"),
+                        format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {} t1 in",
+                            self.inner_len,
+                        ),
+                    ],
+        }.into()
+      }
+      (4, Dtype::Float32) => {
+        unimplemented!();
+      }
+      _ => unimplemented!()
+    }
   }
 }
 

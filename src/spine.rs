@@ -2,12 +2,54 @@ use crate::cell::*;
 use crate::clock::{Counter, Clock};
 use crate::ctx::*;
 use crate::panick::{panick_wrap};
+use crate::pctx::{Locus};
+use crate::pctx::smp::{MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 
+use std::any::{Any};
 use std::cmp::{Ordering};
 use std::collections::{HashMap, HashSet};
 //use std::mem::{swap};
+
+pub enum SpineResume<'a> {
+  _Top,
+  PutMemV(CellPtr, &'a dyn Any),
+  PutMemF(CellPtr, &'a dyn Fn(MemReg, )),
+}
+
+impl<'a> SpineResume<'a> {
+  pub fn key(&self) -> Option<CellPtr> {
+    let ret = match self {
+      &SpineResume::_Top => {
+        None
+      }
+      &SpineResume::PutMemV(key, val) => {
+        Some(key)
+      }
+      &SpineResume::PutMemF(key, fun) => {
+        Some(key)
+      }
+    };
+    ret
+  }
+
+  pub fn take(&mut self) -> SpineResume<'a> {
+    let ret = match &*self {
+      &SpineResume::_Top => {
+        SpineResume::_Top
+      }
+      &SpineResume::PutMemV(key, val) => {
+        SpineResume::PutMemV(key, val)
+      }
+      &SpineResume::PutMemF(key, fun) => {
+        SpineResume::PutMemF(key, fun)
+      }
+    };
+    *self = SpineResume::_Top;
+    ret
+  }
+}
 
 #[derive(Clone, Debug)]
 //#[derive(Clone, Copy, PartialEq, Eq)]
@@ -25,6 +67,8 @@ pub enum SpineEntry {
   Intro(CellPtr),
   Uninit(CellPtr),
   //IntroFin(CellPtr),
+  YieldSet(CellPtr, Locus),
+  YieldInit(CellPtr, Locus),
   PushSeal(CellPtr),
   Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
@@ -55,6 +99,8 @@ impl SpineEntry {
       &SpineEntry::OIntro(..)     => SpineEntryName::OIntro,
       &SpineEntry::Intro(..)      => SpineEntryName::Intro,
       &SpineEntry::Uninit(..)     => SpineEntryName::Uninit,
+      &SpineEntry::YieldSet(..)   => SpineEntryName::YieldSet,
+      &SpineEntry::YieldInit(..)  => SpineEntryName::YieldInit,
       &SpineEntry::PushSeal(..)   => SpineEntryName::PushSeal,
       &SpineEntry::Initialize(..) => SpineEntryName::Initialize,
       &SpineEntry::Apply(..)      => SpineEntryName::Apply,
@@ -82,6 +128,8 @@ pub enum SpineEntryName {
   OIntro,
   Intro,
   Uninit,
+  YieldSet,
+  YieldInit,
   PushSeal,
   Initialize,
   Apply,
@@ -101,7 +149,7 @@ pub enum SpineRet {
   _Top,
   Halt,
   Pause,
-  Yield_,
+  Yield_(()),
   Break_,
   Bot,
 }
@@ -242,6 +290,63 @@ impl SpineEnv {
           }
         }
       }
+      &SpineEntry::YieldSet(x, _loc) => {
+        match self.state.get(&x) {
+          None => {
+            self.state.insert(x, CellState::default());
+          }
+          _ => {}
+        }
+        match self.state.get_mut(&x) {
+          None => panic!("bug"),
+          Some(state) => {
+            assert_eq!(state.mode, CellMode::_Top);
+            assert!(!state.flag.intro());
+            assert!(!state.flag.seal());
+            assert_eq!(state.clk.up, 0);
+            state.mode.set_aff();
+            state.flag.set_intro();
+            let clk0: Clock = self.ctr.into();
+            let next_clk = clk0.update();
+            match self.apply_.get(&x) {
+              None => {
+                self.apply_.insert(x, Vec::new());
+              }
+              _ => {}
+            }
+            match self.apply_.get_mut(&x) {
+              None => panic!("bug"),
+              Some(thlist) => {
+                thlist.push((sp, ThunkPtr::nil(), next_clk));
+                assert_eq!(thlist.len(), next_clk.up as _);
+              }
+            }
+            state.clk = next_clk;
+          }
+        }
+      }
+      &SpineEntry::YieldInit(x, _loc) => {
+        match self.state.get(&x) {
+          None => {
+            self.state.insert(x, CellState::default());
+          }
+          _ => {}
+        }
+        match self.state.get_mut(&x) {
+          None => panic!("bug"),
+          Some(state) => {
+            assert_eq!(state.mode, CellMode::_Top);
+            assert!(!state.flag.intro());
+            assert!(!state.flag.seal());
+            /*assert_eq!(state.clk.up, 0);*/
+            state.mode.set_init();
+            state.flag.set_intro();
+            let next_clk = self.ctr.into();
+            assert!(self.iapply.insert(x, (sp, ThunkPtr::nil(), next_clk)).is_none());
+            state.clk = next_clk;
+          }
+        }
+      }
       &SpineEntry::PushSeal(x) => {
         match self.state.get_mut(&x) {
           None => panic!("bug"),
@@ -366,6 +471,7 @@ pub struct Spine {
   pub ctlp: u32,
   pub hltp: u32,
   pub curp: u32,
+  pub retp: u32,
   pub cur_env:  SpineEnv,
   pub log:  Vec<SpineEntry>,
 }
@@ -377,6 +483,7 @@ impl Default for Spine {
       ctlp: 0,
       hltp: 0,
       curp: 0,
+      retp: u32::max_value(),
       cur_env:  SpineEnv::default(),
       log:  Vec::new(),
     }
@@ -391,6 +498,7 @@ impl Spine {
     self.ctlp = 0;
     self.hltp = 0;
     self.curp = 0;
+    self.retp = u32::max_value();
     self.cur_env.reset(self.ctr);
     self.log.clear();
   }
@@ -423,6 +531,22 @@ impl Spine {
     let sp = self.curp;
     self.curp += 1;
     let e = SpineEntry::ICacheMux(x);
+    self.cur_env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn yield_set(&mut self, x: CellPtr, loc: Locus) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::YieldSet(x, loc);
+    self.cur_env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn yield_init(&mut self, x: CellPtr, loc: Locus) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::YieldInit(x, loc);
     self.cur_env.step(sp, &e);
     self.log.push(e);
   }
@@ -502,23 +626,27 @@ impl Spine {
     self.hltp = self.curp;
   }*/
 
-  pub fn _resume(&mut self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock*/) -> SpineRet {
+  pub fn _resume(&mut self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock,*/ mut item: SpineResume) -> SpineRet {
     //self._start();
-    println!("DEBUG: Spine::_resume: ctr={:?} ctlp={} hltp={} curp={}",
-        self.ctr, self.ctlp, self.hltp, self.curp);
+    let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+    println!("DEBUG: Spine::_resume: ctr={:?} ctlp={} hltp={} curp={} retp={:?} item={:?}",
+        self.ctr, self.ctlp, self.hltp, self.curp, retp, item.key());
     self.hltp = self.curp;
     loop {
-      let state = self._step(ctr, env, thunkenv);
+      let state = self._step(ctr, env, thunkenv, item.take());
       match state {
+        SpineRet::Yield_(_) |
         SpineRet::Bot => {
+          self.retp = self.ctlp;
           return state;
         }
         _ => {}
       }
       self.ctlp += 1;
+      self.retp = u32::max_value();
       match state {
         SpineRet::Halt   |
-        SpineRet::Yield_ |
+        SpineRet::Pause  |
         SpineRet::Break_ => {
           return state;
         }
@@ -527,20 +655,21 @@ impl Spine {
     }
   }
 
-  pub fn _step(&self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv) -> SpineRet {
+  pub fn _step(&self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, item: SpineResume) -> SpineRet {
+    let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
     if self.ctlp >= self.hltp {
-      println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} halt",
-          self.ctr, self.ctlp, self.hltp, self.curp);
+      println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} halt",
+          self.ctr, self.ctlp, self.hltp, self.curp, retp);
       return SpineRet::Halt;
     }
     let mut ret = SpineRet::_Top;
     let entry = &self.log[self.ctlp as usize];
-    println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} entry={:?}",
-        self.ctr, self.ctlp, self.hltp, self.curp, entry.name());
+    println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
+        self.ctr, self.ctlp, self.hltp, self.curp, retp, entry.name());
     match entry {
       // TODO
       &SpineEntry::Yield_ => {
-        ret = SpineRet::Yield_;
+        ret = SpineRet::Yield_(());
       }
       &SpineEntry::YieldV(_, _) => {
         unimplemented!();
@@ -635,6 +764,103 @@ impl Spine {
         }
       }
       &SpineEntry::Uninit(x) => {
+        unimplemented!();
+      }
+      &SpineEntry::YieldSet(x, loc) => {
+        let ctlp = self.ctlp;
+        let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+        println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
+            ctlp, retp, x, loc, item.key());
+        match env.lookup_ref(x) {
+          None => panic!("bug"),
+          Some(e) => {
+            println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
+            match e.ty.dtype {
+              Dtype::Float32 => {
+                //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
+                match &item {
+                  SpineResume::_Top => {
+                    println!("DEBUG: Spine::_step: YieldSet:   no value");
+                  }
+                  &SpineResume::PutMemV(k, v) => {
+                    match v.downcast_ref::<f32>() {
+                      None => {
+                        println!("DEBUG: Spine::_step: YieldSet:   wrong type");
+                      }
+                      Some(v) => {
+                        println!("DEBUG: Spine::_step: YieldSet:   value={:?}", v);
+                      }
+                    }
+                  }
+                  &SpineResume::PutMemF(k, f) => {
+                    unimplemented!();
+                  }
+                }
+              }
+              _ => {
+              }
+            }
+          }
+        }
+        if Some(ctlp) == retp {
+          println!("DEBUG: Spine::_step: YieldSet:   ...resume");
+          // FIXME FIXME
+          panic!();
+          /*
+          let xclk = match env.lookup_ref(x) {
+            None => panic!("bug"),
+            Some(e) => {
+              assert!(!e.state().flag.intro());
+              assert!(!e.state().flag.seal());
+              assert_eq!(e.state().clk.ctr(), self.ctr);
+              assert_eq!(e.state().clk.up, 0);
+              // FIXME
+              let next_clk = e.state().clk.update();
+              e.state().mode = CellMode::Init;
+              e.state().flag.set_intro();
+              e.state().clk = next_clk;
+              next_clk
+            }
+          };
+          match env.pwrite_ref(x) {
+            None => panic!("bug"),
+            Some(e) => {
+              match e.cel_ {
+                &Cell_::Phy(_, ref clo, ref cel_) => {
+                  match (loc, &item) {
+                    (Locus::Mem, &SpineResume::PutMemV(_, _val)) => {
+                      unimplemented!();
+                    }
+                    (Locus::Mem, &SpineResume::PutMemF(_, fun)) => {
+                      match cel_.write_mem(x, xclk) {
+                        None => panic!("bug"),
+                        Some(icel) => {
+                          (fun)(icel.as_reg());
+                        }
+                      }
+                    }
+                    _ => {
+                      unimplemented!();
+                    }
+                  }
+                  clo.borrow_mut().thunk_.push(ThunkPtr::nil());
+                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
+                }
+                _ => panic!("bug")
+              }
+            }
+          }
+          */
+        } else {
+          println!("DEBUG: Spine::_step: YieldSet:   yield...");
+          ret = SpineRet::Yield_(());
+        }
+      }
+      &SpineEntry::YieldInit(x, loc) => {
+        println!("DEBUG: Spine::_step: YieldInit: x={:?} loc={:?} key={:?}", x, loc, item.key());
+        panic!();
+      }
+      &SpineEntry::PushSeal(x) => {
         unimplemented!();
       }
       &SpineEntry::Initialize(x, ith) => {

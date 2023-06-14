@@ -3,6 +3,7 @@ use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
 use crate::pctx::{Locus, PMach};
+use crate::pctx::smp::{MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::pickle::{TorchDtype};
@@ -14,7 +15,7 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of, swap};
 use std::ops::{Deref};
-use std::rc::{Weak};
+use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts};
 use std::str::{FromStr};
 
@@ -92,7 +93,7 @@ impl From<CellPtr> for StableCell {
 
 impl From<f32> for StableCell {
   fn from(value: f32) -> StableCell {
-    StableCell::scalar(value)
+    StableCell::set_scalar(value)
   }
 }
 
@@ -135,7 +136,16 @@ impl StableCell {
     StableCell{ptr_: ptr}
   }
 
-  pub fn scalar<T: ThunkValExt>(value: T) -> StableCell {
+  pub fn scalar<D: TryInto<Dtype>>(dtype: D) -> StableCell {
+    let dtype: Dtype = match dtype.try_into() {
+      Ok(d) => d,
+      Err(_) => panic!("bug: StableCell::scalar: invalid dtype")
+    };
+    let ty = CellType{shape: Vec::new(), dtype};
+    ctx_insert(ty).into()
+  }
+
+  pub fn set_scalar<T: ThunkValExt>(value: T) -> StableCell {
     ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_thunk_val()}).into()
   }
 
@@ -143,7 +153,7 @@ impl StableCell {
     let shape: Vec<i64> = shape.into();
     let dtype: Dtype = match dtype.try_into() {
       Ok(d) => d,
-      Err(_) => panic!("bug: StableCell::new_array: invalid dtype")
+      Err(_) => panic!("bug: StableCell::array: invalid dtype")
     };
     let ty = CellType{shape, dtype};
     ctx_insert(ty).into()
@@ -804,20 +814,31 @@ impl PCell {
     // FIXME FIXME
     unimplemented!();
   }
+
+  fn write_mem(&self, x: CellPtr, xclk: Clock) -> Option<Rc<dyn InnerCell_>> {
+    // FIXME FIXME
+    unimplemented!();
+  }
 }
 
 pub trait InnerCell {
-  // TODO TODO
+  // FIXME FIXME
+  fn as_reg(&self) -> Option<MemReg> { None }
 }
 
 pub trait InnerCell_ {
-  // TODO TODO
+  // FIXME FIXME
   fn as_any(&self) -> &dyn Any;
+  fn as_reg(&self) -> Option<MemReg>;
 }
 
 impl<C: InnerCell + Any> InnerCell_ for C {
   fn as_any(&self) -> &dyn Any {
     self
+  }
+
+  fn as_reg(&self) -> Option<MemReg> {
+    InnerCell::as_reg(self)
   }
 }
 

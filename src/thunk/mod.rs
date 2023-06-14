@@ -4,7 +4,7 @@ use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 //use crate::op::*;
-use crate::pctx::{TL_PCTX, Locus, PMach};
+use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach};
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::*;
 //use crate::pctx::smp::*;
@@ -126,6 +126,11 @@ pub enum ThunkDimErr {
 impl Default for ThunkDimErr {
   fn default() -> ThunkDimErr {
     ThunkDimErr::_Bot
+  }
+}
+impl ThunkDimErr {
+  pub fn into_gen(self) -> FutharkGenErr {
+    FutharkGenErr::Dim(self)
   }
 }
 
@@ -281,8 +286,15 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
 #[repr(u8)]
 pub enum FutharkGenErr {
   NotImpl,
+  Dim(ThunkDimErr),
   _Bot,
 }
+
+/*impl From<ThunkDimErr> for FutharkGenErr {
+  fn from(e: ThunkDimErr) -> FutharkGenErr {
+    FutharkGenErr::Dim(e)
+  }
+}*/
 
 impl From<FutharkThunkCode> for Result<FutharkThunkCode, FutharkGenErr> {
   #[inline]

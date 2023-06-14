@@ -1,9 +1,10 @@
-use super::{TL_PCTX, Locus, PMach};
-use crate::algo::{MergeVecDeque, Region};
+use super::{TL_PCTX, PCtxImpl, Locus, PMach, PMachSet, PMemErr};
+use crate::algo::{MergeVecDeque, Region, RevSortMap8};
 use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::*;
+use crate::pctx::smp::{MemReg};
 
 use cacti_gpu_cu_ffi::*;
 //use cacti_gpu_cu_ffi::types::{CU_CTX_SCHED_YIELD, cudaErrorCudartUnloading, cudaErrorNotReady};
@@ -63,6 +64,15 @@ pub struct GpuOuterCell {
   //pub lastcopy: Rc<GpuSnapshot>,
   //pub smp_dep:  Option<Rc<SmpInnerCell>>,
   // TODO
+}
+
+pub struct GpuOuterCell_ {
+  // FIXME FIXME
+  pub ptr:      Cell<CellPtr>,
+  pub clk:      Cell<Clock>,
+  pub mem:      MemReg,
+  pub write:    Rc<GpuSnapshot>,
+  pub lastuse:  Rc<GpuSnapshot>,
 }
 
 pub struct GpuInnerCell {
@@ -170,9 +180,9 @@ impl NvGpuInfo {
   }
 }
 
-pub type NvGpuPCtx = GpuPCtx;
+pub type GpuPCtx = NvGpuPCtx;
 
-pub struct GpuPCtx {
+pub struct NvGpuPCtx {
   // FIXME FIXME: work threads for copying.
   //pub iref_ctr:     Cell<u32>,
   //pub dev:          i32,
@@ -188,7 +198,40 @@ pub struct GpuPCtx {
   // TODO
 }
 
-impl GpuPCtx {
+impl PCtxImpl for NvGpuPCtx {
+  type ICel = GpuInnerCell;
+
+  fn pmach(&self) -> PMach {
+    PMach::NvGpu
+  }
+
+  fn fastest_locus(&self) -> Locus {
+    // FIXME: query device/driver capabilities.
+    Locus::VMem
+  }
+
+  fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>) {
+    // FIXME: query device/driver capabilities.
+    lp.insert((Locus::VMem, PMach::NvGpu), ());
+    lp.insert((Locus::Mem, PMach::NvGpu), ());
+    pl.insert((PMach::NvGpu, Locus::VMem), ());
+    pl.insert((PMach::NvGpu, Locus::Mem), ());
+  }
+
+  fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<GpuInnerCell>, PMemErr> {
+    unimplemented!();
+  }
+}
+
+impl NvGpuPCtx {
+  pub fn dev_count() -> i32 {
+    let n = cuda_device_get_count().unwrap_or(0);
+    for i in 0 .. n {
+      assert_eq!(Ok(i), cuda_device_get(i));
+    }
+    n
+  }
+
   pub fn new(dev: i32) -> Option<GpuPCtx> {
     println!("DEBUG: NvGpuPCtx::new: dev={}", dev);
     if LIBCUDA._inner.is_none() {
@@ -222,21 +265,6 @@ impl GpuPCtx {
       cel_map,
       // TODO
     })
-  }
-
-  pub fn pmach(&self) -> PMach {
-    PMach::NvGpu
-  }
-
-  pub fn fastest_locus(&self) -> Locus {
-    // FIXME: query device/driver capabilities.
-    Locus::VMem
-  }
-
-  pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {
-    // FIXME: query device/driver capabilities.
-    lp.push((Locus::VMem, PMach::NvGpu));
-    pl.push((PMach::NvGpu, Locus::VMem));
   }
 
   pub fn dev(&self) -> i32 {

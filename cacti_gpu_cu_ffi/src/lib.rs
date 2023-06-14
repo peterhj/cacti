@@ -92,6 +92,24 @@ pub static LIBCUBLAS: Lazy<Libcublas> = Lazy::new(|| {
 
 pub type CudaResult<T=()> = Result<T, CUresult>;
 
+pub fn cuda_device_get_count() -> CudaResult<i32> {
+  let mut c = -1;
+  let e = (LIBCUDA.cuDeviceGetCount.as_ref().unwrap())(&mut c);
+  if e != CUDA_SUCCESS {
+    return Err(e);
+  }
+  Ok(c)
+}
+
+pub fn cuda_device_get(rank: i32) -> CudaResult<i32> {
+  let mut dev = -1;
+  let e = (LIBCUDA.cuDeviceGet.as_ref().unwrap())(&mut dev, rank);
+  if e != CUDA_SUCCESS {
+    return Err(e);
+  }
+  Ok(dev)
+}
+
 pub struct CudaPrimaryCtx {
   raw:  CUcontext,
   dev:  i32,
@@ -221,7 +239,7 @@ pub fn cuda_memcpy_d2h_async(dst: *mut c_void, src: u64, sz: usize, stream_raw: 
 pub type CudartResult<T=()> = Result<T, cudaError_t>;
 
 pub fn cudart_get_dev_count() -> CudartResult<i32> {
-  let mut c = 0;
+  let mut c = -1;
   let e = (LIBCUDART.cudaGetDeviceCount.as_ref().unwrap())(&mut c);
   if e != cudaSuccess {
     return Err(e);
@@ -230,7 +248,7 @@ pub fn cudart_get_dev_count() -> CudartResult<i32> {
 }
 
 pub fn cudart_get_cur_dev() -> CudartResult<i32> {
-  let mut dev: c_int = -1;
+  let mut dev = -1;
   let e = (LIBCUDART.cudaGetDevice.as_ref().unwrap())(&mut dev);
   if e != cudaSuccess {
     return Err(e);
