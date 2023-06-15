@@ -1,9 +1,11 @@
-use self::nvgpu::{NvGpuPCtx, *};
+use self::nvgpu::{NvGpuPCtx};
 use self::smp::{SmpPCtx};
 use crate::algo::{RevSortMap8};
 use crate::cell::{CellPtr, InnerCell, InnerCell_};
 
+use std::cell::{Cell, RefCell};
 use std::cmp::{max};
+use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::rc::{Rc, Weak};
 
 pub mod nvgpu;
@@ -88,17 +90,71 @@ pub enum PMemErr {
   Bot,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct PAddr {
+  pub bits: i64,
+}
+
+impl Debug for PAddr {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "PAddr({})", self.bits)
+  }
+}
+
+impl PAddr {
+  pub fn from_unchecked(bits: i64) -> PAddr {
+    PAddr{bits}
+  }
+
+  pub fn to_unchecked(&self) -> i64 {
+    self.bits
+  }
+}
+
+/*#[derive(Clone, Copy)]
+pub struct PAddrTabEntry {
+  pub loc:  Locus,
+  pub pm:   PMach,
+  pub pin:  bool,
+}*/
+
 thread_local! {
   pub static TL_PCTX: PCtx = PCtx::new();
 }
 
+#[derive(Default)]
+pub struct PCtxCtr {
+  pub addr: Cell<i64>,
+}
+
+impl PCtxCtr {
+  pub fn fresh_addr(&self) -> PAddr {
+    let next = self.addr.get() + 1;
+    assert!(next > 0);
+    self.addr.set(next);
+    PAddr{bits: next}
+  }
+
+  pub fn next_addr(&self) -> PAddr {
+    let next = self.addr.get() + 1;
+    assert!(next > 0);
+    PAddr{bits: next}
+  }
+
+  pub fn peek_addr(&self) -> PAddr {
+    let cur = self.addr.get();
+    PAddr{bits: cur}
+  }
+}
+
 pub struct PCtx {
   // TODO TODO
+  pub ctr:      PCtxCtr,
   pub pmset:    PMachSet,
-  //pub lpmatrix: Vec<(Locus, PMach)>,
-  //pub plmatrix: Vec<(PMach, Locus)>,
   pub lpmatrix: RevSortMap8<(Locus, PMach), ()>,
   pub plmatrix: RevSortMap8<(PMach, Locus), ()>,
+  //pub addrtab:  RefCell<HashMap<PAddr, PAddrTabEntry>>,
   pub smp:      SmpPCtx,
   #[cfg(feature = "gpu")]
   pub nvgpu_ct: i32,
@@ -111,9 +167,8 @@ impl PCtx {
   pub fn new() -> PCtx {
     println!("DEBUG: PCtx::new");
     let mut pctx = PCtx{
+      ctr:      PCtxCtr::default(),
       pmset:    PMachSet::default(),
-      //lpmatrix: Vec::new(),
-      //plmatrix: Vec::new(),
       lpmatrix: RevSortMap8::default(),
       plmatrix: RevSortMap8::default(),
       smp:      SmpPCtx::new(),
@@ -138,8 +193,6 @@ impl PCtx {
       gpu.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
       pctx.pmset.insert(PMach::NvGpu);
     }
-    //pctx.lpmatrix.sort_by(|lx, rx| rx.cmp(lx));
-    //pctx.plmatrix.sort_by(|lx, rx| rx.cmp(lx));
     pctx
   }
 
@@ -158,15 +211,14 @@ impl PCtx {
       None => Ok(None),
       Some((key, _)) => {
         let pmach = key.key.as_ref().1;
-        //let ret: Result<Option<Weak<dyn InnerCell_>>, _> =
         let ret = match pmach {
           PMach::Smp => {
-            self.smp.try_alloc(x, sz, self.pmset)
+            self.smp.try_alloc(x, sz, locus)
               //.map(|r| Some(Rc::downgrade(&r) as _))
               .map(|r| Some(r as _))
           }
           PMach::NvGpu => {
-            self.nvgpu.as_ref().unwrap().try_alloc(x, sz, self.pmset)
+            self.nvgpu.as_ref().unwrap().try_alloc(x, sz, locus)
               //.map(|r| Some(Rc::downgrade(&r) as _))
               .map(|r| Some(r as _))
           }
@@ -180,11 +232,11 @@ impl PCtx {
 
 pub trait PCtxImpl {
   // FIXME: don't need this associated type.
-  type ICel: InnerCell;
+  //type ICel: InnerCell;
 
   fn pmach(&self) -> PMach;
   fn fastest_locus(&self) -> Locus;
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>);
-  fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<Self::ICel>, PMemErr>;
-  //fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
+  //fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<Self::ICel>, PMemErr>;
+  fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
 }

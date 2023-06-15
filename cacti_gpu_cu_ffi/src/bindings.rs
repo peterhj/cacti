@@ -391,6 +391,18 @@ pub struct Libcublas {
                                     cublasComputeType_t,
                                     cublasGemmAlgo_t,
                                 ) -> cublasStatus_t>>,
+  pub cublasDgemmBatched:       Option<Symbol<extern "C" fn (
+                                    cublasHandle_t,
+                                    cublasOperation_t,
+                                    cublasOperation_t,
+                                    c_int, c_int, c_int,
+                                    *const f64,
+                                    *const *const f64, c_int,
+                                    *const *const f64, c_int,
+                                    *const f64,
+                                    *const *mut f64, c_int,
+                                    c_int,
+                                ) -> cublasStatus_t>>,
   pub cublasSgemmBatched:       Option<Symbol<extern "C" fn (
                                     cublasHandle_t,
                                     cublasOperation_t,
@@ -447,6 +459,7 @@ impl Libcublas {
     self.cublasSetMathMode = library.get(b"cublasSetMathMode").ok();
     self.cublasSgemmEx = library.get(b"cublasSgemmEx").ok();
     self.cublasGemmEx = library.get(b"cublasGemmEx").ok();
+    self.cublasDgemmBatched = library.get(b"cublasDgemmBatched").ok();
     self.cublasSgemmBatched = library.get(b"cublasSgemmBatched").ok();
     self.cublasGemmBatchedEx = library.get(b"cublasGemmBatchedEx").ok();
     // TODO
@@ -464,6 +477,7 @@ impl Libcublas {
     i += 1; self.cublasSetMathMode.as_ref().ok_or(i)?;
     i += 1; self.cublasSgemmEx.as_ref().ok_or(i)?;
     i += 1; self.cublasGemmEx.as_ref().ok_or(i)?;
+    i += 1; self.cublasDgemmBatched.as_ref().ok_or(i)?;
     i += 1; self.cublasSgemmBatched.as_ref().ok_or(i)?;
     i += 1; self.cublasGemmBatchedEx.as_ref().ok_or(i)?;
     // TODO

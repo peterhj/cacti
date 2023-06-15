@@ -2,18 +2,21 @@ use super::*;
 use crate::algo::fp::{TotalOrd};
 use crate::cell::{DtypeExt, Dim};
 use cacti_gpu_cu_ffi::{cublas_gemm_batched};
-use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F};
+use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F, CUDA_R_16BF};
 
-use futhark_syntax::{Exp as FutExp};
+use futhark_ffi::{Abi};
+use futhark_syntax::{Exp};
 
 use std::borrow::{Cow};
 use std::cell::{Cell};
+use std::ffi::{c_void};
 //use std::io::{Write};
+use std::rc::{Weak};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct LamFutExpThunkSpec {
   pub lam_src: Cow<'static, str>,
-  pub lam_exp: FutExp,
+  pub lam_exp: Exp,
   pub ar_in: u16,
   pub ar_out: u16,
   // FIXME FIXME
@@ -23,8 +26,15 @@ pub struct LamFutExpThunkSpec {
 }
 
 impl FutharkThunkSpec for LamFutExpThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (self.ar_in, self.ar_out)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = self.ar_in;
+    abi.arityout = self.ar_out;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -59,8 +69,15 @@ impl FutharkThunkSpec for LamFutExpThunkSpec {
 pub struct SetScalarFutThunkSpec<T> { pub val: T }
 
 impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalarFutThunkSpec<T> {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (0, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 0;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -89,8 +106,15 @@ impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalarFutThunkSpec<T
 pub struct SetScalar1dFutThunkSpec<T> { pub val: T }
 
 impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar1dFutThunkSpec<T> {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (0, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 0;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -117,8 +141,15 @@ impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar1dFutThunkSpec
 pub struct SetScalar2dFutThunkSpec<T> { pub val: T }
 
 impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar2dFutThunkSpec<T> {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (0, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 0;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -148,8 +179,15 @@ impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar2dFutThunkSpec
 pub struct SetScalar3dFutThunkSpec<T> { pub val: T }
 
 impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar3dFutThunkSpec<T> {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (0, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 0;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -179,8 +217,15 @@ impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar3dFutThunkSpec
 pub struct SetScalar4dFutThunkSpec<T> { pub val: T }
 
 impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar4dFutThunkSpec<T> {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (0, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 0;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -236,8 +281,15 @@ impl FutharkThunkSpec for UpcastF16F32FutThunkSpec {
 pub struct CastFutThunkSpec { pub org_dtype: Dtype, pub new_dtype: Dtype }
 
 impl FutharkThunkSpec for CastFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -262,8 +314,15 @@ impl FutharkThunkSpec for CastFutThunkSpec {
 pub struct InnerOneHotFutThunkSpec { pub inner_len: i64, /*pub org_dtype: Dtype,*/ pub new_dtype: Dtype }
 
 impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -349,8 +408,15 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
 pub struct AddScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -373,8 +439,15 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
 pub struct AddFutThunkSpec;
 
 impl FutharkThunkSpec for AddFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (2, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -396,8 +469,15 @@ impl FutharkThunkSpec for AddFutThunkSpec {
 pub struct SubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for SubScalarF32FutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -420,8 +500,15 @@ impl FutharkThunkSpec for SubScalarF32FutThunkSpec {
 pub struct SubFutThunkSpec;
 
 impl FutharkThunkSpec for SubFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (2, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -443,8 +530,15 @@ impl FutharkThunkSpec for SubFutThunkSpec {
 pub struct MulScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -467,8 +561,15 @@ impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
 pub struct MulFutThunkSpec;
 
 impl FutharkThunkSpec for MulFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (2, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -490,8 +591,15 @@ impl FutharkThunkSpec for MulFutThunkSpec {
 pub struct DivScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for DivScalarF32FutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -514,8 +622,15 @@ impl FutharkThunkSpec for DivScalarF32FutThunkSpec {
 pub struct DivFutThunkSpec;
 
 impl FutharkThunkSpec for DivFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (2, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -537,8 +652,15 @@ impl FutharkThunkSpec for DivFutThunkSpec {
 pub struct SqrtFutThunkSpec;
 
 impl FutharkThunkSpec for SqrtFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -560,8 +682,15 @@ impl FutharkThunkSpec for SqrtFutThunkSpec {
 pub struct RsqrtFutThunkSpec;
 
 impl FutharkThunkSpec for RsqrtFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -585,8 +714,15 @@ impl FutharkThunkSpec for RsqrtFutThunkSpec {
 pub struct CosFutThunkSpec;
 
 impl FutharkThunkSpec for CosFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -608,8 +744,15 @@ impl FutharkThunkSpec for CosFutThunkSpec {
 pub struct SinFutThunkSpec;
 
 impl FutharkThunkSpec for SinFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -631,8 +774,15 @@ impl FutharkThunkSpec for SinFutThunkSpec {
 pub struct ExpFutThunkSpec;
 
 impl FutharkThunkSpec for ExpFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -654,8 +804,15 @@ impl FutharkThunkSpec for ExpFutThunkSpec {
 pub struct TanhFutThunkSpec;
 
 impl FutharkThunkSpec for TanhFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -677,8 +834,15 @@ impl FutharkThunkSpec for TanhFutThunkSpec {
 pub struct PowiF32FutThunkSpec { pub exp: i64 }
 
 impl FutharkThunkSpec for PowiF32FutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -740,8 +904,15 @@ pub struct InnerSum3dThunkSpec;
 pub struct Sum1dFutThunkSpec;
 
 impl FutharkThunkSpec for Sum1dFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -769,8 +940,15 @@ impl FutharkThunkSpec for Sum1dFutThunkSpec {
 pub struct Sum2dFutThunkSpec;
 
 impl FutharkThunkSpec for Sum2dFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -804,8 +982,15 @@ impl FutharkThunkSpec for Sum2dFutThunkSpec {
 pub struct Sum3dFutThunkSpec;
 
 impl FutharkThunkSpec for Sum3dFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -839,8 +1024,15 @@ impl FutharkThunkSpec for Sum3dFutThunkSpec {
 pub struct Sum4dFutThunkSpec;
 
 impl FutharkThunkSpec for Sum4dFutThunkSpec {
-  fn arity(&self) -> (u16, u16) {
+  /*fn arity(&self) -> (u16, u16) {
     (1, 1)
+  }*/
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -972,7 +1164,7 @@ impl ThunkSpec for BlockMulMatrixThunkSpec {
   }
 }
 
-pub struct BlockMulMatrixGpuThunkImpl {
+pub struct BlockMulMatrixF16F32GpuThunkImpl {
   // TODO
   alpha: Cell<f32>,
   beta: Cell<f32>,
@@ -981,7 +1173,7 @@ pub struct BlockMulMatrixGpuThunkImpl {
   tmp_c: RefCell<Vec<u64>>,
 }
 
-impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
+impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
     self.alpha.set(1.0);
@@ -997,85 +1189,182 @@ impl ThunkImpl for BlockMulMatrixGpuThunkImpl {
     }
     let out_ty_ = ThunkSpec::out_ty_(spec, &arg_ty_).unwrap();
     // FIXME FIXME: correct transposes, shapes, arg order for row major v col major.
-    let m = out_ty_.shape[0];
-    assert!(m <= i32::max_value() as _);
-    let n = out_ty_.shape[1];
-    assert!(n <= i32::max_value() as _);
-    let inner_len = if spec.lt { arg_ty_[0].shape[0] } else { arg_ty_[0].shape[1] };
+    let colmajor_at = spec.rt;
+    let colmajor_bt = spec.lt;
+    /*let o_nrow = out_ty_.shape[0];
+    assert!(o_nrow <= i32::max_value() as _);
+    let o_ncol = out_ty_.shape[1];
+    assert!(o_ncol <= i32::max_value() as _);*/
+    // FIXME FIXME: should be the block inner len.
+    /*let inner_len = if spec.lt { arg_ty_[0].shape[0] } else { arg_ty_[0].shape[1] };
     assert_eq!(inner_len, if spec.rt { arg_ty_[1].shape[1] } else { arg_ty_[1].shape[0] });
+    assert!(inner_len <= i32::max_value() as _);*/
+    let inner_len = if spec.lt { spec.l_block[0] } else { spec.l_block[1] };
+    assert_eq!(inner_len, if spec.rt { spec.r_block[1] } else { spec.r_block[0] });
     assert!(inner_len <= i32::max_value() as _);
+    // FIXME FIXME: m, n should be the block size.
+    let o_blknrow = if spec.lt { spec.l_block[1] } else { spec.l_block[0] };
+    assert!(o_blknrow <= i32::max_value() as _);
+    let o_blkncol = if spec.lt { spec.r_block[1] } else { spec.r_block[0] };
+    assert!(o_blkncol <= i32::max_value() as _);
+    let colmajor_m = o_blkncol;
+    let colmajor_n = o_blknrow;
+    let ldb = arg_ty_[0].shape[1];
+    assert!(ldb <= i32::max_value() as _);
+    let lda = arg_ty_[1].shape[1];
+    assert!(lda <= i32::max_value() as _);
+    let ldc = out_ty_.shape[1];
+    assert!(ldc <= i32::max_value() as _);
     // FIXME FIXME: load dptrs to blocks.
-    /*
-    let a_nrowblk = arg_ty_[0].shape[0] / self.l_block[0];
-    let a_ncolblk = arg_ty_[0].shape[1] / self.l_block[1];
+    /*let b_nrowblk = arg_ty_[0].shape[0] / spec.l_block[0];
+    assert_eq!(0, arg_ty_[0].shape[0] % spec.l_block[0]);
+    let b_ncolblk = arg_ty_[0].shape[1] / spec.l_block[1];
+    assert_eq!(0, arg_ty_[0].shape[1] % spec.l_block[1]);
+    let a_nrowblk = arg_ty_[1].shape[0] / spec.r_block[0];
+    assert_eq!(0, arg_ty_[1].shape[0] % spec.r_block[0]);
+    let a_ncolblk = arg_ty_[1].shape[1] / spec.r_block[1];
+    assert_eq!(0, arg_ty_[1].shape[1] % spec.r_block[1]);*/
+    let nrowblk = arg_ty_[0].shape[0] / spec.l_block[0];
+    assert_eq!(0, arg_ty_[0].shape[0] % spec.l_block[0]);
+    assert_eq!(nrowblk, arg_ty_[1].shape[0] / spec.r_block[0]);
+    assert_eq!(0, arg_ty_[1].shape[0] % spec.r_block[0]);
+    let ncolblk = arg_ty_[0].shape[1] / spec.l_block[1];
+    assert_eq!(0, arg_ty_[0].shape[1] % spec.l_block[1]);
+    assert_eq!(ncolblk, arg_ty_[1].shape[1] / spec.r_block[1]);
+    assert_eq!(0, arg_ty_[1].shape[1] % spec.r_block[1]);
     match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
-          &mut Cell::Phy(ref _state, ref _clo, ref mut pcel) => {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_ = pcel.get(PMach::NvGpu).unwrap();
+            let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
-            //gpu_cel.dptr
-            // FIXME FIXME
-            //self.tmp_a.borrow_mut()...;
+            let base = gpu_cel.dptr;
+            let inc = spec.l_dtype.size_bytes() as u64;
+            /*let nrowblk = arg_ty_[0].shape[0] / spec.l_block[0];
+            assert_eq!(0, arg_ty_[0].shape[0] % spec.l_block[0]);
+            let ncolblk = arg_ty_[0].shape[1] / spec.l_block[1];
+            assert_eq!(0, arg_ty_[0].shape[1] % spec.l_block[1]);*/
+            let blknrow = spec.l_block[0] as u64;
+            let blkncol = spec.l_block[1] as u64;
+            let stride = arg_ty_[0].shape[1] as u64;
+            let mut tmp = self.tmp_b.borrow_mut();
+            tmp.clear();
+            for j in 0 .. nrowblk as u64 {
+              for i in 0 .. ncolblk as u64 {
+                tmp.push(base + inc * (blkncol * i + stride * blknrow * j));
+              }
+            }
           }
           _ => panic!("bug")
         }
       }
     }
-    // TODO TODO
+    match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/) {
+      None => panic!("bug"),
+      Some(e) => {
+        match e.cel_ {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
+            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
+            let pcel_ = Weak::upgrade(pcel_).unwrap();
+            let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
+            let base = gpu_cel.dptr;
+            let inc = spec.r_dtype.size_bytes() as u64;
+            /*let nrowblk = arg_ty_[1].shape[0] / spec.r_block[0];
+            assert_eq!(0, arg_ty_[1].shape[0] % spec.r_block[0]);
+            let ncolblk = arg_ty_[1].shape[1] / spec.r_block[1];
+            assert_eq!(0, arg_ty_[1].shape[1] % spec.r_block[1]);*/
+            let blknrow = spec.r_block[0] as u64;
+            let blkncol = spec.r_block[1] as u64;
+            let stride = arg_ty_[1].shape[1] as u64;
+            let mut tmp = self.tmp_a.borrow_mut();
+            tmp.clear();
+            for j in 0 .. nrowblk as u64 {
+              for i in 0 .. ncolblk as u64 {
+                tmp.push(base + inc * (blkncol * i + stride * blknrow * j));
+              }
+            }
+          }
+          _ => panic!("bug")
+        }
+      }
+    }
     match env.pwrite_ref(out, oclk, /*CellEMode::Mutex,*/) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
-          &mut Cell::Phy(ref _state, ref _clo, ref mut pcel) => {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             /*clo.thunk_.push(th);
             assert_eq!(clo.thunk.len(), oclk.up as usize);*/
             let pcel_ = pcel.get(PMach::NvGpu).unwrap();
+            let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
-            //gpu_cel.dptr
-            // FIXME FIXME
-            //self.tmp_c.borrow_mut()...;
+            let base = gpu_cel.dptr;
+            let inc = spec.o_dtype.size_bytes() as u64;
+            /*let o_nrowblk = if spec.lt {
+              let ncolblk = arg_ty_[0].shape[1] / spec.l_block[1];
+              assert_eq!(0, arg_ty_[0].shape[1] % spec.l_block[1]);
+              ncolblk
+            } else {
+              let nrowblk = arg_ty_[0].shape[0] / spec.l_block[0];
+              assert_eq!(0, arg_ty_[0].shape[0] % spec.l_block[0]);
+              nrowblk
+            };
+            let o_ncolblk = if spec.rt {
+              let nrowblk = arg_ty_[1].shape[0] / spec.r_block[0];
+              assert_eq!(0, arg_ty_[1].shape[0] % spec.r_block[0]);
+              nrowblk
+            } else {
+              let ncolblk = arg_ty_[1].shape[1] / spec.r_block[1];
+              assert_eq!(0, arg_ty_[1].shape[1] % spec.r_block[1]);
+              ncolblk
+            };*/
+            let o_blknrow = o_blknrow as u64;
+            let o_blkncol = o_blkncol as u64;
+            let stride = out_ty_.shape[1] as u64;
+            let mut tmp = self.tmp_c.borrow_mut();
+            tmp.clear();
+            for j in 0 .. nrowblk as u64 {
+              for i in 0 .. ncolblk as u64 {
+                tmp.push(base + inc * (o_blkncol * i + stride * o_blknrow * j));
+              }
+            }
           }
           _ => panic!("bug")
         }
       }
     }
-    */
-    let lda = arg_ty_[0].shape[1];
-    assert!(lda <= i32::max_value() as _);
-    let ldb = arg_ty_[1].shape[1];
-    assert!(ldb <= i32::max_value() as _);
-    let ldc = out_ty_.shape[1];
-    assert!(ldc <= i32::max_value() as _);
-    let a_gputy = match spec.l_dtype {
+    let b_gputy = match spec.l_dtype {
       Dtype::Float32 => CUDA_R_32F,
       Dtype::Float16 => CUDA_R_16F,
+      Dtype::BFloat16 => CUDA_R_16BF,
       _ => unimplemented!()
     };
-    let b_gputy = match spec.r_dtype {
+    let a_gputy = match spec.r_dtype {
       Dtype::Float32 => CUDA_R_32F,
       Dtype::Float16 => CUDA_R_16F,
+      Dtype::BFloat16 => CUDA_R_16BF,
       _ => unimplemented!()
     };
     let c_gputy = match spec.o_dtype {
       Dtype::Float32 => CUDA_R_32F,
       Dtype::Float16 => CUDA_R_16F,
+      Dtype::BFloat16 => CUDA_R_16BF,
       _ => unimplemented!()
     };
     TL_PCTX.with(|pctx| {
-      // FIXME FIXME
       let gpu = &pctx.nvgpu.as_ref().unwrap();
       let ret = cublas_gemm_batched(
           &gpu.blas_ctx,
-          spec.lt, spec.rt,
-          m as _, n as _, inner_len as _,
-          self.alpha.as_ptr() as *const _,
+          colmajor_at, colmajor_bt,
+          colmajor_m as _, colmajor_n as _, inner_len as _,
+          self.alpha.as_ptr() as *const f32 as *const c_void,
           &*self.tmp_a.borrow(), a_gputy, lda as _,
           &*self.tmp_b.borrow(), b_gputy, ldb as _,
-          self.beta.as_ptr() as *const _,
+          self.beta.as_ptr() as *const f32 as *const c_void,
           &*self.tmp_c.borrow(), c_gputy, ldc as _,
-          &gpu.main,
+          &gpu.compute,
       );
       match ret {
         Err(_) => ThunkRet::Failure,

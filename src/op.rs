@@ -11,6 +11,7 @@ use futhark_syntax::*;
 use std::borrow::{Cow};
 use std::convert::{TryInto};
 use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
+use std::rc::{Rc};
 
 /*impl<P: Into<CellPtr> + Sized> Add<P> for f32 {
   type Output = CellPtr;
@@ -919,12 +920,13 @@ pub fn jvp(y: &MSet, x_dx: &MMap) -> MMap {
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
   panick_wrap(|| {
     let result = TL_CTX.with(|ctx| {
-      let mut fut_trie = ctx.fut_trie.borrow_mut();
-      if fut_trie.is_none() {
-        *fut_trie = Some(tokenizer_trie());
+      let mut fut = ctx.futhark.borrow_mut();
+      if fut.trie.is_none() {
+        fut.trie = Some(Rc::new(tokenizer_trie()));
       }
-      let fut_trie = fut_trie.as_ref().unwrap();
-      let tokens = Tokenizer::new(fut_trie, &*lam_src);
+      drop(fut);
+      let trie = ctx.futhark.borrow().trie.as_ref().unwrap().clone();
+      let tokens = Tokenizer::new(trie, &*lam_src);
       let mut parser = ExpParser::new(tokens);
       parser.parse()
     });

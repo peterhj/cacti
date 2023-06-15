@@ -100,7 +100,7 @@ pub struct Ctx {
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
   pub arg:      RefCell<Vec<(CellPtr, Clock)>>,
-  pub fut_trie: RefCell<Option<ReTrie<FutToken>>>,
+  pub futhark:  RefCell<FutharkCtx>,
 }
 
 impl Ctx {
@@ -112,9 +112,14 @@ impl Ctx {
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
       arg:      RefCell::new(Vec::new()),
-      fut_trie: RefCell::new(None),
+      futhark:  RefCell::new(FutharkCtx::default()),
     }
   }
+}
+
+#[derive(Default)]
+pub struct FutharkCtx {
+  pub trie: Option<Rc<ReTrie<FutToken>>>,
 }
 
 #[track_caller]
@@ -145,7 +150,7 @@ pub fn resume() -> SpineRet {
 }
 
 #[track_caller]
-pub fn resume_put_mem<K: AsRef<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
+pub fn resume_put_mem_val<K: AsRef<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();

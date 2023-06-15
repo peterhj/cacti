@@ -1,4 +1,5 @@
-use super::{TL_PCTX, PCtxImpl, Locus, PMach, PMachSet, PMemErr};
+//use super::{TL_PCTX, PCtxImpl, Locus, PMach, PMachSet, PMemErr};
+use super::*;
 use crate::algo::{MergeVecDeque, Region, RevSortMap8};
 use crate::algo::sync::{SpinWait};
 use crate::cell::*;
@@ -68,15 +69,19 @@ pub struct GpuOuterCell {
 
 pub struct GpuOuterCell_ {
   // FIXME FIXME
-  pub ptr:      Cell<CellPtr>,
+  //pub ptr:      Cell<CellPtr>,
+  pub ptr:      Cell<PAddr>,
   pub clk:      Cell<Clock>,
   pub mem:      MemReg,
   pub write:    Rc<GpuSnapshot>,
   pub lastuse:  Rc<GpuSnapshot>,
 }
 
-pub struct GpuInnerCell {
-  pub ptr:      Cell<CellPtr>,
+pub type GpuInnerCell = NvGpuInnerCell;
+
+pub struct NvGpuInnerCell {
+  //pub ptr:      Cell<CellPtr>,
+  pub ptr:      Cell<PAddr>,
   pub clk:      Cell<Clock>,
   //pub ref_:     GpuInnerRef,
   pub dev:      i32,
@@ -93,22 +98,8 @@ pub struct GpuInnerCell {
   // TODO
 }
 
-impl InnerCell for GpuInnerCell {
+impl InnerCell for NvGpuInnerCell {
 }
-
-/*#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[repr(transparent)]
-pub struct GpuInnerRef(u32);
-
-impl GpuInnerRef {
-  pub fn free() -> GpuInnerRef {
-    GpuInnerRef(0)
-  }
-
-  pub fn is_free(&self) -> bool {
-    self.0 == 0
-  }
-}*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct NvGpuInfo {
@@ -189,36 +180,58 @@ pub struct NvGpuPCtx {
   pub pctx:         CudaPrimaryCtx,
   pub info:         NvGpuInfo,
   pub blas_ctx:     CublasContext,
-  pub main:         CudartStream,
+  pub compute:      CudartStream,
   pub copy_to:      CudartStream,
   pub copy_from:    CudartStream,
   pub mem_pool:     GpuMemPool,
   //pub cel_map:      RefCell<HashMap<GpuInnerRef, Rc<GpuInnerCell>>>,
-  pub cel_map:      RefCell<HashMap<CellPtr, Rc<GpuInnerCell>>>,
+  //pub cel_map:      RefCell<HashMap<CellPtr, Rc<GpuInnerCell>>>,
+  pub cel_map:      RefCell<HashMap<PAddr, Rc<GpuInnerCell>>>,
   // TODO
 }
 
 impl PCtxImpl for NvGpuPCtx {
-  type ICel = GpuInnerCell;
+  //type ICel = GpuInnerCell;
 
   fn pmach(&self) -> PMach {
     PMach::NvGpu
   }
 
   fn fastest_locus(&self) -> Locus {
-    // FIXME: query device/driver capabilities.
-    Locus::VMem
+    if self.info.integrated {
+      println!("DEBUG: NvGpuPCtx::fastest_locus: integrated: capability={}.{}",
+          self.info.capability_major, self.info.capability_minor);
+      if !self.info.unified_address {
+        println!("WARNING: NvGpuPCtx::fastest_locus: integrated but not unified address space");
+      }
+      if !self.info.managed_memory {
+        println!("WARNING: NvGpuPCtx::fastest_locus: integrated but not managed memory");
+      }
+      Locus::Mem
+    } else {
+      Locus::VMem
+    }
   }
 
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>) {
-    // FIXME: query device/driver capabilities.
-    lp.insert((Locus::VMem, PMach::NvGpu), ());
+    if self.info.integrated {
+      println!("DEBUG: NvGpuPCtx::append_matrix: integrated: capability={}.{}",
+          self.info.capability_major, self.info.capability_minor);
+      if !self.info.unified_address {
+        println!("WARNING: NvGpuPCtx::append_matrix: integrated but not unified address space");
+      }
+      if !self.info.managed_memory {
+        println!("WARNING: NvGpuPCtx::append_matrix: integrated but not managed memory");
+      }
+    } else {
+      lp.insert((Locus::VMem, PMach::NvGpu), ());
+      pl.insert((PMach::NvGpu, Locus::VMem), ());
+    }
     lp.insert((Locus::Mem, PMach::NvGpu), ());
-    pl.insert((PMach::NvGpu, Locus::VMem), ());
     pl.insert((PMach::NvGpu, Locus::Mem), ());
   }
 
-  fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<GpuInnerCell>, PMemErr> {
+  fn try_alloc(&self, x: CellPtr, sz: usize, /*pmset: PMachSet,*/ locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr> {
     unimplemented!();
   }
 }
@@ -244,10 +257,10 @@ impl NvGpuPCtx {
     let info = NvGpuInfo::new(dev);
     println!("DEBUG: NvGpuPCtx::new: info={:?}", &info);
     let blas_ctx = CublasContext::create().unwrap();
-    let main = CudartStream::null();
+    let compute = CudartStream::null();
     let copy_to = CudartStream::create_nonblocking().unwrap();
     let copy_from = CudartStream::create_nonblocking().unwrap();
-    /*let main = CudartStream::create().unwrap();
+    /*let compute = CudartStream::create().unwrap();
     let copy_to = CudartStream::create().unwrap();
     let copy_from = CudartStream::create().unwrap();*/
     let mem_pool = GpuMemPool::new(dev);
@@ -258,7 +271,7 @@ impl NvGpuPCtx {
       pctx,
       info,
       blas_ctx,
-      main,
+      compute,
       copy_to,
       copy_from,
       mem_pool,
@@ -279,7 +292,8 @@ impl NvGpuPCtx {
     GpuInnerRef(next)
   }*/
 
-  pub fn find_dptr(&self, p: CellPtr) -> Option<u64> {
+  //pub fn find_dptr(&self, p: CellPtr) -> Option<u64> {}
+  pub fn find_dptr(&self, p: PAddr) -> Option<u64> {
     unimplemented!();
   }
 
@@ -312,7 +326,7 @@ impl NvGpuPCtx {
     self.mem_pool.try_front_pre_alloc(query_sz)
   }
 
-  pub fn alloc(&self, ptr: CellPtr, offset: usize, req_sz: usize, next_offset: usize) -> Weak<GpuInnerCell> {
+  pub fn alloc(&self, ptr: PAddr, offset: usize, req_sz: usize, next_offset: usize) -> Weak<GpuInnerCell> {
     //let r = self._fresh_inner_ref();
     self.mem_pool.front_set.borrow_mut().insert(ptr, Region{off: offset, sz: req_sz});
     self.mem_pool.front_cursor.set(next_offset);
@@ -342,7 +356,8 @@ impl NvGpuPCtx {
   }
 
   //pub fn try_free(&self, r: GpuInnerRef) -> Option<()> {}
-  pub fn try_free(&self, ptr: CellPtr) -> Option<()> {
+  //pub fn try_free(&self, ptr: CellPtr) -> Option<()> {}
+  pub fn try_free(&self, ptr: PAddr) -> Option<()> {
     match self.cel_map.borrow().get(&ptr) {
       None => {}
       Some(cel) => {
@@ -364,7 +379,9 @@ impl NvGpuPCtx {
     Some(())
   }
 
-  pub fn unify(&self, x: CellPtr, y: CellPtr) {
+  // FIXME FIXME
+  //pub fn unify(&self, x: CellPtr, y: CellPtr) {}
+  pub fn unify(&self, x: PAddr, y: PAddr) {
     let mut cel_map = self.cel_map.borrow_mut();
     match cel_map.remove(&x) {
       None => panic!("bug"),
@@ -417,13 +434,15 @@ pub struct GpuMemPool {
   pub back_pad:     usize,
   //pub front_list:   RefCell<MergeVecDeque<(GpuInnerRef, GpuInnerMemCell)>>,
   //pub front_set:    RefCell<BTreeMap<GpuInnerRef, Region>>,
-  pub front_set:    RefCell<HashMap<CellPtr, Region>>,
+  //pub front_set:    RefCell<HashMap<CellPtr, Region>>,
+  pub front_set:    RefCell<HashMap<PAddr, Region>>,
   pub front_cursor: Cell<usize>,
   //pub back_bitmap:  RefCell<Bitvec64>,
   pub back_cursor:  Cell<usize>,
   //pub tmp_freelist: ExtentVecList,
   //pub alloc_map:    RefCell<BTreeMap<Region, GpuInnerRef>>,
-  pub alloc_map:    RefCell<BTreeMap<Region, CellPtr>>,
+  //pub alloc_map:    RefCell<BTreeMap<Region, CellPtr>>,
+  pub alloc_map:    RefCell<BTreeMap<Region, PAddr>>,
   pub free_set:     RefCell<BTreeSet<Region>>,
   pub free_merge:   RefCell<MergeVecDeque<Region>>,
   // TODO
@@ -505,7 +524,8 @@ impl GpuMemPool {
   }
 
   //pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<GpuInnerRef>)> {}
-  pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<CellPtr>)> {
+  //pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<CellPtr>)> {}
+  pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<PAddr>)> {
     println!("DEBUG: GpuMemPool::lookup_dptr: query dptr=0x{:016x}", query_dptr);
     println!("DEBUG: GpuMemPool::lookup_dptr:   res base=0x{:016x}", self.reserve_base);
     if query_dptr < self.reserve_base {
@@ -563,7 +583,8 @@ impl GpuMemPool {
   }
 
   //pub fn find_front_lru_match(&self, query_sz: usize) -> Option<GpuInnerRef> {}
-  pub fn find_front_lru_match(&self, query_sz: usize) -> Option<CellPtr> {
+  //pub fn find_front_lru_match(&self, query_sz: usize) -> Option<CellPtr> {}
+  pub fn find_front_lru_match(&self, query_sz: usize) -> Option<PAddr> {
     let mut mat = None;
     for (&r, desc) in self.front_set.borrow().iter() {
       if query_sz == desc.sz {
@@ -608,7 +629,8 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
       None => panic!("bug"),
       Some((offset, req_sz, next_offset)) => {
         // FIXME FIXME
-        let p = ctx_fresh_tmp();
+        //let p = ctx_fresh_tmp();
+        let p = pctx.ctr.fresh_addr();
         let x = pctx.nvgpu.as_ref().unwrap().alloc(p, offset, req_sz, next_offset);
         let y = Weak::upgrade(&x).unwrap();
         unsafe {

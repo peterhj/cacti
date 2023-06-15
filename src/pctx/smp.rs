@@ -141,7 +141,7 @@ pub struct SmpPCtx {
 }
 
 impl PCtxImpl for SmpPCtx {
-  type ICel = SmpInnerCell;
+  //type ICel = SmpInnerCell;
 
   fn pmach(&self) -> PMach {
     PMach::Smp
@@ -156,7 +156,7 @@ impl PCtxImpl for SmpPCtx {
     pl.insert((PMach::Smp, Locus::Mem), ());
   }
 
-  fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<SmpInnerCell>, PMemErr> {
+  fn try_alloc(&self, x: CellPtr, sz: usize, /*pmset: PMachSet,*/ locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr> {
     unimplemented!();
   }
 }
