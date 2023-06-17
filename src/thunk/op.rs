@@ -52,9 +52,11 @@ impl FutharkThunkSpec for LamFutExpThunkSpec {
   fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
     let mut s = String::new();
     if self.wrap_parens {
-      write!(&mut s, "({})", &self.lam_src).unwrap();
-    } else {
-      s.push_str(&self.lam_src);
+      write!(&mut s, "(").unwrap();
+    }
+    s.push_str(&self.lam_src);
+    if self.wrap_parens {
+      write!(&mut s, ")").unwrap();
     }
     for k in 0 .. self.ar_in {
       write!(&mut s, " {{%{}}}", k).unwrap();
@@ -1237,10 +1239,14 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
-            let pcel_ = Weak::upgrade(pcel_).unwrap();
+            let pcel_addr = pcel.get(arg[0].1, PMach::NvGpu);
+            /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
-            let base = gpu_cel.dptr;
+            let base = gpu_cel.dptr;*/
+            let base = TL_PCTX.with(|pctx| {
+              let gpu_cel = pctx.nvgpu.as_ref().unwrap().lookup(pcel_addr).unwrap();
+              gpu_cel.dptr
+            });
             let inc = spec.l_dtype.size_bytes() as u64;
             /*let nrowblk = arg_ty_[0].shape[0] / spec.l_block[0];
             assert_eq!(0, arg_ty_[0].shape[0] % spec.l_block[0]);
@@ -1266,10 +1272,14 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
-            let pcel_ = Weak::upgrade(pcel_).unwrap();
+            let pcel_addr = pcel.get(arg[1].1, PMach::NvGpu);
+            /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
-            let base = gpu_cel.dptr;
+            let base = gpu_cel.dptr;*/
+            let base = TL_PCTX.with(|pctx| {
+              let gpu_cel = pctx.nvgpu.as_ref().unwrap().lookup(pcel_addr).unwrap();
+              gpu_cel.dptr
+            });
             let inc = spec.r_dtype.size_bytes() as u64;
             /*let nrowblk = arg_ty_[1].shape[0] / spec.r_block[0];
             assert_eq!(0, arg_ty_[1].shape[0] % spec.r_block[0]);
@@ -1297,10 +1307,14 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             /*clo.thunk_.push(th);
             assert_eq!(clo.thunk.len(), oclk.up as usize);*/
-            let pcel_ = pcel.get(PMach::NvGpu).unwrap();
-            let pcel_ = Weak::upgrade(pcel_).unwrap();
+            let pcel_addr = pcel.get(oclk, PMach::NvGpu);
+            /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
-            let base = gpu_cel.dptr;
+            let base = gpu_cel.dptr;*/
+            let base = TL_PCTX.with(|pctx| {
+              let gpu_cel = pctx.nvgpu.as_ref().unwrap().lookup(pcel_addr).unwrap();
+              gpu_cel.dptr
+            });
             let inc = spec.o_dtype.size_bytes() as u64;
             /*let o_nrowblk = if spec.lt {
               let ncolblk = arg_ty_[0].shape[1] / spec.l_block[1];

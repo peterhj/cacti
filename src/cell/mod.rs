@@ -2,7 +2,7 @@ use crate::algo::{RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
-use crate::pctx::{Locus, PMach, /*PAddr*/};
+use crate::pctx::{Locus, PMach, PAddr};
 use crate::pctx::smp::{MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -606,6 +606,7 @@ pub enum CellMode {
   Aff,
   Init,
   //Fin,
+  //Unsafe,
 }
 
 impl Default for CellMode {
@@ -643,10 +644,6 @@ impl CellMode {
         return Err(());
       }
     }
-  }
-
-  pub fn set_mux(&mut self) -> Result<bool, ()> {
-    self.set_init()
   }
 }
 
@@ -717,10 +714,10 @@ pub struct CellState {
   pub clk:  Clock,
 }
 
-pub struct CellReplica {
+pub struct PCellReplica {
   pub clk:  Clock,
-  pub icel: Option<Weak<dyn InnerCell_>>,
-  //pub addr: PAddr,
+  //pub icel: Option<Weak<dyn InnerCell_>>,
+  pub addr: PAddr,
 }
 
 pub struct PCell {
@@ -733,7 +730,7 @@ pub struct PCell {
   pub primary:  Locus,
   pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
   //pub replicas: RevSortMap8<(Locus, PMach), Option<Weak<dyn InnerCell_>>>,
-  pub replicas: RevSortMap8<(Locus, PMach), CellReplica>,
+  pub replicas: RevSortMap8<(Locus, PMach), PCellReplica>,
 }
 
 impl PCell {
@@ -754,42 +751,49 @@ impl PCell {
     }
   }
 
-  pub fn push_new_replica(&mut self, locus: Locus, pmach: PMach, /*addr: PAddr,*/ icel: Option<Weak<dyn InnerCell_>>) {
+  pub fn push_new_replica(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
     match self.replicas.find((locus, pmach)) {
       None => {}
       Some(_) => panic!("bug")
     }
-    // FIXME FIXME
-    let rep = CellReplica{clk: Clock::default(), icel};
+    let rep = PCellReplica{clk, addr};
     let key = self.replicas.insert((locus, pmach), rep);
     self.pm_index.insert((pmach, locus), key);
   }
 
-  pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, Clock, &mut Option<Weak<dyn InnerCell_>>)> {
-    match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {
+  //pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, Clock, &mut Option<Weak<dyn InnerCell_>>)> {}
+  pub fn lookup_replica(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
+    //match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {}
+    match self.replicas.find_lub((q_locus, PMach::_Bot)) {
       None => None,
       Some((key, rep)) => {
         let key = key.key.as_ref();
         if key.0 != q_locus {
           None
         } else {
-          Some((key.1, rep.clk, &mut rep.icel))
+          //Some((key.1, rep.clk, &mut rep.icel))
+          Some((key.1, rep))
         }
       }
     }
   }
 
-  pub fn get(&mut self, q_pmach: PMach) -> Option<&mut Weak<dyn InnerCell_>> {
+  pub fn get(&mut self, q_clk: Clock, q_pmach: PMach) -> /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr {
     match self.pm_index.find_lub((q_pmach, Locus::_Bot)) {
       None => {}
       Some((_, key)) => {
         if key.key.as_ref().1 == q_pmach {
-          let rep = self.replicas.get_mut(key);
+          // FIXME FIXME
+          /*let rep = self.replicas.get_mut(key);
           match &mut rep.icel {
             &mut None => {}
             &mut Some(ref mut icel) => {
               return Some(icel);
             }
+          }*/
+          let rep = self.replicas.get(key);
+          if rep.clk == q_clk {
+            return rep.addr;
           }
         }
       }
@@ -803,10 +807,10 @@ impl PCell {
     unimplemented!();
   }
 
-  fn write_mem(&self, x: CellPtr, xclk: Clock) -> Option<Rc<dyn InnerCell_>> {
+  /*pub fn write_mem(&self, x: CellPtr, xclk: Clock) -> Option<Rc<dyn InnerCell_>> {
     // FIXME FIXME
     unimplemented!();
-  }
+  }*/
 }
 
 pub trait InnerCell {

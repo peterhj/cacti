@@ -73,9 +73,10 @@ pub enum SpineEntry {
   Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
   Accumulate(CellPtr, ThunkPtr),
+  UnsafeWrite(CellPtr, ThunkPtr),
   Seal(CellPtr),
   Unseal(CellPtr),
-  Eval(CellPtr),
+  //Eval(CellPtr),
   //Uneval(CellPtr),
   Unsync(CellPtr),
   //Alias(CellPtr, CellPtr),
@@ -105,9 +106,10 @@ impl SpineEntry {
       &SpineEntry::Initialize(..) => SpineEntryName::Initialize,
       &SpineEntry::Apply(..)      => SpineEntryName::Apply,
       &SpineEntry::Accumulate(..) => SpineEntryName::Accumulate,
+      &SpineEntry::UnsafeWrite(..) => SpineEntryName::UnsafeWrite,
       &SpineEntry::Seal(..)       => SpineEntryName::Seal,
       &SpineEntry::Unseal(..)     => SpineEntryName::Unseal,
-      &SpineEntry::Eval(..)       => SpineEntryName::Eval,
+      //&SpineEntry::Eval(..)       => SpineEntryName::Eval,
       &SpineEntry::Unsync(..)     => SpineEntryName::Unsync,
       &SpineEntry::Bot            => SpineEntryName::Bot,
     }
@@ -134,9 +136,10 @@ pub enum SpineEntryName {
   Initialize,
   Apply,
   Accumulate,
+  UnsafeWrite,
   Seal,
   Unseal,
-  Eval,
+  //Eval,
   //Uneval,
   Unsync,
   // TODO
@@ -269,7 +272,7 @@ impl SpineEnv {
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             assert_eq!(state.clk.up, 0);
-            state.mode.set_aff();
+            state.mode = CellMode::Aff;
             state.flag.set_intro();
             state.clk = self.ctr.into();
           }
@@ -283,7 +286,7 @@ impl SpineEnv {
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
-            state.mode.set_init();
+            state.mode = CellMode::Init;
             state.flag.set_intro();
             let next_clk = self.ctr.into();
             state.clk = next_clk;
@@ -304,7 +307,7 @@ impl SpineEnv {
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             assert_eq!(state.clk.up, 0);
-            state.mode.set_aff();
+            state.mode = CellMode::Aff;
             state.flag.set_intro();
             let clk0: Clock = self.ctr.into();
             let next_clk = clk0.update();
@@ -339,7 +342,7 @@ impl SpineEnv {
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
-            state.mode.set_init();
+            state.mode = CellMode::Init;
             state.flag.set_intro();
             let next_clk = self.ctr.into();
             assert!(self.iapply.insert(x, (sp, ThunkPtr::nil(), next_clk)).is_none());
@@ -367,7 +370,7 @@ impl SpineEnv {
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
-            state.mode.set_init();
+            state.mode = CellMode::Init;
             state.flag.set_intro();
             let next_clk = self.ctr.into();
             assert!(self.iapply.insert(x, (sp, ith, next_clk)).is_none());
@@ -428,6 +431,9 @@ impl SpineEnv {
             self.arg.clear();
           }
         }
+      }
+      &SpineEntry::UnsafeWrite(x, th) => {
+        unimplemented!();
       }
       &SpineEntry::Seal(x) => {
         match self.state.get_mut(&x) {
@@ -727,7 +733,7 @@ impl Spine {
             // FIXME FIXME
             //unimplemented!();
             let flag = !e.state().flag.set_cache();
-            let mode = match e.state().mode.set_mux() {
+            let mode = match e.state().mode.set_init() {
               Err(_) => panic!("bug"),
               Ok(prev) => !prev
             };
@@ -1017,6 +1023,9 @@ impl Spine {
           }
         }
       }
+      &SpineEntry::UnsafeWrite(x, th) => {
+        unimplemented!();
+      }
       &SpineEntry::Seal(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
@@ -1038,7 +1047,7 @@ impl Spine {
       &SpineEntry::Unseal(x) => {
         unimplemented!();
       }
-      &SpineEntry::Eval(x) => {
+      /*&SpineEntry::Eval(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
@@ -1066,7 +1075,7 @@ impl Spine {
             */
           }
         }
-      }
+      }*/
       &SpineEntry::Unsync(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),

@@ -400,6 +400,13 @@ impl NvGpuPCtx {
       }
     }
   }
+
+  pub fn lookup(&self, x: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+    match self.cel_map.borrow().get(&x) {
+      None => None,
+      Some(icel) => Some(icel.clone())
+    }
+  }
 }
 
 #[derive(Clone)]

@@ -2,7 +2,7 @@ use crate::algo::{SortKey8, SortMap8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::*;
-use crate::ctx::{CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
+use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 //use crate::op::*;
 use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr};
 #[cfg(feature = "gpu")]
@@ -310,12 +310,13 @@ pub trait FutharkThunkSpec {
   //fn tag(&self) -> Option<&'static str> { None }
   /*fn arity(&self) -> (u16, u16);*/
   fn abi(&self) -> FutAbi;
+  fn abi_param(&self, _param: &mut [FutAbiScalar]) -> usize { 0 }
+  // FIXME: now that we have params, deprecate scalar_val.
+  fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
   fn set_out_dim(&self, _arg: &[Dim], _out: Dim) -> Result<(), ThunkDimErr> { Err(ThunkDimErr::Immutable) }
   fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
-  fn scalar_val(&self) -> Option<&dyn DtypeExt> { None }
-  fn set_param(&self, _param: &mut [FutAbiScalar]) {}
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr>;
   //fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out_adj: CellPtr, _arg_adj: &[CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
@@ -360,7 +361,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     let np = abi.num_param();
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
     param.resize(np, FutAbiScalar::Empty);
-    FutharkThunkSpec::set_param(self, &mut param);
+    assert_eq!(FutharkThunkSpec::abi_param(self, &mut param), np);
     let code = match self.gen_futhark(&spec_dim) {
       Err(e) => panic!("ERROR: failed to generate futhark thunk code: {:?}", e),
       Ok(code) => code
@@ -607,15 +608,21 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           TL_PCTX.with(|pctx| {
             match pctx.nvgpu.as_ref().unwrap().cel_map.borrow().get(&p) {
               None => panic!("bug"),
-              Some(gpu_cel) => {
+              Some(_gpu_cel) => {
                 // FIXME: the type of the constant could probably be inferred,
                 // but easier to defer it until unification.
                 let ty = CellType::top();
                 let mut pcel = PCell::new(x, ty.clone());
                 let pmach = PMach::NvGpu;
                 let locus = pctx.nvgpu.as_ref().unwrap().fastest_locus();
-                let icel = Rc::downgrade(gpu_cel);
-                pcel.push_new_replica(locus, pmach, /*p,*/ Some(icel));
+                /*let icel = Rc::downgrade(gpu_cel);
+                pcel.push_new_replica(locus, pmach, Some(icel));*/
+                // FIXME: check that this const clock definition is correct.
+                let mut clk: Clock = TL_CTX.with(|ctx| {
+                  ctx.spine.borrow().ctr.into()
+                });
+                clk.up = 1;
+                pcel.push_new_replica(clk, locus, pmach, p);
                 env.insert_phy(x, ty, pcel);
               }
             }

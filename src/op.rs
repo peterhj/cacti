@@ -800,7 +800,17 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   }*/
 
   #[track_caller]
-  fn override_unseal_init(self) -> Self {
+  fn set<X: AsRef<CellPtr>>(&self, _x: X) where Self: Sized {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn unsafe_unseal(self) -> Self {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn unsafe_unseal_init(self) -> Self {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
       spine.unseal_mux(*self.as_ref());
