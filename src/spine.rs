@@ -2,7 +2,7 @@ use crate::cell::*;
 use crate::clock::{Counter, Clock};
 use crate::ctx::*;
 use crate::panick::{panick_wrap};
-use crate::pctx::{Locus};
+use crate::pctx::{TL_PCTX, Locus};
 use crate::pctx::smp::{MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 pub enum SpineResume<'a> {
   _Top,
   PutMemV(CellPtr, &'a dyn Any),
-  PutMemF(CellPtr, &'a dyn Fn(MemReg, )),
+  PutMemF(CellPtr, &'a dyn Fn(CellType, MemReg, )),
 }
 
 impl<'a> SpineResume<'a> {
@@ -61,7 +61,7 @@ pub enum SpineEntry {
   BreakV(CellPtr, CellPtr),
   TraceV(CellPtr, CellPtr),
   Profile(CellPtr, CellPtr),
-  CacheAff(CellPtr),
+  Cache(CellPtr),
   ICacheMux(CellPtr),
   OIntro(CellPtr, CellPtr),
   Intro(CellPtr),
@@ -69,6 +69,7 @@ pub enum SpineEntry {
   //IntroFin(CellPtr),
   YieldSet(CellPtr, Locus),
   YieldInit(CellPtr, Locus),
+  Alias(CellPtr, CellPtr),
   PushSeal(CellPtr),
   Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
@@ -79,7 +80,6 @@ pub enum SpineEntry {
   //Eval(CellPtr),
   //Uneval(CellPtr),
   Unsync(CellPtr),
-  //Alias(CellPtr, CellPtr),
   //Cache(CellPtr),
   // TODO
   Bot,
@@ -95,13 +95,14 @@ impl SpineEntry {
       &SpineEntry::BreakV(..)     => SpineEntryName::BreakV,
       &SpineEntry::TraceV(..)     => SpineEntryName::TraceV,
       &SpineEntry::Profile(..)    => SpineEntryName::Profile,
-      &SpineEntry::CacheAff(..)   => SpineEntryName::CacheAff,
+      &SpineEntry::Cache(..)      => SpineEntryName::Cache,
       &SpineEntry::ICacheMux(..)  => SpineEntryName::ICacheMux,
       &SpineEntry::OIntro(..)     => SpineEntryName::OIntro,
       &SpineEntry::Intro(..)      => SpineEntryName::Intro,
       &SpineEntry::Uninit(..)     => SpineEntryName::Uninit,
       &SpineEntry::YieldSet(..)   => SpineEntryName::YieldSet,
       &SpineEntry::YieldInit(..)  => SpineEntryName::YieldInit,
+      &SpineEntry::Alias(..)      => SpineEntryName::Alias,
       &SpineEntry::PushSeal(..)   => SpineEntryName::PushSeal,
       &SpineEntry::Initialize(..) => SpineEntryName::Initialize,
       &SpineEntry::Apply(..)      => SpineEntryName::Apply,
@@ -125,13 +126,14 @@ pub enum SpineEntryName {
   BreakV,
   TraceV,
   Profile,
-  CacheAff,
+  Cache,
   ICacheMux,
   OIntro,
   Intro,
   Uninit,
   YieldSet,
   YieldInit,
+  Alias,
   PushSeal,
   Initialize,
   Apply,
@@ -171,7 +173,7 @@ pub type SpineCellMap = MCellMap;
   pub clk:      Clock,
 }*/
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct SpineEnv {
   // FIXME FIXME
   /*pub aff:      HashMap<CellPtr, u32>,
@@ -199,6 +201,7 @@ pub struct SpineEnv {
 
 impl SpineEnv {
   pub fn reset(&mut self, ctr: Counter) {
+    println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr);
     /*self.aff.clear();
     self.init.clear();
     self.cache.clear();
@@ -219,20 +222,54 @@ impl SpineEnv {
 
   pub fn step(&mut self, sp: u32, e: &SpineEntry) {
     // FIXME FIXME
+    println!("DEBUG: SpineEnv::step: idx={} e={:?}", sp, e);
     match e {
       &SpineEntry::OIntro(x, _) => {
         /*self.cache.insert(x, sp);*/
         // FIXME FIXME
         unimplemented!();
       }
-      &SpineEntry::CacheAff(x) => {
+      &SpineEntry::Cache(x) => {
         /*assert!(!self.intro.contains_key(&x));
         assert!(!self.seal.contains_key(&x));
         self.intro.insert(x, sp);
         self.seal.insert(x, sp);
         self.aff.insert(x, sp);*/
         // FIXME FIXME
-        unimplemented!();
+        //unimplemented!();
+        match self.state.get(&x) {
+          None => {
+            self.state.insert(x, CellState::default());
+          }
+          _ => {}
+        }
+        match self.state.get_mut(&x) {
+          None => panic!("bug"),
+          Some(state) => {
+            assert_eq!(state.mode, CellMode::_Top);
+            assert!(!state.flag.intro());
+            assert!(!state.flag.seal());
+            assert_eq!(state.clk.up, 0);
+            state.mode = CellMode::Aff;
+            state.flag.set_intro();
+            let clk0: Clock = self.ctr.into();
+            let next_clk = clk0.update();
+            match self.apply_.get(&x) {
+              None => {
+                self.apply_.insert(x, Vec::new());
+              }
+              _ => {}
+            }
+            match self.apply_.get_mut(&x) {
+              None => panic!("bug"),
+              Some(thlist) => {
+                thlist.push((sp, ThunkPtr::nil(), next_clk));
+                assert_eq!(thlist.len(), next_clk.up as _);
+              }
+            }
+            state.clk = next_clk;
+          }
+        }
       }
       &SpineEntry::ICacheMux(x) => {
         /*assert!(!self.seal.contains_key(&x));
@@ -350,9 +387,27 @@ impl SpineEnv {
           }
         }
       }
+      &SpineEntry::Alias(x, og) => {
+        // FIXME FIXME: prefer unification?
+        /*match self.state.get(&x) {
+          None => {
+            self.state.insert(x, CellState::default());
+          }
+          _ => {}
+        }*/
+        match self.state.get(&og) {
+          None => panic!("bug"),
+          Some(state) => {
+            self.state.insert(x, state.clone());
+          }
+        }
+      }
       &SpineEntry::PushSeal(x) => {
         match self.state.get_mut(&x) {
-          None => panic!("bug"),
+          None => {
+            println!("DEBUG: PushSeal: x={:?} spine env={:?}", x, self);
+            panic!("bug");
+          }
           Some(state) => {
             assert!(state.flag.intro());
             // NB: late/lazy idempotent seal.
@@ -520,7 +575,7 @@ impl Spine {
   pub fn cache_aff(&mut self, x: CellPtr) {
     let sp = self.curp;
     self.curp += 1;
-    let e = SpineEntry::CacheAff(x);
+    let e = SpineEntry::Cache(x);
     self.cur_env.step(sp, &e);
     self.log.push(e);
   }
@@ -553,6 +608,14 @@ impl Spine {
     let sp = self.curp;
     self.curp += 1;
     let e = SpineEntry::YieldInit(x, loc);
+    self.cur_env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn alias(&mut self, x: CellPtr, og: CellPtr) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::Alias(x, og);
     self.cur_env.step(sp, &e);
     self.log.push(e);
   }
@@ -695,7 +758,7 @@ impl Spine {
       &SpineEntry::OIntro(_x, _og) => {
         // FIXME FIXME
       }
-      &SpineEntry::CacheAff(x) => {
+      &SpineEntry::Cache(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
@@ -794,12 +857,13 @@ impl Spine {
                         println!("DEBUG: Spine::_step: YieldSet:   wrong type");
                       }
                       Some(v) => {
-                        println!("DEBUG: Spine::_step: YieldSet:   value={:?}", v);
+                        println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v);
                       }
                     }
                   }
-                  &SpineResume::PutMemF(k, f) => {
-                    unimplemented!();
+                  &SpineResume::PutMemF(k, _f) => {
+                    println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k);
+                    // TODO
                   }
                 }
               }
@@ -810,40 +874,44 @@ impl Spine {
         }
         if Some(ctlp) == retp {
           println!("DEBUG: Spine::_step: YieldSet:   ...resume");
-          // FIXME FIXME
-          panic!();
-          /*
           let xclk = match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
               assert!(!e.state().flag.intro());
               assert!(!e.state().flag.seal());
-              assert_eq!(e.state().clk.ctr(), self.ctr);
+              // FIXME: concise condition.
+              //assert_eq!(e.state().clk.ctr(), self.ctr);
+              assert!(e.state().clk.ctr().is_nil() || e.state().clk.ctr() == self.ctr);
               assert_eq!(e.state().clk.up, 0);
               // FIXME
-              let next_clk = e.state().clk.update();
-              e.state().mode = CellMode::Init;
+              println!("DEBUG: Spine::_step: YieldSet:   prev clk={:?}", e.state().clk);
+              /*let next_clk = e.state().clk.update();*/
+              let base_clk: Clock = self.ctr.into();
+              println!("DEBUG: Spine::_step: YieldSet:   base clk={:?}", base_clk);
+              let next_clk = base_clk.update();
+              println!("DEBUG: Spine::_step: YieldSet:   next clk={:?}", next_clk);
+              e.state().mode = CellMode::Aff;
               e.state().flag.set_intro();
               e.state().clk = next_clk;
               next_clk
             }
           };
-          match env.pwrite_ref(x) {
+          match env.pwrite_ref(x, xclk) {
             None => panic!("bug"),
             Some(e) => {
               match e.cel_ {
-                &Cell_::Phy(_, ref clo, ref cel_) => {
+                &mut Cell_::Phy(_, ref clo, ref mut cel_) => {
                   match (loc, &item) {
                     (Locus::Mem, &SpineResume::PutMemV(_, _val)) => {
+                      // FIXME FIXME
                       unimplemented!();
                     }
                     (Locus::Mem, &SpineResume::PutMemF(_, fun)) => {
-                      match cel_.write_mem(x, xclk) {
-                        None => panic!("bug"),
-                        Some(icel) => {
-                          (fun)(icel.as_reg());
-                        }
-                      }
+                      let (pm, addr) = cel_.get_loc(xclk, Locus::Mem, &e.ty);
+                      TL_PCTX.with(|pctx| {
+                        let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                        (fun)(e.ty.clone(), icel.as_mem_reg().unwrap());
+                      });
                     }
                     _ => {
                       unimplemented!();
@@ -856,7 +924,6 @@ impl Spine {
               }
             }
           }
-          */
         } else {
           println!("DEBUG: Spine::_step: YieldSet:   yield...");
           ret = SpineRet::Yield_(());
@@ -1140,7 +1207,7 @@ impl Backward {
       let e = &spine.log[idx];
       match e {
         // FIXME FIXME: other cases.
-        &SpineEntry::CacheAff(..) => {
+        &SpineEntry::Cache(..) => {
           unimplemented!();
         }
         &SpineEntry::ICacheMux(..) => {
@@ -1405,7 +1472,7 @@ impl DrySpine {
     while self.ctlp < self.hltp {
       // FIXME
       match &self.log[0][self.ctlp as usize] {
-        &SpineEntry::CacheAff(x) => {
+        &SpineEntry::Cache(x) => {
           unimplemented!();
         }
         &SpineEntry::ICacheMux(x) => {

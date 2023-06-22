@@ -453,6 +453,17 @@ impl FutharkNumFormatter {
       _ => panic!("bug")
     }
   }
+
+  pub fn format_f32_as_dtype(&self, x: f32, dtype: Dtype) -> String {
+    // FIXME FIXME
+    unimplemented!();
+    /*
+    let mut s = String::new();
+    self.ffmt.format_generic_f32(&mut s, x);
+    write!(&mut s, "{}", dtype.to_futhark()).unwrap();
+    s
+    */
+  }
 }
 
 #[derive(Clone)]
@@ -692,12 +703,16 @@ pub fn _to_futhark_entry_out0_type(dim: Dim) -> String {
 
 #[derive(Clone, Copy)]
 pub struct FutharkThunkBuildConfig {
+  // FIXME
+  pub emit_arg_shapes: bool,
   pub emit_out0_shape: bool,
 }
 
 impl Default for FutharkThunkBuildConfig {
   fn default() -> FutharkThunkBuildConfig {
     FutharkThunkBuildConfig{
+      // FIXME
+      emit_arg_shapes: false,
       emit_out0_shape: false,
     }
   }
@@ -707,14 +722,23 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
   pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, mut cfg: FutharkThunkBuildConfig) {
     let mut s = String::new();
     write!(&mut s, "entry kernel").unwrap();
+    if cfg.emit_arg_shapes {
+      for k in 0 .. self.abi.arityin {
+        let nd = self.spec_dim[k as usize].ndim();
+        for d in 0 .. nd {
+          write!(&mut s, " [x_{}_s_{}]", k, d).unwrap();
+        }
+      }
+    }
     if cfg.emit_out0_shape {
       assert_eq!(self.abi.arityout, 1);
-      let dim = self.spec_dim[self.abi.arityin as usize];
-      for i in 0 .. dim.ndim {
-        write!(&mut s, " [y_{}_s_{}]", 0, i).unwrap();
+      let nd = self.spec_dim[self.abi.arityin as usize].ndim();
+      for d in 0 .. nd {
+        write!(&mut s, " [y_{}_s_{}]", 0, d).unwrap();
       }
     }
     for k in 0 .. self.abi.arityin {
+      // FIXME FIXME: emit arg shapes.
       let dim = self.spec_dim[k as usize];
       write!(&mut s, " (x_{}: {})", k, _to_futhark_entry_type(dim)).unwrap();
     }
@@ -773,10 +797,24 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     for k in 0 .. self.abi.arityin {
       pats.push(format!("{{%{}}}", k));
       reps.push(format!("x_{}", k));
+      if cfg.emit_arg_shapes {
+        let nd = self.spec_dim[k as usize].ndim();
+        for d in 0 .. nd {
+          pats.push(format!("{{%{}.s[{}]}}", k, d));
+          reps.push(format!("x_{}_s_{}", k, d));
+        }
+      }
     }
     for k in 0 .. self.abi.arityout {
       pats.push(format!("{{%{}}}", self.abi.arityin + k));
       reps.push(format!("y_{}", k));
+      if k == 0 && cfg.emit_out0_shape {
+        let nd = self.spec_dim[self.abi.arityin as usize].ndim();
+        for d in 0 .. nd {
+          pats.push(format!("{{%{}.s[{}]}}", self.abi.arityin + k, d));
+          reps.push(format!("y_{}_s_{}", k, d));
+        }
+      }
     }
     assert_eq!(pats.len(), reps.len());
     let matcher = AhoCorasick::new(&pats).unwrap();
@@ -885,11 +923,9 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
 impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     // FIXME
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(ThunkMode::Apply).is_none() {
       self._try_build(ctr, env, ThunkMode::Apply, FutharkThunkBuildConfig::default());
     }
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(ThunkMode::Apply).is_none() {
       panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
     }
@@ -901,11 +937,9 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let mode = ThunkMode::Apply;
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(mode).is_none() {
       self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
     }
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: build error");
     }
@@ -1029,16 +1063,13 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: val={:?}", out_val);
     }
     ThunkRet::Success
-    //unimplemented!();
   }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let mode = ThunkMode::Accumulate;
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(mode).is_none() {
       self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
     }
-    //if self.object.borrow().is_none() {}
     if self.objects.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: build error");
     }

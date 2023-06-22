@@ -15,6 +15,7 @@ use cacti_gpu_cu_ffi::types::*;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::convert::{TryInto};
+use std::ffi::{c_void};
 use std::rc::{Rc, Weak};
 use std::ptr::{write};
 
@@ -183,7 +184,8 @@ pub struct NvGpuPCtx {
   pub compute:      CudartStream,
   pub copy_to:      CudartStream,
   pub copy_from:    CudartStream,
-  pub mem_pool:     GpuMemPool,
+  pub page_map:     NvGpuPageMap,
+  pub mem_pool:     NvGpuMemPool,
   //pub cel_map:      RefCell<HashMap<GpuInnerRef, Rc<GpuInnerCell>>>,
   //pub cel_map:      RefCell<HashMap<CellPtr, Rc<GpuInnerCell>>>,
   pub cel_map:      RefCell<HashMap<PAddr, Rc<GpuInnerCell>>>,
@@ -231,8 +233,18 @@ impl PCtxImpl for NvGpuPCtx {
     pl.insert((PMach::NvGpu, Locus::Mem), ());
   }
 
-  fn try_alloc(&self, x: CellPtr, sz: usize, /*pmset: PMachSet,*/ locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr> {
-    unimplemented!();
+  //fn try_alloc(&self, x: CellPtr, sz: usize, /*pmset: PMachSet,*/ locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr> {}
+  fn try_alloc(&self, pctr: &PCtxCtr, /*pmset: PMachSet,*/ locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr> {
+    let sz = ty.packed_span_bytes() as usize;
+    match locus {
+      Locus::Mem => {
+        let mem = NvGpuMemCell::try_alloc(sz)?;
+        let addr = pctr.fresh_addr();
+        assert!(self.page_map.alloc_map.borrow_mut().insert(addr, Rc::new(mem)).is_none());
+        Ok(addr)
+      }
+      _ => unimplemented!()
+    }
   }
 }
 
@@ -245,7 +257,7 @@ impl NvGpuPCtx {
     n
   }
 
-  pub fn new(dev: i32) -> Option<GpuPCtx> {
+  pub fn new(dev: i32) -> Option<NvGpuPCtx> {
     println!("DEBUG: NvGpuPCtx::new: dev={}", dev);
     if LIBCUDA._inner.is_none() {
       return None;
@@ -263,9 +275,10 @@ impl NvGpuPCtx {
     /*let compute = CudartStream::create().unwrap();
     let copy_to = CudartStream::create().unwrap();
     let copy_from = CudartStream::create().unwrap();*/
-    let mem_pool = GpuMemPool::new(dev);
+    let page_map = NvGpuPageMap::new();
+    let mem_pool = NvGpuMemPool::new(dev);
     let cel_map = RefCell::new(HashMap::default());
-    Some(GpuPCtx{
+    Some(NvGpuPCtx{
       //iref_ctr:     Cell::new(0),
       //dev,
       pctx,
@@ -274,6 +287,7 @@ impl NvGpuPCtx {
       compute,
       copy_to,
       copy_from,
+      page_map,
       mem_pool,
       cel_map,
       // TODO
@@ -407,6 +421,83 @@ impl NvGpuPCtx {
       Some(icel) => Some(icel.clone())
     }
   }
+
+  pub fn lookup2(&self, x: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+    match self.cel_map.borrow().get(&x) {
+      None => {}
+      Some(icel) => {
+        return Some((Locus::VMem, icel.clone()));
+      }
+    }
+    match self.page_map.alloc_map.borrow().get(&x) {
+      None => {}
+      Some(icel) => {
+        return Some((Locus::Mem, icel.clone()));
+      }
+    }
+    None
+  }
+}
+
+#[repr(C)]
+pub struct NvGpuMemCell {
+  pub ptr:  *mut c_void,
+  pub sz:   usize,
+}
+
+impl Drop for NvGpuMemCell {
+  fn drop(&mut self) {
+    if self.ptr.is_null() {
+      return;
+    }
+    unsafe {
+      match cuda_mem_free_host(self.ptr) {
+        Ok(_) => {}
+        Err(CUDA_ERROR_DEINITIALIZED) => {}
+        Err(_) => panic!("bug"),
+      }
+    }
+  }
+}
+
+impl NvGpuMemCell {
+  pub fn try_alloc(sz: usize) -> Result<NvGpuMemCell, PMemErr> {
+    let ptr = match cuda_mem_alloc_host(sz) {
+      Err(CUDA_ERROR_OUT_OF_MEMORY) => {
+        return Err(PMemErr::Oom);
+      }
+      Err(_) => {
+        return Err(PMemErr::Bot);
+      }
+      Ok(ptr) => ptr
+    };
+    if ptr.is_null() {
+      return Err(PMemErr::Bot);
+    }
+    println!("DEBUG: NvGpuMemCell::try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz);
+    Ok(NvGpuMemCell{ptr, sz})
+  }
+}
+
+impl InnerCell for NvGpuMemCell {
+  fn as_mem_reg(&self) -> Option<MemReg> {
+    Some(MemReg{ptr: self.ptr, sz: self.sz})
+  }
+}
+
+pub struct NvGpuPageMap {
+  pub alloc_map:    RefCell<HashMap<PAddr, Rc<NvGpuMemCell>>>,
+}
+
+impl NvGpuPageMap {
+  pub fn new() -> NvGpuPageMap {
+    NvGpuPageMap{
+      alloc_map:    RefCell::new(HashMap::new()),
+    }
+  }
+
+  /*pub fn try_alloc(&mut self, sz: usize) -> Result<PAddr, PMemErr> {
+  }*/
 }
 
 #[derive(Clone)]
@@ -428,7 +519,9 @@ impl GpuInnerMemCell {
   }
 }
 
-pub struct GpuMemPool {
+pub type GpuMemPool = NvGpuMemPool;
+
+pub struct NvGpuMemPool {
   pub dev:          i32,
   pub reserve_base: u64,
   pub reserve_sz:   usize,

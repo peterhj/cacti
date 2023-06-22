@@ -362,7 +362,7 @@ impl<K> AsRef<K> for SortKey8<K> {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SortMap8<K, V> {
   pub buf:  Vec<(K, V)>,
 }
@@ -423,7 +423,7 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
     for (i, (k, v)) in self.buf.iter().enumerate() {
       if &key == k {
         assert!(i <= 255);
-        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+        return Some((SortKey8{key: *k, probe: Cell::new(i as u8)}, v));
       }
     }
     None
@@ -434,7 +434,7 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
     for (i, (k, v)) in self.buf.iter_mut().enumerate() {
       if &key == k {
         assert!(i <= 255);
-        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+        return Some((SortKey8{key: *k, probe: Cell::new(i as u8)}, v));
       }
     }
     None
@@ -445,7 +445,7 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
     for (i, (k, v)) in self.buf.iter().enumerate() {
       if &key <= k {
         assert!(i <= 255);
-        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+        return Some((SortKey8{key: *k, probe: Cell::new(i as u8)}, v));
       }
     }
     None
@@ -456,7 +456,7 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
     for (i, (k, v)) in self.buf.iter_mut().enumerate() {
       if &key <= k {
         assert!(i <= 255);
-        return Some((SortKey8{key, probe: Cell::new(i as u8)}, v));
+        return Some((SortKey8{key: *k, probe: Cell::new(i as u8)}, v));
       }
     }
     None

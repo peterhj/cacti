@@ -1,4 +1,4 @@
-pub use half::{f16};
+pub use half::{f16, bf16};
 
 use std::cmp::{Ordering};
 use std::convert::{TryFrom};

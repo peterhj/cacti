@@ -313,6 +313,231 @@ impl FutharkThunkSpec for CastFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CastBf16F16FutThunkSpec;
+
+impl FutharkThunkSpec for CastBf16F16FutThunkSpec {
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].dtype != Dtype::BFloat16 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::Float16})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].dtype != Dtype::BFloat16 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Float16})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match arg[0].ndim() {
+      0 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = f16.f32 (f32.from_bits ((u32.u16 {{%0}}) << 16)) in"),
+                    ],
+        }.into()
+      }
+      1 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = map (\t -> f16.f32 (f32.from_bits ((u32.u16 t) << 16))) {{%0}} in"),
+                    ],
+        }.into()
+      }
+      2 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten {{%0}} in"),
+                        format!("let t1 = map (\t -> f16.f32 (f32.from_bits ((u32.u16 t) << 16))) t0 in"),
+                        format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"),
+                    ],
+        }.into()
+      }
+      3 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_3d {{%0}} in"),
+                        format!("let t1 = map (\t -> f16.f32 (f32.from_bits ((u32.u16 t) << 16))) t0 in"),
+                        format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"),
+                    ],
+        }.into()
+      }
+      4 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_4d {{%0}} in"),
+                        format!("let t1 = map (\t -> f16.f32 (f32.from_bits ((u32.u16 t) << 16))) t0 in"),
+                        format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"),
+                    ],
+        }.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CastBf16F32FutThunkSpec;
+
+impl FutharkThunkSpec for CastBf16F32FutThunkSpec {
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].dtype != Dtype::BFloat16 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::Float32})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].dtype != Dtype::BFloat16 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Float32})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match arg[0].ndim() {
+      0 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = f32.from_bits ((u32.u16 {{%0}}) << 16) in"),
+                    ],
+        }.into()
+      }
+      1 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = map (\t -> f32.from_bits ((u32.u16 t) << 16)) {{%0}} in"),
+                    ],
+        }.into()
+      }
+      2 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten {{%0}} in"),
+                        format!("let t1 = map (\t -> f32.from_bits ((u32.u16 t) << 16)) t0 in"),
+                        format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"),
+                    ],
+        }.into()
+      }
+      3 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_3d {{%0}} in"),
+                        format!("let t1 = map (\t -> f32.from_bits ((u32.u16 t) << 16)) t0 in"),
+                        format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"),
+                    ],
+        }.into()
+      }
+      4 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_4d {{%0}} in"),
+                        format!("let t1 = map (\t -> f32.from_bits ((u32.u16 t) << 16)) t0 in"),
+                        format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"),
+                    ],
+        }.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CastF32Bf16FutThunkSpec;
+
+impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].dtype != Dtype::Float32 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::BFloat16})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].dtype != Dtype::Float32 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::BFloat16})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match arg[0].ndim() {
+      0 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = u16.u32 ((f32.to_bits {{%0}}) >> 16) in"),
+                    ],
+        }.into()
+      }
+      1 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let {{%1}} = map (\t -> u16.u32 ((f32.to_bits t) >> 16)) {{%0}} in"),
+                    ],
+        }.into()
+      }
+      2 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten {{%0}} in"),
+                        format!("let t1 = map (\t -> u16.u32 ((f32.to_bits t) >> 16)) t0 in"),
+                        format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"),
+                    ],
+        }.into()
+      }
+      3 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_3d {{%0}} in"),
+                        format!("let t1 = map (\t -> u16.u32 ((f32.to_bits t) >> 16)) t0 in"),
+                        format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"),
+                    ],
+        }.into()
+      }
+      4 => {
+        FutharkThunkCode{
+          body:     vec![
+                        format!("let t0 = flatten_4d {{%0}} in"),
+                        format!("let t1 = map (\t -> u16.u32 ((f32.to_bits t) >> 16)) t0 in"),
+                        format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"),
+                    ],
+        }.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InnerOneHotFutThunkSpec { pub inner_len: i64, /*pub org_dtype: Dtype,*/ pub new_dtype: Dtype }
 
 impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
@@ -346,11 +571,17 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
     let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let fmt = FutharkNumFormatter::default();
-    match (out.ndim, out.dtype) {
-      (1, Dtype::Float32) => {
+    //match (out.ndim, out.dtype) {}
+    match out.ndim {
+      0 => {
         unimplemented!();
       }
-      (2, Dtype::Float32) => {
+      //(1, Dtype::Float32) => {}
+      1 => {
+        unimplemented!();
+      }
+      //(2, Dtype::Float32) => {}
+      2 => {
         FutharkThunkCode{
           body:     vec![
                         format!("let t_oidx = {{%0}} in"),
@@ -360,12 +591,14 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
                             arg[0].dtype.format_futhark(),
                             self.inner_len,
                         ),
-                        format!("let t_val = replicate {{%0.s[0]}} {} in",
-                            fmt.format(&TotalOrd::from(1.0_f32)),
+                        format!("let t_val = replicate {{%0.s[0]}} 1.0{} in",
+                            //fmt.format(&TotalOrd::from(1.0_f32)),
+                            out.dtype.format_futhark(),
                         ),
-                        format!("let t0 = replicate ({{%0.s[0]}} * {}) {} in",
+                        format!("let t0 = replicate ({{%0.s[0]}} * {}) 0.0{} in",
                             self.inner_len,
-                            fmt.format(&TotalOrd::from(0.0_f32)),
+                            //fmt.format(&TotalOrd::from(0.0_f32)),
+                            out.dtype.format_futhark(),
                         ),
                         format!("let t1 = scatter t0 t_key t_val in"),
                         format!("let {{%1}} = unflatten {{%0.s[0]}} {} t1 in",
@@ -374,7 +607,8 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
                     ],
         }.into()
       }
-      (3, Dtype::Float32) => {
+      //(3, Dtype::Float32) => {}
+      3 => {
         FutharkThunkCode{
           body:     vec![
                         format!("let t_oidx = flatten {{%0}} in"),
@@ -384,12 +618,14 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
                             arg[0].dtype.format_futhark(),
                             self.inner_len,
                         ),
-                        format!("let t_val = replicate ({{%0.s[0]}} * {{%0.s[1]}}) {} in",
-                            fmt.format(&TotalOrd::from(1.0_f32)),
+                        format!("let t_val = replicate ({{%0.s[0]}} * {{%0.s[1]}}) 1.0{} in",
+                            //fmt.format(&TotalOrd::from(1.0_f32)),
+                            out.dtype.format_futhark(),
                         ),
-                        format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {}) {} in",
+                        format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {}) 0.0{} in",
                             self.inner_len,
-                            fmt.format(&TotalOrd::from(0.0_f32)),
+                            //fmt.format(&TotalOrd::from(0.0_f32)),
+                            out.dtype.format_futhark(),
                         ),
                         format!("let t1 = scatter t0 t_key t_val in"),
                         format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {} t1 in",
@@ -398,7 +634,8 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
                     ],
         }.into()
       }
-      (4, Dtype::Float32) => {
+      //(4, Dtype::Float32) => {}
+      4 => {
         unimplemented!();
       }
       _ => unimplemented!()
@@ -1071,7 +1308,17 @@ pub struct DotThunkSpec;*/
 }*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct BlockMulMatrixThunkSpec {
+pub struct BlockLMatrixMulThunkSpec {
+  pub l_block:  [i64; 2],
+  pub lt:       bool,
+  pub rt:       bool,
+  pub l_dtype:  Dtype,
+  pub r_dtype:  Dtype,
+  pub o_dtype:  Dtype,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct BlockMatrixMulThunkSpec {
   //pub l_shape:  [i64; 2],
   //pub r_shape:  [i64; 2],
   pub l_block:  [i64; 2],
@@ -1085,7 +1332,7 @@ pub struct BlockMulMatrixThunkSpec {
   pub o_dtype:  Dtype,
 }
 
-impl ThunkSpec for BlockMulMatrixThunkSpec {
+impl ThunkSpec for BlockMatrixMulThunkSpec {
   fn arity(&self) -> (u16, u16) {
     (2, 1)
   }
@@ -1166,7 +1413,7 @@ impl ThunkSpec for BlockMulMatrixThunkSpec {
   }
 }
 
-pub struct BlockMulMatrixF16F32GpuThunkImpl {
+pub struct BlockMatrixMulF16F32GpuThunkImpl {
   // TODO
   alpha: Cell<f32>,
   beta: Cell<f32>,
@@ -1175,9 +1422,9 @@ pub struct BlockMulMatrixF16F32GpuThunkImpl {
   tmp_c: RefCell<Vec<u64>>,
 }
 
-impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
+impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
-    let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
+    let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
     self.alpha.set(1.0);
     self.beta.set(0.0);
     let mut arg_ty_ = Vec::with_capacity(arg.len());
@@ -1239,7 +1486,7 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_addr = pcel.get(arg[0].1, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(arg[0].1, PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/
@@ -1272,7 +1519,7 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_addr = pcel.get(arg[1].1, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(arg[1].1, PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/
@@ -1307,7 +1554,7 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             /*clo.thunk_.push(th);
             assert_eq!(clo.thunk.len(), oclk.up as usize);*/
-            let pcel_addr = pcel.get(oclk, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(oclk, PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/
@@ -1388,7 +1635,7 @@ impl ThunkImpl for BlockMulMatrixF16F32GpuThunkImpl {
   }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
-    let spec = spec_.as_any().downcast_ref::<BlockMulMatrixThunkSpec>().unwrap();
+    let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
     self.alpha.set(1.0);
     self.beta.set(1.0);
     unimplemented!();

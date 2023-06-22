@@ -37,7 +37,7 @@ fn main() {
         i,
         t.tensor_type.clone()
           .and_then(|t| Dtype::try_from(t))
-          .map_err(|s| sane_ascii(&s)),
+          .map_err(|s| sane_ascii(s.as_str())),
         &t.shape,
         &t.stride,
         sane_ascii(&t.name),

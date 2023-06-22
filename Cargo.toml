@@ -36,6 +36,7 @@ cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 futhark_ffi = { path = "../futhark_ffi" }
 futhark_syntax = { path = "../futhark_syntax" }
+glob = { path = "../glob" }
 half = { path = "../half" }
 home = { path = "../home" }
 libc = { path = "../libc" }
@@ -45,6 +46,7 @@ repugnant_pickle = { path = "../repugnant_pickle" }
 rustc_serialize = { path = "../rustc_serialize" }
 #ryu = { path = "../ryu" }
 safetensor_serialize = { path = "../safetensor_serialize" }
+smol_str = { path = "../smol_str", default-features = false }
 
 [dev-dependencies]
 dessert = { path = "../dessert" }
@@ -56,3 +58,7 @@ path = "tools/inspect_pth.rs"
 [[bin]]
 name = "boot"
 path = "tools/boot.rs"
+
+[[bin]]
+name = "boot_array"
+path = "tools/boot_array.rs"

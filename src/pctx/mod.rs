@@ -1,7 +1,7 @@
 use self::nvgpu::{NvGpuPCtx};
 use self::smp::{SmpPCtx};
 use crate::algo::{RevSortMap8};
-use crate::cell::{CellPtr, InnerCell, InnerCell_};
+use crate::cell::{CellPtr, CellType, InnerCell, InnerCell_};
 
 use std::cell::{Cell, RefCell};
 use std::cmp::{max};
@@ -205,7 +205,7 @@ impl PCtx {
     max_locus
   }
 
-  //pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Weak<dyn InnerCell_>>, PMemErr> {}
+  /*//pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Weak<dyn InnerCell_>>, PMemErr> {}
   pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Rc<dyn InnerCell_>>, PMemErr> {
     match self.lpmatrix.find_lub((locus, PMach::_Top)) {
       None => Ok(None),
@@ -227,6 +227,57 @@ impl PCtx {
         ret
       }
     }
+  }*/
+
+  pub fn alloc_loc(&self, locus: Locus, ty: &CellType) -> (PMach, PAddr) {
+    match self.lpmatrix.find_lub((locus, PMach::_Bot)) {
+      None => {
+        panic!("bug: PCtx::alloc_loc: failed to alloc: locus={:?}", locus);
+      }
+      Some((key, _)) => {
+        let pmach = key.key.as_ref().1;
+        match pmach {
+          #[cfg(not(feature = "gpu"))]
+          PMach::NvGpu => {
+            unimplemented!();
+          }
+          #[cfg(feature = "gpu")]
+          PMach::NvGpu => {
+            let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, locus, ty) {
+              Err(e) => panic!("bug: PCtx::alloc_loc: unimplemented error: {:?}", e),
+              Ok(addr) => addr
+            };
+            (PMach::NvGpu, addr)
+          }
+          _ => {
+            println!("DEBUG: {:?}", &self.lpmatrix);
+            println!("DEBUG: {:?}", &self.plmatrix);
+            panic!("bug: PCtx::alloc_loc: unimplemented: locus={:?} pmach={:?}", locus, pmach);
+          }
+        }
+      }
+    }
+  }
+
+  pub fn lookup_pm(&self, pmach: PMach, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+    match pmach {
+      #[cfg(not(feature = "gpu"))]
+      PMach::NvGpu => {
+        unimplemented!();
+      }
+      #[cfg(feature = "gpu")]
+      PMach::NvGpu => {
+        self.nvgpu.as_ref().unwrap().lookup2(addr)
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+
+  pub fn lookup(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+    // FIXME FIXME
+    unimplemented!();
   }
 }
 
@@ -238,5 +289,6 @@ pub trait PCtxImpl {
   fn fastest_locus(&self) -> Locus;
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>);
   //fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<Self::ICel>, PMemErr>;
-  fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
+  //fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
+  fn try_alloc(&self, pctr: &PCtxCtr, locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr>;
 }

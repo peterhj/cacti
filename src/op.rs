@@ -8,40 +8,10 @@ use crate::thunk::op::*;
 
 use futhark_syntax::*;
 
-use std::borrow::{Cow};
+use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
 use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
 use std::rc::{Rc};
-
-/*impl<P: Into<CellPtr> + Sized> Add<P> for f32 {
-  type Output = CellPtr;
-
-  fn add(self, rhs: P) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = AddScalarF32ThunkOp{scalar: self};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(rhs.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }
-}*/
-
-/*impl<P: Into<CellPtr> + Sized> Add<f32> for P {
-  type Output = CellPtr;
-
-  fn add(self, rhs: f32) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = AddScalarF32ThunkOp{scalar: rhs};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }
-}*/
 
 impl AddAssign<f32> for CellPtr {
   #[track_caller]
@@ -57,7 +27,7 @@ impl AddAssign<f32> for CellPtr {
   }
 }
 
-impl<'p> Add<f32> for &'p CellPtr {
+impl<'l> Add<f32> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
@@ -81,6 +51,15 @@ impl Add<f32> for CellPtr {
   }
 }
 
+impl<'l> Add<f32> for &'l StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: f32) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
+  }
+}
+
 impl Add<f32> for StableCell {
   type Output = CellPtr;
 
@@ -90,11 +69,10 @@ impl Add<f32> for StableCell {
   }
 }
 
-/*impl<P: Into<CellPtr> + Sized, Q: Into<CellPtr> + Sized> Add<Q> for P {
+impl<'l, R: Borrow<CellPtr>> Add<R> for &'l CellPtr {
   type Output = CellPtr;
 
-  fn add(self, rhs: Q) -> CellPtr {
-    unimplemented!();
+  fn add(self, rhs: R) -> CellPtr {
     /*
     let p = self.into();
     let q = rhs.into();
@@ -105,58 +83,41 @@ impl Add<f32> for StableCell {
     //ctx_push_cell_out(_);
     ctx_pop_thunk(op)
     */
-  }
-}*/
-
-impl<'p, Q: Into<CellPtr>> Add<Q> for &'p CellPtr {
-  type Output = CellPtr;
-
-  fn add(self, rhs: Q) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = self.into();
-    let q = rhs.into();
-    let op = AddThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = AddFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 }
 
-/*impl<P: Into<CellPtr> + Sized> Mul<P> for f32 {
+impl<R: Borrow<CellPtr>> Add<R> for CellPtr {
   type Output = CellPtr;
 
-  fn mul(self, rhs: P) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = MulScalarF32ThunkOp{scalar: self};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(rhs.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+  fn add(self, rhs: R) -> CellPtr {
+    panick_wrap(|| (&self).add(rhs))
   }
-}*/
+}
 
-/*impl<P: Into<CellPtr> + Sized> Mul<f32> for P {
+impl<'l, R: Borrow<CellPtr>> Add<R> for &'l StableCell {
   type Output = CellPtr;
 
-  fn mul(self, rhs: f32) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = MulScalarF32ThunkOp{scalar: rhs};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+  fn add(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
   }
-}*/
+}
 
-impl<'p> Mul<f32> for &'p CellPtr {
+impl<R: Borrow<CellPtr>> Add<R> for StableCell {
+  type Output = CellPtr;
+
+  fn add(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
+  }
+}
+
+impl<'l> Mul<f32> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
@@ -181,58 +142,43 @@ impl Mul<f32> for CellPtr {
   }
 }
 
-impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p CellPtr {
+impl<'l, R: Borrow<CellPtr>> Mul<R> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
-  fn mul(self, rhs: Q) -> CellPtr {
+  fn mul(self, rhs: R) -> CellPtr {
     unimplemented!();
   }
 }
 
-impl<Q: AsRef<CellPtr>> Mul<Q> for CellPtr {
+impl<R: Borrow<CellPtr>> Mul<R> for CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
-  fn mul(self, rhs: Q) -> CellPtr {
+  fn mul(self, rhs: R) -> CellPtr {
     panick_wrap(|| (&self).mul(rhs))
   }
 }
 
-impl<'p, Q: AsRef<CellPtr>> Mul<Q> for &'p StableCell {
+impl<'l, R: Borrow<CellPtr>> Mul<R> for &'l StableCell {
   type Output = CellPtr;
 
   #[track_caller]
-  fn mul(self, rhs: Q) -> CellPtr {
+  fn mul(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().mul(rhs))
   }
 }
 
-impl<Q: AsRef<CellPtr>> Mul<Q> for StableCell {
+impl<R: Borrow<CellPtr>> Mul<R> for StableCell {
   type Output = CellPtr;
 
   #[track_caller]
-  fn mul(self, rhs: Q) -> CellPtr {
+  fn mul(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().mul(rhs))
   }
 }
 
-/*impl<P: Into<CellPtr> + Sized> Div<f32> for P {
-  type Output = CellPtr;
-
-  fn div(self, rhs: f32) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = DivScalarF32ThunkOp{scalar: rhs};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }
-}*/
-
-impl<'p> Div<f32> for &'p CellPtr {
+impl<'l> Div<f32> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
@@ -256,29 +202,11 @@ impl Div<f32> for CellPtr {
   }
 }
 
-/*impl<P: Into<CellPtr> + Sized, Q: Into<CellPtr> + Sized> Div<Q> for P {
-  type Output = CellPtr;
-
-  fn div(self, rhs: Q) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = self.into();
-    let q = rhs.into();
-    let op = DivThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }
-}*/
-
-impl<'p, Q: Into<CellPtr>> Div<Q> for &'p CellPtr {
+impl<'l, R: Borrow<CellPtr>> Div<R> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
-  fn div(self, rhs: Q) -> CellPtr {
+  fn div(self, rhs: R) -> CellPtr {
     unimplemented!();
     /*
     let p = self.into();
@@ -293,9 +221,18 @@ impl<'p, Q: Into<CellPtr>> Div<Q> for &'p CellPtr {
   }
 }
 
-pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
+impl<R: Borrow<CellPtr>> Div<R> for CellPtr {
+  type Output = CellPtr;
+
   #[track_caller]
-  fn pow(self, rhs: Q) -> CellPtr {
+  fn div(self, rhs: R) -> CellPtr {
+    panick_wrap(|| (&self).div(rhs))
+  }
+}
+
+pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
+  #[track_caller]
+  fn pow(&self, rhs: R) -> CellPtr {
     unimplemented!();
   }
 
@@ -311,24 +248,61 @@ pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
     ctx_pop_thunk(op)
   }*/
 
-  #[track_caller]
-  fn mm(self, lt: bool, rhs: Q, rt: bool) -> CellPtr {
+  /*#[track_caller]
+  fn mm(&self, lt: bool, rhs: R, rt: bool) -> CellPtr {
     unimplemented!();
-  }
+  }*/
+
+  /*#[track_caller]
+  fn blockl_mm(&self, l_block: [i64; 2], lt: bool, rhs: R, rt: bool) -> CellPtr {
+    panick_wrap(|| {
+      unimplemented!();
+      // FIXME FIXME
+      /*
+      let o_dtype = p_ty.dtype.max(q_ty.dtype).unwrap();
+      let op = BlockLMatrixMulThunkSpec{
+        l_block,
+        lt,
+        rt,
+        l_dtype: p_ty.dtype,
+        r_dtype: q_ty.dtype,
+        o_dtype,
+      };
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(p);
+      ctx_push_cell_arg(q);
+      ctx_pop_thunk(op)
+      */
+    })
+  }*/
 
   #[track_caller]
-  fn block_mm(self, l_block: [i64; 2], lt: bool, rhs: Q, r_block: [i64; 2], rt: bool) -> CellPtr {
+  fn block_mm(&self, l_block: [i64; 2], lt: bool, rhs: R, r_block: [i64; 2], rt: bool) -> CellPtr {
     panick_wrap(|| {
-      let p = self.into();
-      let q = rhs.into();
+      let p = *self.borrow();
+      let q = *rhs.borrow();
       let p_ty = ctx_lookup_type(p);
       let q_ty = ctx_lookup_type(q);
+      //println!("DEBUG: block_mm: l_ty={:?} r_ty={:?}", p_ty, q_ty);
+      //println!("DEBUG: block_mm: lblk={:?} rblk={:?}", l_block, r_block);
       assert_eq!(p_ty.ndim(), 2);
       assert_eq!(q_ty.ndim(), 2);
       assert_eq!(p_ty.shape[0] % l_block[0], 0);
       assert_eq!(p_ty.shape[1] % l_block[1], 0);
       assert_eq!(q_ty.shape[0] % r_block[0], 0);
       assert_eq!(q_ty.shape[1] % r_block[1], 0);
+      let l_nrow = p_ty.shape[0] / l_block[0];
+      let l_ncol = p_ty.shape[1] / l_block[1];
+      let r_nrow = q_ty.shape[0] / r_block[0];
+      let r_ncol = q_ty.shape[1] / r_block[1];
+      let (l_nrow_t, l_ncol_t) = if lt { (l_ncol, l_nrow) } else { (l_nrow, l_ncol) };
+      let (r_nrow_t, r_ncol_t) = if rt { (r_ncol, r_nrow) } else { (r_nrow, r_ncol) };
+      if !(l_nrow_t == r_nrow_t || l_nrow_t == 1 || r_nrow_t == 1) ||
+         !(l_ncol_t == r_ncol_t || l_ncol_t == 1 || r_ncol_t == 1)
+      {
+        panic!("ERROR: block_mm: incompatible shapes or blocks: {:?} {:?} x {:?} {:?}",
+            &p_ty.shape, l_block, &q_ty.shape, r_block);
+      }
       let (_m, _n) = match (lt, rt) {
         (false, false) => {
           assert_eq!(p_ty.shape[1], q_ty.shape[0]);
@@ -347,12 +321,13 @@ pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
           (p_ty.shape[1], q_ty.shape[0])
         }
       };
-      //let l_nrow = p_ty.shape[0] / l_block[0];
-      //let l_ncol = p_ty.shape[1] / l_block[1];
-      //let r_nrow = q_ty.shape[0] / r_block[0];
-      //let r_ncol = q_ty.shape[1] / r_block[1];
-      let o_dtype = p_ty.dtype.max(q_ty.dtype).unwrap();
-      let op = BlockMulMatrixThunkSpec{
+      let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
+        None => {
+          panic!("ERROR: block_mm: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
+        }
+        Some(dty) => dty
+      };
+      let op = BlockMatrixMulThunkSpec{
         //l_shape: [p_ty.shape[0], p_ty.shape[1]],
         //r_shape: [q_ty.shape[0], q_ty.shape[1]],
         l_block,
@@ -373,79 +348,79 @@ pub trait MathBinaryOps<Q: Into<CellPtr>>: Into<CellPtr> {
   }
 }
 
-impl<P: Into<CellPtr>, Q: Into<CellPtr>> MathBinaryOps<Q> for P {}
+impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> MathBinaryOps<R> for L {}
 
-pub trait MathUnaryOps: Into<CellPtr> {
+pub trait MathUnaryOps: Borrow<CellPtr> {
   #[track_caller]
-  fn sqrt(self) -> CellPtr {
+  fn sqrt(&self) -> CellPtr {
     panick_wrap(|| {
       let op = SqrtFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn rsqrt(self) -> CellPtr {
+  fn rsqrt(&self) -> CellPtr {
     panick_wrap(|| {
       let op = RsqrtFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn cos(self) -> CellPtr {
+  fn cos(&self) -> CellPtr {
     panick_wrap(|| {
       let op = CosFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn sin(self) -> CellPtr {
+  fn sin(&self) -> CellPtr {
     panick_wrap(|| {
       let op = SinFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn exp(self) -> CellPtr {
+  fn exp(&self) -> CellPtr {
     panick_wrap(|| {
       let op = ExpFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn tanh(self) -> CellPtr {
+  fn tanh(&self) -> CellPtr {
     panick_wrap(|| {
       let op = TanhFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
+      ctx_push_cell_arg(*self.borrow());
       /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
 
   #[track_caller]
-  fn powi(self, exp: i64) -> CellPtr {
+  fn powi(&self, exp: i64) -> CellPtr {
     panick_wrap(|| {
-      let p = self.into();
+      let p = *self.borrow();
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(p);
       /*ctx_push_cell_tmp_out();*/
@@ -461,10 +436,10 @@ pub trait MathUnaryOps: Into<CellPtr> {
   }
 
   #[track_caller]
-  fn inner_max(self) -> CellPtr {
+  fn inner_max(&self) -> CellPtr {
     unimplemented!();
     /*
-    let p = self.into();
+    let p = *self.borrow();
     let ty = ctx_lookup_type(p);
     match ty.shape.len() {
       3 => {
@@ -480,10 +455,10 @@ pub trait MathUnaryOps: Into<CellPtr> {
   }
 
   #[track_caller]
-  fn inner_mean(self) -> CellPtr {
+  fn inner_mean(&self) -> CellPtr {
     unimplemented!();
     /*
-    let p = self.into();
+    let p = *self.borrow();
     let ty = ctx_lookup_type(p);
     match ty.shape.len() {
       3 => {
@@ -499,10 +474,10 @@ pub trait MathUnaryOps: Into<CellPtr> {
   }
 
   #[track_caller]
-  fn inner_sum(self) -> CellPtr {
+  fn inner_sum(&self) -> CellPtr {
     unimplemented!();
     /*
-    let p = self.into();
+    let p = *self.borrow();
     let ty = ctx_lookup_type(p);
     match ty.shape.len() {
       3 => {
@@ -540,14 +515,14 @@ pub trait MathUnaryOps: Into<CellPtr> {
   }*/
 
   #[track_caller]
-  fn inner_softmax(self) -> CellPtr {
+  fn inner_softmax(&self) -> CellPtr {
     unimplemented!();
   }
 
   #[track_caller]
-  fn flat_sum(self) -> CellPtr {
+  fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
-      let p = self.into();
+      let p = *self.borrow();
       let ty_ = ctx_lookup_type(p);
       match ty_.ndim() {
         0 => p,
@@ -581,7 +556,7 @@ pub trait MathUnaryOps: Into<CellPtr> {
   }
 }
 
-impl<P: Into<CellPtr>> MathUnaryOps for P {}
+impl<P: Borrow<CellPtr>> MathUnaryOps for P {}
 
 pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   unimplemented!();
@@ -591,7 +566,7 @@ pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   unimplemented!();
 }
 
-pub trait CastOps: AsRef<CellPtr> {
+pub trait CastOps: Borrow<CellPtr> {
   /*fn upcast_f32(self) -> CellPtr {
     unimplemented!();
   }
@@ -603,7 +578,7 @@ pub trait CastOps: AsRef<CellPtr> {
   #[track_caller]
   fn cast(&self, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
-      let x = *self.as_ref();
+      let x = *self.borrow();
       let org_dtype = ctx_lookup_dtype(x);
       if org_dtype == new_dtype {
         return x;
@@ -616,40 +591,58 @@ pub trait CastOps: AsRef<CellPtr> {
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
+        (Dtype::Float32, Dtype::BFloat16) => {
+          let op = CastF32Bf16FutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
+        (Dtype::BFloat16, Dtype::Float16) => {
+          let op = CastBf16F16FutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
+        (Dtype::BFloat16, Dtype::Float32) => {
+          let op = CastBf16F32FutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
         _ => unimplemented!()
       }
     })
   }
 }
 
-impl<P: AsRef<CellPtr>> CastOps for P {}
+impl<L: Borrow<CellPtr>> CastOps for L {}
 
-pub trait GradOps<Q: AsRef<CellPtr>>: AsRef<CellPtr> {
+pub trait GradOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
-  fn grad(&self, x: Q) -> CellPtr { self.gradr(x) }
+  fn grad(&self, x: R) -> CellPtr { self.gradr(x) }
 
   #[track_caller]
-  fn gradr(&self, x: Q) -> CellPtr {
+  fn gradr(&self, x: R) -> CellPtr {
     // FIXME FIXME
     //ctx_lookup_or_insert_gradr(self.into(), x.into())
     unimplemented!();
   }
 
   #[track_caller]
-  fn gradl(&self, y: Q) -> CellPtr {
+  fn gradl(&self, y: R) -> CellPtr {
     // FIXME FIXME
     //ctx_lookup_or_insert_gradl(self.into(), tg.into())
     unimplemented!();
   }
 }
 
-impl<P: AsRef<CellPtr>, Q: AsRef<CellPtr>> GradOps<Q> for P {}
+impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> GradOps<R> for L {}
 
-pub trait ArrayOps: AsRef<CellPtr> + Sized {
+pub trait ArrayOps: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn type_(&self) -> CellType {
     panick_wrap(|| {
-      ctx_lookup_type(*self.as_ref())
+      ctx_lookup_type(*self.borrow())
     })
   }
 
@@ -663,26 +656,26 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
   #[track_caller]
   fn dtype(&self) -> Dtype {
     panick_wrap(|| {
-      ctx_lookup_dtype(*self.as_ref())
+      ctx_lookup_dtype(*self.borrow())
     })
   }
 
   #[track_caller]
   fn bit_alias(&self, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
-      ctx_alias_bits(*self.as_ref(), new_dtype)
+      ctx_alias_bits(*self.borrow(), new_dtype)
     })
   }
 
   #[track_caller]
-  fn new_shape(&self, new_shape: Vec<i64>) -> CellPtr {
+  fn new_shape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr {
     panick_wrap(|| {
-      ctx_alias_new_shape(*self.as_ref(), new_shape)
+      ctx_alias_new_shape(*self.borrow(), new_shape.into())
     })
   }
 
   #[track_caller]
-  fn reshape(&self, new_shape: Vec<i64>) -> CellPtr { self.new_shape(new_shape) }
+  fn reshape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
 
   #[track_caller]
   fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
@@ -690,7 +683,7 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
       if !(inner_len > 0) {
         panic!("ERROR: inner_one_hot: invalid parameter: expected inner_len > 0, actual {:?}", inner_len);
       }
-      let x = *self.as_ref();
+      let x = *self.borrow();
       let org_dtype = ctx_lookup_dtype(x);
       if !org_dtype.is_uint() {
         panic!("ERROR: inner_one_hot: invalid argument: expected dtype uint, actual {:?}", org_dtype);
@@ -703,9 +696,9 @@ pub trait ArrayOps: AsRef<CellPtr> + Sized {
   }
 }
 
-impl<P: AsRef<CellPtr> + Sized> ArrayOps for P {}
+impl<L: Borrow<CellPtr> + Sized> ArrayOps for L {}
 
-pub trait CtlOps: AsRef<CellPtr> + Sized {
+pub trait CtlOps: Borrow<CellPtr> + Sized {
   /*
   #[track_caller]
   fn yield_(self) -> CellPtr {
@@ -732,7 +725,7 @@ pub trait CtlOps: AsRef<CellPtr> + Sized {
 
   #[track_caller]
   fn opaque(self) -> CellPtr {
-    panick_wrap(|| ctx_opaque(*self.as_ref()))
+    panick_wrap(|| ctx_opaque(*self.borrow()))
   }
 
   #[track_caller]
@@ -741,9 +734,9 @@ pub trait CtlOps: AsRef<CellPtr> + Sized {
   }
 }
 
-impl<P: AsRef<CellPtr> + Sized> CtlOps for P {}
+impl<L: Borrow<CellPtr> + Sized> CtlOps for L {}
 
-pub trait Ops: AsRef<CellPtr> + Sized {
+pub trait Ops: Borrow<CellPtr> + Sized {
   /*fn bar(self) -> Self {
     unimplemented!();
   }*/
@@ -768,31 +761,31 @@ pub trait Ops: AsRef<CellPtr> + Sized {
 
   #[track_caller]
   fn apply_futhark(&self, lam_src: Cow<'static, str>) -> CellPtr {
-    apply_futhark(lam_src, &[self.as_ref()])
+    apply_futhark(lam_src, &[self.borrow()])
   }
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
   #[track_caller]
-  fn cache(self) -> Self {
+  fn cache(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
-      spine.cache_aff(*self.as_ref());
-      self
+      spine.cache_aff(*self.borrow());
+      //self
     }))
   }
 
   #[track_caller]
-  fn init_cache(self) -> Self {
+  fn init_cache(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
-      spine.init_cache_mux(*self.as_ref());
-      self
+      spine.init_cache_mux(*self.borrow());
+      //self
     }))
   }
 
   #[track_caller]
-  fn cache_init(self) -> Self { self.init_cache() }
+  fn cache_init(&self) /*-> Self */{ self.init_cache() }
 
   /*fn cache_init_futhark(self, fut_str: &str) -> Self {
     // TODO: ???
@@ -813,7 +806,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   fn unsafe_unseal_init(self) -> Self {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
-      spine.unseal_mux(*self.as_ref());
+      spine.unseal_mux(*self.borrow());
       self
     }))
   }
@@ -830,7 +823,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   fn mem_set_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
-      spine.yield_set(*self.as_ref(), Locus::Mem);
+      spine.yield_set(*self.borrow(), Locus::Mem);
     }))
   }
 
@@ -843,7 +836,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   fn mem_init_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
-      spine.yield_init(*self.as_ref(), Locus::Mem);
+      spine.yield_init(*self.borrow(), Locus::Mem);
     }))
   }
 
@@ -852,10 +845,10 @@ pub trait Ops: AsRef<CellPtr> + Sized {
     panick_wrap(|| self.mem_init_yield_())
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn eval(self) -> Self {
     panick_wrap(|| {
-      let ret = eval(*self.as_ref());
+      let ret = eval(*self.borrow());
       match ret {
         SpineRet::Bot => panic!("EXCEPTION"),
         _ => {}
@@ -874,7 +867,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
       }
       Ok(self)
     })
-  }
+  }*/
 
   /*#[track_caller]
   fn tag(self, /*_: ???*/) -> Self {
@@ -884,7 +877,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   #[track_caller]
   fn version(&self) -> Clock {
     panick_wrap(|| {
-      ctx_lookup_clk(*self.as_ref())
+      ctx_lookup_clk(*self.borrow())
     })
   }
 
@@ -892,7 +885,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   fn snapshot(&self) -> CellPtr {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut env = ctx.env.borrow_mut();
-      env.snapshot(&ctx.ctr, *self.as_ref())
+      env.snapshot(&ctx.ctr, *self.borrow())
     }))
   }
 
@@ -902,7 +895,7 @@ pub trait Ops: AsRef<CellPtr> + Sized {
   }*/
 }
 
-impl<P: AsRef<CellPtr> + Sized> Ops for P {}
+impl<L: Borrow<CellPtr> + Sized> Ops for L {}
 
 impl MSet {
   #[track_caller]

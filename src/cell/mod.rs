@@ -2,13 +2,16 @@ use crate::algo::{RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
-use crate::pctx::{Locus, PMach, PAddr};
+use crate::pctx::{TL_PCTX, Locus, PMach, PAddr};
 use crate::pctx::smp::{MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::pickle::{TorchDtype};
 
+use smol_str::{SmolStr};
+
 use std::any::{Any};
+use std::borrow::{Borrow};
 use std::cell::{Cell};
 use std::collections::{HashMap};
 use std::convert::{TryFrom, TryInto};
@@ -81,6 +84,7 @@ impl CellPtr {
   }
 }
 
+#[derive(PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct StableCell {
   pub ptr_: CellPtr,
@@ -96,6 +100,18 @@ impl From<CellPtr> for StableCell {
 impl From<f32> for StableCell {
   fn from(value: f32) -> StableCell {
     StableCell::set_scalar(value)
+  }
+}
+
+impl<'a> Borrow<CellPtr> for &'a StableCell {
+  fn borrow(&self) -> &CellPtr {
+    self.as_ptr_ref()
+  }
+}
+
+impl Borrow<CellPtr> for StableCell {
+  fn borrow(&self) -> &CellPtr {
+    self.as_ptr_ref()
   }
 }
 
@@ -267,9 +283,10 @@ pub enum Dtype {
 }
 
 impl TryFrom<TorchDtype> for Dtype {
-  type Error = String;
+  //type Error = String;
+  type Error = SmolStr;
 
-  fn try_from(t: TorchDtype) -> Result<Dtype, String> {
+  fn try_from(t: TorchDtype) -> Result<Dtype, SmolStr> {
     Ok(match t {
       TorchDtype::Float64 => Dtype::Float64,
       TorchDtype::Float32 => Dtype::Float32,
@@ -287,18 +304,38 @@ impl TryFrom<TorchDtype> for Dtype {
   }
 }
 
-impl<'a> TryFrom<&'a str> for Dtype {
-  type Error = String;
+impl TryFrom<SmolStr> for Dtype {
+  //type Error = String;
+  type Error = SmolStr;
 
-  fn try_from(s: &str) -> Result<Dtype, String> {
+  fn try_from(s: SmolStr) -> Result<Dtype, SmolStr> {
+    Dtype::from_str(s.as_str())
+  }
+}
+
+impl TryFrom<String> for Dtype {
+  //type Error = String;
+  type Error = SmolStr;
+
+  fn try_from(s: String) -> Result<Dtype, SmolStr> {
+    Dtype::from_str(s.as_str())
+  }
+}
+
+impl<'a> TryFrom<&'a str> for Dtype {
+  //type Error = String;
+  type Error = SmolStr;
+
+  fn try_from(s: &'a str) -> Result<Dtype, SmolStr> {
     Dtype::from_str(s)
   }
 }
 
 impl FromStr for Dtype {
-  type Err = String;
+  //type Err = String;
+  type Err = SmolStr;
 
-  fn from_str(s: &str) -> Result<Dtype, String> {
+  fn from_str(s: &str) -> Result<Dtype, SmolStr> {
     Ok(match s {
       "f64"     |
       "float64" => Dtype::Float64,
@@ -306,6 +343,7 @@ impl FromStr for Dtype {
       "float32" => Dtype::Float32,
       "f16"     |
       "float16" => Dtype::Float16,
+      "bf16"    |
       "bfloat16" => Dtype::BFloat16,
       "i64"     |
       "int64"   => Dtype::Int64,
@@ -323,12 +361,16 @@ impl FromStr for Dtype {
       "uint16"  => Dtype::UInt16,
       "u8"      |
       "uint8"   => Dtype::UInt8,
-      _ => return Err(s.to_owned())
+      _ => return Err(s.into())
     })
   }
 }
 
 impl Dtype {
+  pub fn top() -> Dtype {
+    Dtype::_Top
+  }
+
   pub fn format_futhark(self) -> &'static str {
     match self {
       Dtype::_Top       => panic!("bug"),
@@ -405,8 +447,11 @@ impl Dtype {
       (_, Dtype::_Top) => Some(Dtype::_Top),
       (Dtype::Float32, Dtype::Float32) |
       (Dtype::Float32, Dtype::Float16) |
-      (Dtype::Float16, Dtype::Float32) => Some(Dtype::Float32),
+      (Dtype::Float32, Dtype::BFloat16) |
+      (Dtype::Float16, Dtype::Float32) |
+      (Dtype::BFloat16, Dtype::Float32) => Some(Dtype::Float32),
       (Dtype::Float16, Dtype::Float16) => Some(Dtype::Float16),
+      (Dtype::BFloat16, Dtype::BFloat16) => Some(Dtype::BFloat16),
       _ => None
     }
   }
@@ -430,6 +475,7 @@ impl DtypeExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Float32 } }
 impl DtypeExt for f64 { fn dtype() -> Dtype { Dtype::Float64 } }
 impl DtypeExt for f32 { fn dtype() -> Dtype { Dtype::Float32 } }
 impl DtypeExt for f16 { fn dtype() -> Dtype { Dtype::Float16 } }
+impl DtypeExt for bf16 { fn dtype() -> Dtype { Dtype::BFloat16 } }
 impl DtypeExt for i64 { fn dtype() -> Dtype { Dtype::Int64 } }
 impl DtypeExt for i32 { fn dtype() -> Dtype { Dtype::Int32 } }
 impl DtypeExt for i16 { fn dtype() -> Dtype { Dtype::Int16 } }
@@ -484,12 +530,12 @@ impl CellType {
   }
 
   pub fn to_dim(&self) -> Dim {
-    assert!(self.dtype != Dtype::_Top, "bug");
+    assert!(self.dtype != Dtype::_Top);
     Dim{ndim: self.ndim(), dtype: self.dtype}
   }
 
   pub fn ndim(&self) -> u8 {
-    assert!(self.dtype != Dtype::_Top, "bug");
+    assert!(self.dtype != Dtype::_Top);
     assert!(self.shape.len() <= u8::max_value() as usize);
     self.shape.len() as u8
   }
@@ -498,20 +544,29 @@ impl CellType {
     self.ndim() == 0
   }
 
+  pub fn packed_span_bytes(&self) -> u64 {
+    let nd = self.ndim() as usize;
+    let mut span = if nd == 0 { 1 } else { self.shape[(nd - 1)] };
+    for d in 1 .. nd {
+      span = self.shape[(nd - 1) - d] * span;
+    }
+    (span * self.dtype.size_bytes() as i64) as u64
+  }
+
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
-    assert!(self.dtype != Dtype::_Top, "bug");
-    assert!(orig.dtype != Dtype::_Top, "bug");
+    assert!(self.dtype != Dtype::_Top);
+    assert!(orig.dtype != Dtype::_Top);
     if &self.shape == &orig.shape {
       return ShapeCompat::Equal;
     }
-    let nd = self.shape.len();
-    let o_nd = orig.shape.len();
+    let nd = self.ndim() as usize;
+    let o_nd = orig.ndim() as usize;
     let mut span = Vec::with_capacity(nd);
     let mut o_span = Vec::with_capacity(o_nd);
     if nd == 0 {
       span.push(1);
     } else {
-      span.push(self.shape[0]);
+      span.push(self.shape[(nd - 1)]);
     }
     for d in 1 .. nd {
       span.push(self.shape[(nd - 1) - d] * span[d - 1]);
@@ -520,12 +575,14 @@ impl CellType {
     if o_nd == 0 {
       o_span.push(1);
     } else {
-      o_span.push(orig.shape[0]);
+      o_span.push(orig.shape[(o_nd - 1)]);
     }
     for d in 1 .. o_nd {
       o_span.push(orig.shape[(o_nd - 1) - d] * o_span[d - 1]);
     }
     o_span.reverse();
+    //println!("DEBUG: CellType:;shape_compat: shape={:?} o_shape={:?}", &self.shape, &orig.shape);
+    //println!("DEBUG: CellType:;shape_compat: span={:?} o_span={:?}", &span, &o_span);
     if span[0] == o_span[0] {
       return ShapeCompat::NewShape;
     } else if span[0] > o_span[0] {
@@ -647,7 +704,7 @@ impl CellMode {
   }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 #[repr(transparent)]
 pub struct CellFlag {
   bits: u8,
@@ -707,7 +764,7 @@ impl CellFlag {
   }*/
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct CellState {
   pub mode: CellMode,
   pub flag: CellFlag,
@@ -715,7 +772,7 @@ pub struct CellState {
 }
 
 pub struct PCellReplica {
-  pub clk:  Clock,
+  pub clk:  Cell<Clock>,
   //pub icel: Option<Weak<dyn InnerCell_>>,
   pub addr: PAddr,
 }
@@ -756,13 +813,13 @@ impl PCell {
       None => {}
       Some(_) => panic!("bug")
     }
-    let rep = PCellReplica{clk, addr};
+    let rep = PCellReplica{clk: Cell::new(clk), addr};
     let key = self.replicas.insert((locus, pmach), rep);
     self.pm_index.insert((pmach, locus), key);
   }
 
   //pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, Clock, &mut Option<Weak<dyn InnerCell_>>)> {}
-  pub fn lookup_replica(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
+  pub fn lookup_loc(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
     //match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {}
     match self.replicas.find_lub((q_locus, PMach::_Bot)) {
       None => None,
@@ -778,7 +835,45 @@ impl PCell {
     }
   }
 
-  pub fn get(&mut self, q_clk: Clock, q_pmach: PMach) -> /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr {
+  pub fn get_loc(&mut self, q_clk: Clock, q_locus: Locus, ty: &CellType) -> (PMach, PAddr) {
+    let q_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        if rep.clk.get() >= q_clk {
+          // FIXME FIXME
+          panic!("bug");
+        } else if rep.clk.get() == q_clk {
+          return (pmach, rep.addr);
+        }
+        Some(pmach)
+      }
+    };
+    if q_pmach.is_none() {
+      let (pmach, addr) = TL_PCTX.with(|pctx| {
+        pctx.alloc_loc(q_locus, ty)
+      });
+      self.push_new_replica(Clock::default(), q_locus, pmach, addr);
+    }
+    match self.lookup_loc(q_locus) {
+      None => panic!("bug"),
+      Some((pmach, rep)) => {
+        // FIXME FIXME: fixup causal ordering by replica copying.
+        println!("DEBUG: PCell::get_loc: pmach={:?} rep clk={:?} q clk={:?} q loc={:?}",
+            pmach, rep.clk.get(), q_clk, q_locus);
+        if q_pmach.is_none() {
+          //assert!(rep.clk.get().is_nil());
+          rep.clk.set(q_clk);
+        }
+        if rep.clk.get() < q_clk {
+          unimplemented!();
+        }
+        assert_eq!(rep.clk.get(), q_clk);
+        (pmach, rep.addr)
+      }
+    }
+  }
+
+  pub fn get_pm(&mut self, q_clk: Clock, q_pmach: PMach) -> (Locus, /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr) {
     match self.pm_index.find_lub((q_pmach, Locus::_Bot)) {
       None => {}
       Some((_, key)) => {
@@ -792,13 +887,17 @@ impl PCell {
             }
           }*/
           let rep = self.replicas.get(key);
-          if rep.clk == q_clk {
-            return rep.addr;
+          if rep.clk.get() == q_clk {
+            return (key.key.as_ref().0, rep.addr);
           }
         }
       }
     }
     // FIXME FIXME: if it doesn't exist, then create it.
+    unimplemented!();
+  }
+
+  pub fn get(&mut self, q_clk: Clock) -> PAddr {
     unimplemented!();
   }
 
@@ -815,13 +914,15 @@ impl PCell {
 
 pub trait InnerCell {
   // FIXME FIXME
-  fn as_reg(&self) -> Option<MemReg> { None }
+  fn as_mem_reg(&self) -> Option<MemReg> { None }
+  fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
 }
 
 pub trait InnerCell_ {
   // FIXME FIXME
   fn as_any(&self) -> &dyn Any;
-  fn as_reg(&self) -> Option<MemReg>;
+  fn as_mem_reg(&self) -> Option<MemReg>;
+  fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
 }
 
 impl<C: InnerCell + Any> InnerCell_ for C {
@@ -829,8 +930,8 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     self
   }
 
-  fn as_reg(&self) -> Option<MemReg> {
-    InnerCell::as_reg(self)
+  fn as_mem_reg(&self) -> Option<MemReg> {
+    InnerCell::as_mem_reg(self)
   }
 }
 
@@ -854,7 +955,7 @@ pub struct MMap {
   pub ptr_: MCellPtr,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum MValue {
   Cell(CellPtr),
   /*Atom(Atom),*/
@@ -873,14 +974,14 @@ impl<'p, P: AsRef<CellPtr>> From<&'p P> for MValueRef<'p> {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MCellSetEntry {
   pub item: MValue,
   pub clk:  Clock,
   pub rev_: Cell<bool>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MCellSet {
   // FIXME
   pub idx:  HashMap<(MValue, Clock), u32>,
@@ -913,7 +1014,7 @@ impl MCellSet {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MCellMapEntry {
   pub key:  MValue,
   pub val:  MValue,
@@ -922,7 +1023,7 @@ pub struct MCellMapEntry {
   pub rev_: Cell<bool>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MCellMap {
   // FIXME
   pub kidx: HashMap<(MValue, Clock), u32>,

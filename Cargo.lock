@@ -29,6 +29,7 @@ dependencies = [
  "dessert",
  "futhark_ffi",
  "futhark_syntax",
+ "glob",
  "half",
  "home",
  "libc",
@@ -36,6 +37,7 @@ dependencies = [
  "repugnant_pickle",
  "rustc_serialize",
  "safetensor_serialize",
+ "smol_str",
 ]
 
 [[package]]
@@ -114,6 +116,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "glob"
+version = "0.3.1"
+
+[[package]]
 name = "half"
 version = "3.0.0-dev"
 dependencies = [
@@ -165,6 +171,7 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "nom",
+ "smol_str",
  "zip",
 ]
 

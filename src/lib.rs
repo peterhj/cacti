@@ -6,12 +6,14 @@ extern crate cacti_gpu_cu_ffi;
 extern crate cacti_smp_c_ffi;
 extern crate futhark_ffi;
 extern crate futhark_syntax;
+extern crate glob;
 extern crate half;
 extern crate home;
 extern crate libc;
 extern crate once_cell;
 extern crate repugnant_pickle;
 extern crate safetensor_serialize;
+extern crate smol_str;
 
 pub use crate::prelude::*;
 

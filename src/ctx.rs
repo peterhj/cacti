@@ -10,6 +10,7 @@ use futhark_syntax::{Token as FutToken};
 use futhark_syntax::re::{ReTrie};
 
 use std::any::{Any};
+use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell, Ref, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::mem::{swap};
@@ -150,23 +151,23 @@ pub fn resume() -> SpineRet {
 }
 
 #[track_caller]
-pub fn resume_put_mem_val<K: AsRef<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
+pub fn resume_put_mem_val<K: Borrow<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemV(*key.as_ref(), val))
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemV(*key.borrow(), val))
   }))
 }
 
 #[track_caller]
-pub fn resume_put_mem_fun<K: AsRef<CellPtr>, F: Fn(MemReg)>(key: K, fun: &F) -> SpineRet {
+pub fn resume_put_mem_fun<K: Borrow<CellPtr>, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
     // FIXME FIXME
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(*key.as_ref(), fun as _))
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(*key.borrow(), &fun as _))
   }))
 }
 
@@ -354,10 +355,14 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
     match env.lookup_ref(og) {
       None => panic!("bug"),
       Some(e) => {
-        assert_eq!(new_dtype.size_bytes(), e.ty.dtype.size_bytes());
+        if new_dtype.size_bytes() != e.ty.dtype.size_bytes() {
+          panic!("ERROR");
+        }
         let new_ty = CellType{dtype: new_dtype, shape: e.ty.shape.clone()};
         let x = ctx.ctr.fresh_cel();
         env.insert_alias(x, new_ty, og);
+        let mut spine = ctx.spine.borrow_mut();
+        spine.alias(x, og);
         x
       }
     }
@@ -370,11 +375,17 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
     match env.lookup_ref(og) {
       None => panic!("bug"),
       Some(e) => {
-        let new_ty = CellType{dtype: e.ty.dtype, shape: new_shape};
+        let new_ty = CellType{shape: new_shape, dtype: e.ty.dtype};
         let cmp = new_ty.shape_compat(&e.ty);
-        assert!(cmp == ShapeCompat::Equal || cmp == ShapeCompat::NewShape);
+        if !(cmp == ShapeCompat::Equal || cmp == ShapeCompat::NewShape) {
+          println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} new shape={:?}", og, &e.ty.shape, &new_ty.shape);
+          println!("DEBUG: ctx_alias_new_shape:   compat={:?}", cmp);
+          panic!("ERROR");
+        }
         let x = ctx.ctr.fresh_cel();
         env.insert_alias(x, new_ty, og);
+        let mut spine = ctx.spine.borrow_mut();
+        spine.alias(x, og);
         x
       }
     }
@@ -1389,10 +1400,27 @@ impl CtxEnv {
       None => panic!("bug"),
       Some(e) => {
         match &e.cel_ {
-          &Cell_::Top(.., optr) => {
+          &Cell_::Top(ref state, optr) => {
             assert_eq!(root, optr);
-            // FIXME FIXME: create a fresh PCell.
-            unimplemented!();
+            // FIXME: create a fresh PCell.
+            let ty = e.ty.clone();
+            println!("DEBUG: CtxEnv::pwrite_ref: fresh pcel: ty={:?}", &ty);
+            let state = state.clone();
+            match self.celtab.get_mut(&root) {
+              None => panic!("bug"),
+              Some(e) => {
+                let clo = RefCell::new(CellClosure::default());
+                let pcel = PCell::new(optr, ty.clone());
+                e.cel_ = Cell_::Phy(state, clo, pcel);
+                return Some(CellEnvEntryMutRef{
+                  stablect: &e.stablect,
+                  //snapshot: &e.snapshot,
+                  ty,
+                  eflag: &mut e.eflag,
+                  cel_: &mut e.cel_,
+                });
+              }
+            }
           }
           &Cell_::Phy(ref state, _, ref cel) => {
             assert_eq!(root, cel.optr);

@@ -46,9 +46,9 @@ fn main() {
     //y.set_mem(_);
     let logit = llm.apply(&x);
     let loss = batch_neg_likelihood(logit, &y);
-    for w in llm.param().iter().rev() {
+    /*for w in llm.param().iter().rev() {
       w.gradl(loss).eval();
-    }
+    }*/
     opt.apply_update(loss);
     compile();
     resume();

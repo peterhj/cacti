@@ -125,6 +125,9 @@ impl Clock {
   }
 
   pub fn update(&self) -> Clock {
+    if self.rst == 0 {
+      panic!("bug: Clock::update: trying to update at rst=0");
+    }
     let next_up = self.up + 1;
     assert!(next_up != u32::max_value());
     Clock{rst: self.rst, up: next_up}
