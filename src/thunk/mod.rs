@@ -36,6 +36,7 @@ use home::{home_dir};
 //use smol_str::{SmolStr};
 
 use std::any::{Any};
+use std::borrow::{Borrow};
 use std::cell::{RefCell};
 use std::cmp::{max};
 //use std::convert::{TryFrom};
@@ -469,6 +470,158 @@ impl FutharkNumFormatter {
 #[derive(Clone)]
 pub struct FutharkThunkCode {
   pub body:     Vec<String>,
+}
+
+impl FutharkThunkCode {
+  pub fn replicate_nd<S: Borrow<str>>(out0: Dim, val: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let val = val.borrow();
+    match out0.ndim() {
+      0 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%0}} = ({}) in", val),
+                ],
+        }.into()
+      }
+      1 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%0}} = replicate {{%0.s[0]}} ({}) in", val),
+                ],
+        }.into()
+      }
+      2 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val),
+                    format!("let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"),
+                ],
+        }.into()
+      }
+      3 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val),
+                    format!("let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"),
+                ],
+        }.into()
+      }
+      4 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val),
+                    format!("let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"),
+                ],
+        }.into()
+      }
+      _ => {
+        Err(FutharkGenErr::NotImpl)
+      }
+    }
+  }
+
+  pub fn map_nd<S: Borrow<str>>(arg0: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let lam = lam.borrow();
+    match arg0.ndim() {
+      0 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%1}} = ({}) {{%0}} in", lam),
+                ],
+        }.into()
+      }
+      1 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%1}} = map ({}) {{%0}} in", lam),
+                ],
+        }.into()
+      }
+      2 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten {{%0}} in"),
+                    format!("let t1 = map ({}) t0 in", lam),
+                    format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"),
+                ],
+        }.into()
+      }
+      3 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten_3d {{%0}} in"),
+                    format!("let t1 = map ({}) t0 in", lam),
+                    format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"),
+                ],
+        }.into()
+      }
+      4 => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten_4d {{%0}} in"),
+                    format!("let t1 = map ({}) t0 in", lam),
+                    format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"),
+                ],
+        }.into()
+      }
+      _ => {
+        Err(FutharkGenErr::NotImpl)
+      }
+    }
+  }
+
+  pub fn map2_nd<S: Borrow<str>>(arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let lam = lam.borrow();
+    match (arg0.ndim(), arg1.ndim()) {
+      (0, 0) => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%2}} = ({}) {{%0}} {{%1}} in", lam),
+                ],
+        }.into()
+      }
+      (1, 1) => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let {{%2}} = map2 ({}) {{%0}} {{%1}} in", lam),
+                ],
+        }.into()
+      }
+      (2, 2) => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten {{%0}} in"),
+                    format!("let t1 = flatten {{%1}} in"),
+                    format!("let t2 = map2 ({}) t0 t1 in", lam),
+                    format!("let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"),
+                ],
+        }.into()
+      }
+      (3, 3) => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten_3d {{%0}} in"),
+                    format!("let t1 = flatten_3d {{%1}} in"),
+                    format!("let t2 = map2 ({}) t0 t1 in", lam),
+                    format!("let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"),
+                ],
+        }.into()
+      }
+      (4, 4) => {
+        FutharkThunkCode{
+          body: vec![
+                    format!("let t0 = flatten_4d {{%0}} in"),
+                    format!("let t1 = flatten_4d {{%1}} in"),
+                    format!("let t2 = map2 ({}) t0 t1 in", lam),
+                    format!("let {{%2}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"),
+                ],
+        }.into()
+      }
+      _ => {
+        Err(FutharkGenErr::NotImpl)
+      }
+    }
+  }
 }
 
 pub struct FutharkThunkObject<B: FutBackend> {

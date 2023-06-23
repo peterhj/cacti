@@ -356,7 +356,8 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
       None => panic!("bug"),
       Some(e) => {
         if new_dtype.size_bytes() != e.ty.dtype.size_bytes() {
-          panic!("ERROR");
+          println!("ERROR: ctx_alias_bits: og={:?} old dtype={:?} new dtype={:?}", og, e.ty.dtype, new_dtype);
+          panic!();
         }
         let new_ty = CellType{dtype: new_dtype, shape: e.ty.shape.clone()};
         let x = ctx.ctr.fresh_cel();
@@ -378,9 +379,8 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
         let new_ty = CellType{shape: new_shape, dtype: e.ty.dtype};
         let cmp = new_ty.shape_compat(&e.ty);
         if !(cmp == ShapeCompat::Equal || cmp == ShapeCompat::NewShape) {
-          println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} new shape={:?}", og, &e.ty.shape, &new_ty.shape);
-          println!("DEBUG: ctx_alias_new_shape:   compat={:?}", cmp);
-          panic!("ERROR");
+          println!("ERROR: ctx_alias_new_shape: og={:?} old shape={:?} new shape={:?} compat={:?}", og, &e.ty.shape, &new_ty.shape, cmp);
+          panic!();
         }
         let x = ctx.ctr.fresh_cel();
         env.insert_alias(x, new_ty, og);

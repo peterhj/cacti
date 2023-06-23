@@ -27,17 +27,21 @@ fn main() {
   matcher.insert("embed", embed.clone());
   //let w = StableCell::array([inner_dim, inner_dim], f32::dtype());
   //let w = StableCell::array([inner_dim, inner_dim], bf16::dtype());
+  fn block_causal_attention_mask(x: CellPtr) -> CellPtr {
+    x
+    //unimplemented!();
+  }
   struct LlamaLayer {
+    in_norm: StableCell,
+    inv_freq: StableCell,
     q: StableCell,
     k: StableCell,
     v: StableCell,
     o: StableCell,
-    inv_freq: StableCell,
-    gate: StableCell,
-    down: StableCell,
-    up: StableCell,
-    in_norm: StableCell,
     post_norm: StableCell,
+    gate: StableCell,
+    up: StableCell,
+    down: StableCell,
   }
   let mut layers = Vec::new();
   for layer_idx in 0 .. num_layer {
@@ -89,23 +93,60 @@ fn main() {
       //w.cache();
     }
     in_tok.mem_set_yield_();
-    let x = in_tok.inner_one_hot(tok_dim, f16::dtype());
-    let stream = x.new_shape([ubat_sz * seq_len, tok_dim])
-                  .block_mm([1, tok_dim], false, &embed, [tok_dim, inner_dim], false)
-                  .new_shape([ubat_sz, seq_len, inner_dim]);
-    //let y = stream +
-    let y = stream.new_shape([ubat_sz * seq_len, inner_dim])
-                  //.cast(bf16::dtype())
-                  .block_mm([1, inner_dim], false, &layers[0].q, [inner_dim, inner_dim], false)
-                  //.cast(f32::dtype())
-                  .new_shape([ubat_sz, seq_len, inner_dim]);
+    let stream = in_tok.inner_one_hot(tok_dim, f16::dtype());
+    let stream = stream.new_shape([ubat_sz * seq_len, tok_dim])
+                       .block_mm([1, tok_dim], false, &embed, [tok_dim, inner_dim], false)
+                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
+    // FIXME FIXME: layer norm.
+    let prenrm = stream;
+    //let prenrm = pre_layer_norm(&stream);
+    let q_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                       .block_mm([1, inner_dim], false, &layers[0].q, [inner_dim, inner_dim], true)
+                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
+    let k_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                       .block_mm([1, inner_dim], false, &layers[0].k, [inner_dim, inner_dim], true)
+                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
+    let v_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                       .block_mm([1, inner_dim], false, &layers[0].v, [inner_dim, inner_dim], true)
+                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
+    // FIXME FIXME: rotary embedding.
     /*
-    // ...
-    let out_logit = stream.new_shape([ubat_sz * seq_len, inner_dim])
-                          .block_mm([1, inner_dim], false, &lm_head, [tok_dim, inner_dim], true)
-                          .new_shape([ubat_sz, seq_len, inner_dim]);
-    let out_prob = out_logit.inner_softmax();
+    let (vcos, vsin) = rotational_embed(&v_proj, );
+    let (q_proj, k_proj) = rotational_pos_embed((q_proj, k_proj, vcos, vsin, );
     */
+    let q_proj = q_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
+    let k_proj = k_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
+    let attn = q_proj.block_mm_scale([seq_len, head_dim], false, k_proj, [seq_len, head_dim], true, 1.0 / (num_head as f32).sqrt())
+              .new_shape([ubat_sz, seq_len, num_head, seq_len])
+              .cast(f32::dtype());
+    let attn = block_causal_attention_mask(attn)
+              .inner_softmax()
+              .cast(f16::dtype())
+              .new_shape([ubat_sz * seq_len, num_head * seq_len]);
+    // FIXME FIXME: V shape? may need to transpose.
+    let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
+    let v_attn = attn.block_mm([1, seq_len], false, v_proj, [seq_len, head_dim], false);
+    let o_proj = v_attn.block_mm([1, inner_dim], false, &layers[0].o, [inner_dim, inner_dim], true);
+    let stream = stream + o_proj;
+    // FIXME FIXME: post layer norm, mlp.
+    //let stream = post_layer_norm(stream);
+    let up_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                        .block_mm([1, inner_dim], false, &layers[0].up, [mlp_inner_dim, inner_dim], true);
+    let gate_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                          .block_mm([1, inner_dim], false, &layers[0].gate, [mlp_inner_dim, inner_dim], true);
+    //let gate_proj = activation(gate_proj);
+    let gate_up = gate_proj * up_proj;
+    let down_proj = gate_up.block_mm([1, mlp_inner_dim], false, &layers[0].down, [inner_dim, mlp_inner_dim], true)
+                           .new_shape([ubat_sz, seq_len, num_head, head_dim]);
+    let stream = stream + down_proj;
+    /*
+    // TODO
+    // ...
+    */
+    let out_logit = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                          .block_mm([1, inner_dim], false, &lm_head, [tok_dim, inner_dim], true)
+                          .new_shape([ubat_sz, seq_len, tok_dim]);
+    let out_prob = out_logit.inner_softmax();
     compile();
     resume();
     if iter_nr == 0 {

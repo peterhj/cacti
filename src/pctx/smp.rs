@@ -20,6 +20,7 @@ use libc::{ENOMEM, free, malloc};
 
 use std::borrow::{Borrow};
 use std::cell::{Cell};
+use std::cmp::{min};
 use std::ffi::{c_void};
 use std::io::{Read};
 use std::mem::{align_of};
@@ -76,43 +77,49 @@ impl MemReg {
     }
   }
 
-  pub fn _debug_dump_f16(&self) {
-    let len = self.sz / 2;
-    assert_eq!(0, self.sz % 2);
-    assert_eq!(0, (self.ptr as usize) % align_of::<u16>());
-    let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const u16, len) };
-    let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start);
-    for i in start .. start + 8 {
-      let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
-    }
-    println!();
-    let start = len - 8;
-    print!("DEBUG: MemReg: {:08x} :", start);
-    for i in start .. start + 8 {
-      let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
-    }
-    println!();
-  }
-
   pub fn _debug_dump_f32(&self) {
     let len = self.sz / 4;
     assert_eq!(0, self.sz % 4);
     assert_eq!(0, (self.ptr as usize) % align_of::<f32>());
     let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const f32, len) };
     let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start);
-    for i in start .. start + 8 {
+    print!("DEBUG: MemReg: {:08x} :", start * 4);
+    for i in start .. min(start + 8, len) {
       let x = buf[i];
       print!(" {}", x);
     }
     println!();
-    let start = len - 8;
-    print!("DEBUG: MemReg: {:08x} :", start);
-    for i in start .. start + 8 {
+    if len <= 0 {
+      return;
+    }
+    let start = (len - 1) - ((len - 1) & (8 - 1));
+    print!("DEBUG: MemReg: {:08x} :", start * 4);
+    for i in start .. min(start + 8, len) {
       let x = buf[i];
+      print!(" {}", x);
+    }
+    println!();
+  }
+
+  pub fn _debug_dump_f16(&self) {
+    let len = self.sz / 2;
+    assert_eq!(0, self.sz % 2);
+    assert_eq!(0, (self.ptr as usize) % align_of::<u16>());
+    let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const u16, len) };
+    let start = 0;
+    print!("DEBUG: MemReg: {:08x} :", start * 2);
+    for i in start .. min(start + 8, len) {
+      let x = f16::from_bits(buf[i]);
+      print!(" {}", x);
+    }
+    println!();
+    if len <= 0 {
+      return;
+    }
+    let start = (len - 1) - ((len - 1) & (8 - 1));
+    print!("DEBUG: MemReg: {:08x} :", start * 2);
+    for i in start .. min(start + 8, len) {
+      let x = f16::from_bits(buf[i]);
       print!(" {}", x);
     }
     println!();

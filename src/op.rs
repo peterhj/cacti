@@ -1,4 +1,4 @@
-use crate::cell::{CellPtr, StableCell, CellType, Dtype, MSet, MMap, MValueRef};
+use crate::cell::{CellPtr, StableCell, CellType, Dtype, DtypeExt, MSet, MMap, MValueRef};
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
@@ -147,7 +147,13 @@ impl<'l, R: Borrow<CellPtr>> Mul<R> for &'l CellPtr {
 
   #[track_caller]
   fn mul(self, rhs: R) -> CellPtr {
-    unimplemented!();
+    panick_wrap(|| {
+      let op = MulFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 }
 
@@ -277,33 +283,61 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   }*/
 
   #[track_caller]
-  fn block_mm(&self, l_block: [i64; 2], lt: bool, rhs: R, r_block: [i64; 2], rt: bool) -> CellPtr {
+  fn block_mm(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool) -> CellPtr {
+    panick_wrap(|| {
+      // FIXME FIXME: dtype scalar.
+      self.block_mm_scale(l_block, l_blk_t, rhs, r_block, r_blk_t, 1.0_f32)
+    })
+  }
+
+  #[track_caller]
+  fn block_mm_scale<T: DtypeExt>(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool, scale: T) -> CellPtr {
     panick_wrap(|| {
       let p = *self.borrow();
       let q = *rhs.borrow();
       let p_ty = ctx_lookup_type(p);
       let q_ty = ctx_lookup_type(q);
-      //println!("DEBUG: block_mm: l_ty={:?} r_ty={:?}", p_ty, q_ty);
-      //println!("DEBUG: block_mm: lblk={:?} rblk={:?}", l_block, r_block);
+      //println!("DEBUG: block_mm_scale: l_ty={:?} r_ty={:?}", p_ty, q_ty);
+      //println!("DEBUG: block_mm_scale: lblk={:?} rblk={:?}", l_block, r_block);
+      println!("DEBUG: block_mm_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
+          &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
+          &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+      );
+      // FIXME: can relax the ndim requirement, with well documented semantics.
       assert_eq!(p_ty.ndim(), 2);
       assert_eq!(q_ty.ndim(), 2);
-      assert_eq!(p_ty.shape[0] % l_block[0], 0);
-      assert_eq!(p_ty.shape[1] % l_block[1], 0);
-      assert_eq!(q_ty.shape[0] % r_block[0], 0);
-      assert_eq!(q_ty.shape[1] % r_block[1], 0);
       let l_nrow = p_ty.shape[0] / l_block[0];
       let l_ncol = p_ty.shape[1] / l_block[1];
       let r_nrow = q_ty.shape[0] / r_block[0];
       let r_ncol = q_ty.shape[1] / r_block[1];
-      let (l_nrow_t, l_ncol_t) = if lt { (l_ncol, l_nrow) } else { (l_nrow, l_ncol) };
-      let (r_nrow_t, r_ncol_t) = if rt { (r_ncol, r_nrow) } else { (r_nrow, r_ncol) };
-      if !(l_nrow_t == r_nrow_t || l_nrow_t == 1 || r_nrow_t == 1) ||
-         !(l_ncol_t == r_ncol_t || l_ncol_t == 1 || r_ncol_t == 1)
-      {
-        panic!("ERROR: block_mm: incompatible shapes or blocks: {:?} {:?} x {:?} {:?}",
-            &p_ty.shape, l_block, &q_ty.shape, r_block);
+      assert_eq!(p_ty.shape[0] % l_block[0], 0);
+      assert_eq!(p_ty.shape[1] % l_block[1], 0);
+      assert_eq!(q_ty.shape[0] % r_block[0], 0);
+      assert_eq!(q_ty.shape[1] % r_block[1], 0);
+      let l_blk_inner = if l_blk_t { l_block[0] } else { l_block[1] };
+      let r_blk_inner = if r_blk_t { r_block[1] } else { r_block[0] };
+      if l_blk_inner != r_blk_inner {
+        println!("ERROR: block_mm_scale: incompatible blocks:");
+        println!("ERROR: block_mm_scale:   {:?}{} x {:?}{}",
+            l_block, if l_blk_t { " T" } else { "" },
+            r_block, if r_blk_t { " T" } else { "" },
+        );
+        panic!();
       }
-      let (_m, _n) = match (lt, rt) {
+      // FIXME FIXME: modulo/round robin blocking in the thunk impl.
+      //let (l_nrow_t, l_ncol_t) = if lt { (l_ncol, l_nrow) } else { (l_nrow, l_ncol) };
+      //let (r_nrow_t, r_ncol_t) = if rt { (r_ncol, r_nrow) } else { (r_nrow, r_ncol) };
+      if !(l_nrow == r_nrow || l_nrow == 1 || r_nrow == 1) ||
+         !(l_ncol == r_ncol || l_ncol == 1 || r_ncol == 1)
+      {
+        println!("ERROR: block_mm_scale: incompatible shapes:");
+        println!("ERROR: block_mm_scale:   ({:?} / {:?}{}) x ({:?} / {:?}{})",
+            &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
+            &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+        );
+        panic!();
+      }
+      /*let (_m, _n) = match (lt, rt) {
         (false, false) => {
           assert_eq!(p_ty.shape[1], q_ty.shape[0]);
           (p_ty.shape[0], q_ty.shape[1])
@@ -320,13 +354,15 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
           assert_eq!(p_ty.shape[0], q_ty.shape[1]);
           (p_ty.shape[1], q_ty.shape[0])
         }
-      };
+      };*/
       let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
         None => {
-          panic!("ERROR: block_mm: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
+          println!("ERROR: block_mm: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
+          panic!();
         }
         Some(dty) => dty
       };
+      // FIXME FIXME: scale.
       let op = BlockMatrixMulThunkSpec{
         //l_shape: [p_ty.shape[0], p_ty.shape[1]],
         //r_shape: [q_ty.shape[0], q_ty.shape[1]],
@@ -334,11 +370,12 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
         r_block,
         //l_nblock: [l_nrow, l_ncol],
         //r_nblock: [r_nrow, r_ncol],
-        lt,
-        rt,
+        l_blk_t,
+        r_blk_t,
         l_dtype: p_ty.dtype,
         r_dtype: q_ty.dtype,
         o_dtype,
+        //o_scale: scale,
       };
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(p);
@@ -516,7 +553,12 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
 
   #[track_caller]
   fn inner_softmax(&self) -> CellPtr {
-    unimplemented!();
+    panick_wrap(|| {
+      let op = InnerSoftmaxFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 
   #[track_caller]

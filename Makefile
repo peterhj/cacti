@@ -1,12 +1,14 @@
 include common.mk
 
-.PHONY: all debug distclean
+.PHONY: all build debug distclean
 
-all:
-	$(CARGO) build $(CARGO_TARGET) --release --lib --bins --examples
+all: debug
+
+build:
+	$(CARGO) build $(CARGO_TARGET) --release --lib --bins
 
 debug:
-	$(CARGO) build $(CARGO_TARGET) --lib --bins --examples
+	$(CARGO) build $(CARGO_TARGET) --lib --bins
 
 distclean:
 	rm -r target
