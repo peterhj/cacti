@@ -98,7 +98,7 @@ pub struct PAddr {
 
 impl Debug for PAddr {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "PAddr({})", self.bits)
+    write!(f, "PAddr(0x{:x})", self.bits)
   }
 }
 
@@ -229,34 +229,49 @@ impl PCtx {
     }
   }*/
 
-  pub fn alloc_loc(&self, locus: Locus, ty: &CellType) -> (PMach, PAddr) {
+  pub fn alloc(&self, ty: &CellType, locus: Locus, pmach: PMach) -> PAddr {
+    match pmach {
+      #[cfg(not(feature = "gpu"))]
+      PMach::NvGpu => {
+        unimplemented!();
+      }
+      #[cfg(feature = "gpu")]
+      PMach::NvGpu => {
+        let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, locus, ty) {
+          Err(e) => {
+            println!("BUG:   PCtx::alloc: unimplemented error: {:?}", e);
+            panic!();
+          }
+          Ok(addr) => addr
+        };
+        addr
+      }
+      _ => {
+        println!("DEBUG: PCtx::alloc: {:?}", &self.lpmatrix);
+        println!("DEBUG: PCtx::alloc: {:?}", &self.plmatrix);
+        println!("BUG:   PCtx::alloc: unimplemented: locus={:?} pmach={:?}", locus, pmach);
+        panic!();
+      }
+    }
+  }
+
+  pub fn alloc_loc(&self, ty: &CellType, locus: Locus) -> (PMach, PAddr) {
     match self.lpmatrix.find_lub((locus, PMach::_Bot)) {
       None => {
-        panic!("bug: PCtx::alloc_loc: failed to alloc: locus={:?}", locus);
+        println!("BUG:   PCtx::alloc_loc: failed to alloc: locus={:?}", locus);
+        panic!();
       }
       Some((key, _)) => {
         let pmach = key.key.as_ref().1;
-        match pmach {
-          #[cfg(not(feature = "gpu"))]
-          PMach::NvGpu => {
-            unimplemented!();
-          }
-          #[cfg(feature = "gpu")]
-          PMach::NvGpu => {
-            let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, locus, ty) {
-              Err(e) => panic!("bug: PCtx::alloc_loc: unimplemented error: {:?}", e),
-              Ok(addr) => addr
-            };
-            (PMach::NvGpu, addr)
-          }
-          _ => {
-            println!("DEBUG: {:?}", &self.lpmatrix);
-            println!("DEBUG: {:?}", &self.plmatrix);
-            panic!("bug: PCtx::alloc_loc: unimplemented: locus={:?} pmach={:?}", locus, pmach);
-          }
-        }
+        let addr = self.alloc(ty, locus, pmach);
+        (pmach, addr)
       }
     }
+  }
+
+  pub fn lookup(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+    // FIXME FIXME
+    unimplemented!();
   }
 
   pub fn lookup_pm(&self, pmach: PMach, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
@@ -274,11 +289,6 @@ impl PCtx {
       }
     }
   }
-
-  pub fn lookup(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
-    // FIXME FIXME
-    unimplemented!();
-  }
 }
 
 pub trait PCtxImpl {
@@ -291,4 +301,6 @@ pub trait PCtxImpl {
   //fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<Self::ICel>, PMemErr>;
   //fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
   fn try_alloc(&self, pctr: &PCtxCtr, locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr>;
+  //fn try_alloc(&self, pctr: &PCtxCtr, ty: &CellType, locus: Locus) -> Result<PAddr, PMemErr>;
+  //fn lookup(&self, addr: PAddr) -> Option<()>;
 }

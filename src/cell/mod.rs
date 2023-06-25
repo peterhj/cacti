@@ -817,6 +817,8 @@ pub struct CellState {
   pub mode: CellMode,
   pub flag: CellFlag,
   pub clk:  Clock,
+  // FIXME
+  //pub seal: Clock,
 }
 
 pub struct PCellReplica {
@@ -856,6 +858,21 @@ impl PCell {
     }
   }
 
+  pub fn new_loc(ptr: CellPtr, ty: CellType, primary: Locus) -> PCell {
+    let lay = CellLayout::new_packed(&ty);
+    let pm_index = RevSortMap8::new();
+    let replicas = RevSortMap8::new();
+    PCell{
+      optr: ptr,
+      //optr: Cell::new(ptr),
+      ogty: ty,
+      olay: lay,
+      primary,
+      pm_index,
+      replicas,
+    }
+  }
+
   pub fn push_new_replica(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
     match self.replicas.find((locus, pmach)) {
       None => {}
@@ -864,6 +881,13 @@ impl PCell {
     let rep = PCellReplica{clk: Cell::new(clk), addr};
     let key = self.replicas.insert((locus, pmach), rep);
     self.pm_index.insert((pmach, locus), key);
+  }
+
+  pub fn lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
+    match self.replicas.find((q_locus, q_pmach)) {
+      None => None,
+      Some((_, rep)) => Some(rep)
+    }
   }
 
   //pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, Clock, &mut Option<Weak<dyn InnerCell_>>)> {}
@@ -883,43 +907,91 @@ impl PCell {
     }
   }
 
-  pub fn get(&mut self, q_clk: Clock, q_locus: Locus, q_pmach: PMach, ty: &CellType) -> PAddr {
-    match self.replicas.find((q_locus, q_pmach)) {
-      None => {}
-      Some((_, rep)) => {
-        return rep.addr;
-      }
-    }
+  pub fn find_any(&self, q_clk: Clock, ty: &CellType) -> Option<(Locus, PMach, PAddr)> {
     // FIXME FIXME
     unimplemented!();
   }
 
-  pub fn get_loc(&mut self, q_clk: Clock, q_locus: Locus, ty: &CellType) -> (PMach, PAddr) {
-    let q_pmach = match self.lookup_loc(q_locus) {
+  pub fn get(&mut self, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
+    let f = match self.lookup(q_locus, q_pmach) {
       None => None,
-      Some((pmach, rep)) => {
-        if rep.clk.get() >= q_clk {
+      Some(rep) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
           // FIXME FIXME
           panic!("bug");
-        } else if rep.clk.get() == q_clk {
-          return (pmach, rep.addr);
         }
+        Some(())
+      }
+    };
+    if f.is_none() {
+      let addr = TL_PCTX.with(|pctx| {
+        pctx.alloc(ty, q_locus, q_pmach)
+      });
+      self.push_new_replica(Clock::default(), q_locus, q_pmach, addr);
+    }
+    match self.lookup(q_locus, q_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        //assert_eq!(rep.clk.get(), q_clk);
+        let prev_clk = rep.clk.get();
+        if prev_clk < q_clk {
+          // FIXME: actually copy from any existing replica.
+          // FIXME: depends on whether we want fresh or non-fresh get...
+          /*match self.find_any(q_clk, ty) {
+            None => {
+              println!("ERROR: PCell::get: no replica to copy from");
+              panic!();
+            }
+            Some((o_loc, o_pm, o_addr)) => {
+            }
+          }*/
+          // FIXME FIXME: only set clock on successful copy.
+          rep.clk.set(q_clk);
+        }
+        TL_PCTX.with(|pctx| {
+          match pctx.lookup_pm(q_pmach, rep.addr) {
+            None => {
+              // FIXME FIXME
+              panic!("bug");
+            }
+            Some(_) => {}
+          }
+        });
+        rep.addr
+      }
+    }
+  }
+
+  pub fn get_loc(&mut self, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+    let mut f_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
+          // FIXME FIXME
+          panic!("bug");
+        }/* else if prev_clk == q_clk {
+          return (pmach, rep.addr);
+        }*/
         Some(pmach)
       }
     };
-    if q_pmach.is_none() {
+    if f_pmach.is_none() {
       let (pmach, addr) = TL_PCTX.with(|pctx| {
-        pctx.alloc_loc(q_locus, ty)
+        pctx.alloc_loc(ty, q_locus)
       });
       self.push_new_replica(Clock::default(), q_locus, pmach, addr);
+      f_pmach = Some(pmach);
     }
-    match self.lookup_loc(q_locus) {
+    let f_pmach = f_pmach.unwrap();
+    /*match self.lookup_loc(q_locus) {
       None => panic!("bug"),
       Some((pmach, rep)) => {
         // FIXME FIXME: fixup causal ordering by replica copying.
         println!("DEBUG: PCell::get_loc: pmach={:?} rep clk={:?} q clk={:?} q loc={:?}",
             pmach, rep.clk.get(), q_clk, q_locus);
-        if q_pmach.is_none() {
+        if f_pmach.is_none() {
           //assert!(rep.clk.get().is_nil());
           rep.clk.set(q_clk);
         }
@@ -929,10 +1001,30 @@ impl PCell {
         assert_eq!(rep.clk.get(), q_clk);
         (pmach, rep.addr)
       }
+    }*/
+    match self.lookup(q_locus, f_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        //assert_eq!(rep.clk.get(), q_clk);
+        let prev_clk = rep.clk.get();
+        if prev_clk < q_clk {
+          rep.clk.set(q_clk);
+        }
+        TL_PCTX.with(|pctx| {
+          match pctx.lookup_pm(f_pmach, rep.addr) {
+            None => {
+              // FIXME FIXME
+              panic!("bug");
+            }
+            Some(_) => {}
+          }
+        });
+        (f_pmach, rep.addr)
+      }
     }
   }
 
-  pub fn get_pm(&mut self, q_clk: Clock, q_pmach: PMach) -> (Locus, /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr) {
+  pub fn get_pm(&mut self, q_clk: Clock, ty: &CellType, q_pmach: PMach) -> (Locus, /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr) {
     match self.pm_index.find_lub((q_pmach, Locus::_Bot)) {
       None => {}
       Some((_, key)) => {
@@ -956,7 +1048,7 @@ impl PCell {
     unimplemented!();
   }
 
-  pub fn get_any(&mut self, q_clk: Clock) -> (Locus, PMach, PAddr) {
+  pub fn get_any(&mut self, q_clk: Clock, ty: &CellType) -> (Locus, PMach, PAddr) {
     // FIXME FIXME
     unimplemented!();
   }

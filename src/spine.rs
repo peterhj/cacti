@@ -923,7 +923,7 @@ impl Spine {
                       unimplemented!();
                     }
                     (Locus::Mem, &SpineResume::PutMemF(_, fun)) => {
-                      let (pm, addr) = cel_.get_loc(xclk, Locus::Mem, &e.ty);
+                      let (pm, addr) = cel_.get_loc(xclk, &e.ty, Locus::Mem);
                       TL_PCTX.with(|pctx| {
                         let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
                         (fun)(e.ty.clone(), icel.as_mem_reg().unwrap());
@@ -1204,7 +1204,8 @@ impl Spine {
       &SpineEntry::Bot => {
         ret = SpineRet::Bot;
       }
-      _ => unimplemented!()
+      //_ => unimplemented!()
+      e => panic!("bug: Spine::_step: unimplemented: {:?}", e)
     }
     ret
   }

@@ -238,7 +238,17 @@ impl PCtxImpl for NvGpuPCtx {
         Ok(addr)
       }
       Locus::VMem => {
-        unimplemented!();
+        let query_sz = ty.packed_span_bytes() as usize;
+        let (off, req_sz, next_off) = match self.try_pre_alloc(query_sz) {
+          None => {
+            // FIXME FIXME
+            unimplemented!();
+          }
+          Some(ret) => ret
+        };
+        let addr = pctr.fresh_addr();
+        let _ = self.alloc(addr, off, req_sz, next_off);
+        Ok(addr)
       }
       _ => unimplemented!()
     }
@@ -323,10 +333,6 @@ impl NvGpuPCtx {
   pub fn find_dptr(&self, p: PAddr) -> Option<u64> {
     unimplemented!();
   }*/
-
-  pub fn find_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
-    unimplemented!();
-  }
 
   pub fn fresh_outer(&self) -> Rc<GpuOuterCell> {
     unimplemented!();
@@ -450,6 +456,32 @@ impl NvGpuPCtx {
       None => {}
       Some(icel) => {
         return Some((Locus::Mem, icel.clone()));
+      }
+    }
+    None
+  }
+
+  pub fn find_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
+    self.lookup_reg(p)
+  }
+
+  pub fn lookup_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
+    match self.cel_map.borrow().get(&p) {
+      None => {}
+      Some(icel) => {
+        return Some(NvGpuInnerReg::VMem{
+          dptr: icel.dptr,
+          size: icel.sz,
+        });
+      }
+    }
+    match self.page_map.alloc_map.borrow().get(&p) {
+      None => {}
+      Some(icel) => {
+        return Some(NvGpuInnerReg::Mem{
+          ptr:  icel.ptr,
+          size: icel.sz,
+        });
       }
     }
     None

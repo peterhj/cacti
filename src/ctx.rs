@@ -568,11 +568,17 @@ pub fn ctx_pop_thunk<Th: ThunkSpec_ + 'static>(th: Th) -> CellPtr {
     }
     // FIXME FIXME: multiple arity out.
     let odim = match th.out_dim(&dims) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply dim error: {:?}", &dims);
+        panic!();
+      }
       Ok(dim) => dim
     };
     let oty_ = match th.out_ty_(&tys_) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply type error: {:?}", &tys_);
+        panic!();
+      }
       Ok(ty_) => ty_
     };
     assert_eq!(odim, oty_.to_dim());
@@ -626,11 +632,17 @@ pub fn ctx_pop_init_thunk<Th: ThunkSpec_ + 'static>(th: Th, /*out: CellPtr*/) ->
       tys_.push(ty_);
     }
     let odim = match th.out_dim(&dims) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply dim error: {:?}", &dims);
+        panic!();
+      }
       Ok(dim) => dim
     };
     let oty_ = match th.out_ty_(&tys_) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply type error: {:?}", &tys_);
+        panic!();
+      }
       Ok(ty_) => ty_
     };
     assert_eq!(odim, oty_.to_dim());
@@ -684,11 +696,17 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
       spine.push_seal(arg);
     }
     let odim = match th.out_dim(&dims) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply dim error: {:?}", &dims);
+        panic!();
+      }
       Ok(dim) => dim
     };
     let oty_ = match th.out_ty_(&tys_) {
-      Err(_) => panic!("ERROR: type error"),
+      Err(_) => {
+        println!("ERROR: thunk apply type error: {:?}", &tys_);
+        panic!();
+      }
       Ok(ty_) => ty_
     };
     assert_eq!(odim, oty_.to_dim());
@@ -1307,7 +1325,8 @@ impl CtxEnv {
           match &e.cel_ {
             &Cell_::Top(.., optr) => {
               assert_eq!(root, optr);
-              panic!("ERROR: runtime error: attempted to read an uninitialized cell");
+              println!("ERROR: runtime error: attempted to read an uninitialized cell");
+              panic!();
             }
             &Cell_::Phy(.., ref cel) => {
               assert_eq!(root, cel.optr);

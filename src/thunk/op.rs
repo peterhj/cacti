@@ -523,7 +523,8 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
         code.cfg.emit_arg_shapes = true;
         code.body.push(format!("let t_oidx = {{%0}} in"));
         code.body.push(format!("let t_iota = indices t_oidx in"));
-        code.body.push(format!("let t_key = map (\\(i,k) -> ({}.{} k) + {} * i) (zip t_iota t_oidx) in",
+        code.body.push(format!("let t_key = map (\\(i,k) -> (assert (k >= 0 && k < {}) ({}.{} k)) + {} * i) (zip t_iota t_oidx) in",
+            self.inner_len,
             Dtype::Int64.format_futhark(),
             arg[0].dtype.format_futhark(),
             self.inner_len,
@@ -556,9 +557,8 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
             arg[0].dtype.format_futhark(),
         ));
         code.body.push(format!("let t_iota = indices t_oidx in"));
-        // FIXME FIXME: debugging.
-        //code.body.push(format!("let t_key = map (\\(i,k) -> ({}.{} 0) + {} * i) (zip t_iota t_oidx) in",
-        code.body.push(format!("let t_key = map (\\(i,k) -> ({}.{} k) + {} * i) (zip t_iota t_oidx) in",
+        code.body.push(format!("let t_key = map (\\(i,k) -> (assert (k >= 0 && k < {}) ({}.{} k)) + {} * i) (zip t_iota t_oidx) in",
+            self.inner_len,
             Dtype::Int64.format_futhark(),
             arg[0].dtype.format_futhark(),
             self.inner_len,
@@ -639,7 +639,7 @@ impl FutharkThunkSpec for AddFutThunkSpec {
   }
 
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    FutharkThunkCode::map2_nd(arg[0], arg[1], r"\u, v -> u + v")
+    FutharkThunkCode::map2_nd(arg[0], arg[1], r"+")
   }
 }
 
@@ -688,7 +688,7 @@ impl FutharkThunkSpec for SubFutThunkSpec {
   }
 
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    FutharkThunkCode::map2_nd(arg[0], arg[1], r"\u, v -> u - v")
+    FutharkThunkCode::map2_nd(arg[0], arg[1], r"-")
     /*FutharkThunkCode{
       body:     vec![format!("let {{%2}} = {{%0}} - {{%1}} in")],
     }.into()*/
@@ -741,7 +741,7 @@ impl FutharkThunkSpec for MulFutThunkSpec {
   }
 
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    FutharkThunkCode::map2_nd(arg[0], arg[1], r"\u, v -> u * v")
+    FutharkThunkCode::map2_nd(arg[0], arg[1], r"*")
   }
 }
 
@@ -791,7 +791,7 @@ impl FutharkThunkSpec for DivFutThunkSpec {
   }
 
   fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    FutharkThunkCode::map2_nd(arg[0], arg[1], r"\u, v -> u / v")
+    FutharkThunkCode::map2_nd(arg[0], arg[1], r"/")
   }
 }
 
@@ -1391,7 +1391,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let (_, pcel_addr) = pcel.get_pm(arg[0].1, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(arg[0].1, &arg_ty_[0], PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/
@@ -1424,7 +1424,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       Some(e) => {
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let (_, pcel_addr) = pcel.get_pm(arg[1].1, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(arg[1].1, &arg_ty_[1], PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/
@@ -1459,7 +1459,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             /*clo.thunk_.push(th);
             assert_eq!(clo.thunk.len(), oclk.up as usize);*/
-            let (_, pcel_addr) = pcel.get_pm(oclk, PMach::NvGpu);
+            let (_, pcel_addr) = pcel.get_pm(oclk, &out_ty_, PMach::NvGpu);
             /*let pcel_ = Weak::upgrade(pcel_).unwrap();
             let gpu_cel = pcel_.as_any().downcast_ref::<GpuInnerCell>().unwrap();
             let base = gpu_cel.dptr;*/

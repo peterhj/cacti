@@ -177,7 +177,9 @@ fn main() {
     resume_put_mem_fun(&in_tok, |_, mem| {
       let mut tok_buf = Vec::with_capacity(seq_len as _);
       for _ in 0 .. seq_len {
-        tok_buf.push(0_u16);
+        // FIXME: this should cause failure.
+        tok_buf.push(50000_u16);
+        //tok_buf.push(0_u16);
       }
       mem.copy_from_slice(&tok_buf);
     });

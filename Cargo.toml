@@ -12,7 +12,7 @@ members = [
 ]
 
 [profile.dev]
-opt-level = 3
+opt-level = 1
 overflow-checks = true
 panic = "abort"
 codegen-units = 1
