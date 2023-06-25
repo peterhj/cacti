@@ -21,7 +21,6 @@ impl From<i32> for Pat {
 
 impl From<usize> for Pat {
   fn from(x: usize) -> Pat {
-    assert!(x >= 0);
     assert!(x < i32::max_value() as usize);
     Pat::Int(x as _)
   }

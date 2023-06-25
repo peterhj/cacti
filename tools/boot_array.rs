@@ -116,16 +116,15 @@ fn main() {
     */
     let q_proj = q_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
     let k_proj = k_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
-    let attn = q_proj.block_mm_scale([seq_len, head_dim], false, k_proj, [seq_len, head_dim], true, 1.0 / (num_head as f32).sqrt())
+    let attn = q_proj.block_mm_scale([seq_len, head_dim], false, k_proj, [seq_len, head_dim], true, 1.0 / (head_dim as f32).sqrt())
               .new_shape([ubat_sz, seq_len, num_head, seq_len])
               .cast(f32::dtype());
     let attn = block_causal_attention_mask(attn)
               .inner_softmax()
               .cast(f16::dtype())
               .new_shape([ubat_sz * seq_len, num_head * seq_len]);
-    // FIXME FIXME: V shape? may need to transpose.
     let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
-    let v_attn = attn.block_mm([1, seq_len], false, v_proj, [seq_len, head_dim], false);
+    let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, head_dim], false);
     let o_proj = v_attn.block_mm([1, inner_dim], false, &layers[0].o, [inner_dim, inner_dim], true);
     let stream = stream + o_proj;
     // FIXME FIXME: post layer norm, mlp.
@@ -175,9 +174,13 @@ fn main() {
       }
       //resume_put_mem_fun(&w, |_, mem| mem.copy_from_slice(&[0.0_f32]));
     }
-    /*
-    resume_put_mem_fun(&in_tok, |_, mem| mem.copy_from_slice(&[0_u16]));
-    */
+    resume_put_mem_fun(&in_tok, |_, mem| {
+      let mut tok_buf = Vec::with_capacity(seq_len as _);
+      for _ in 0 .. seq_len {
+        tok_buf.push(0_u16);
+      }
+      mem.copy_from_slice(&tok_buf);
+    });
     // TODO
     break;
   }

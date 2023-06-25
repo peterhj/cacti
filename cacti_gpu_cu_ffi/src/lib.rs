@@ -216,6 +216,14 @@ pub fn cuda_mem_free_host(ptr: *mut c_void) -> CudaResult {
   Ok(())
 }
 
+pub fn cuda_memcpy_d2h(dst: *mut c_void, src: u64, sz: usize) -> CudaResult {
+  let e = (LIBCUDA.cuMemcpyDtoH.as_ref().unwrap())(dst, src, sz);
+  if e != CUDA_SUCCESS {
+    return Err(e);
+  }
+  Ok(())
+}
+
 pub fn cuda_memcpy_async(dst: u64, src: u64, sz: usize, stream_raw: &CUstream) -> CudaResult {
   let e = (LIBCUDA.cuMemcpyAsync.as_ref().unwrap())(dst, src, sz, *stream_raw);
   if e != CUDA_SUCCESS {

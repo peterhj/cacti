@@ -1,5 +1,6 @@
 pub use half::{f16, bf16};
 
+use std::borrow::{Borrow};
 use std::cmp::{Ordering};
 use std::convert::{TryFrom};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
@@ -7,35 +8,28 @@ use std::hash::{Hash, Hasher};
 
 /* `TotalOrd` is derived from the implementation in libcore:
 
-Copyright (c) 2014 The Rust Project Developers
+Short version for non-lawyers:
 
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
+The Rust Project is dual-licensed under Apache 2.0 and MIT
+terms.
 
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
+Longer version:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE. */
+Copyrights in the Rust project are retained by their contributors. No
+copyright assignment is required to contribute to the Rust project.
+
+Some files include explicit copyright notices and/or license notices.
+For full authorship information, see the version control history or
+https://thanks.rust-lang.org
+
+Except as otherwise noted (below and/or in individual files), Rust is
+licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
+<http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+<LICENSE-MIT> or <http://opensource.org/licenses/MIT>, at your option. */
 
 #[derive(Clone, Copy)]
 #[repr(transparent)]
-pub struct TotalOrd<F: Copy>(F);
+pub struct TotalOrd<F: Copy>(pub F);
 
 impl<F: Copy + Debug> Debug for TotalOrd<F> {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -45,6 +39,18 @@ impl<F: Copy + Debug> Debug for TotalOrd<F> {
 
 impl<F: Copy> AsRef<F> for TotalOrd<F> {
   fn as_ref(&self) -> &F {
+    &self.0
+  }
+}
+
+impl<F: Copy> Borrow<F> for TotalOrd<F> {
+  fn borrow(&self) -> &F {
+    &self.0
+  }
+}
+
+impl<'a, F: Copy> Borrow<F> for &'a TotalOrd<F> {
+  fn borrow(&self) -> &F {
     &self.0
   }
 }
@@ -100,7 +106,58 @@ impl TotalOrd<f32> {
   }
 }
 
-#[derive(Clone, Copy)]
+impl From<f64> for TotalOrd<f64> {
+  fn from(x: f64) -> TotalOrd<f64> {
+    TotalOrd(x)
+  }
+}
+
+impl PartialEq for TotalOrd<f64> {
+  fn eq(&self, other: &TotalOrd<f64>) -> bool {
+    match self.cmp(other) {
+      Ordering::Equal => true,
+      _ => false
+    }
+  }
+}
+
+impl Eq for TotalOrd<f64> {}
+
+impl PartialOrd for TotalOrd<f64> {
+  fn partial_cmp(&self, other: &TotalOrd<f64>) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for TotalOrd<f64> {
+  fn cmp(&self, other: &TotalOrd<f64>) -> Ordering {
+    self.to_signed_bits().cmp(&other.to_signed_bits())
+  }
+}
+
+impl Hash for TotalOrd<f64> {
+  fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.to_bits().hash(hasher);
+  }
+}
+
+impl TotalOrd<f64> {
+  #[inline]
+  pub fn to_bits(&self) -> u64 {
+    // NB: This should be the same 1-to-1 mapping as done by `total_cmp`
+    // in libcore.
+    let mut bits = (self.0).to_bits();
+    bits ^= ((((bits as i64) >> 63) as u64) >> 1);
+    bits
+  }
+
+  #[inline]
+  pub fn to_signed_bits(&self) -> i64 {
+    self.to_bits() as i64
+  }
+}
+
+/*#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct Nan<F: Copy>(F);
 
@@ -158,4 +215,4 @@ impl Ord for NonNan<f32> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
     (self.0).to_bits().hash(hasher)
   }
-}*/
+}*/*/

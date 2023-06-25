@@ -1,4 +1,4 @@
-use crate::cell::{CellPtr, StableCell, CellType, Dtype, DtypeExt, MSet, MMap, MValueRef};
+use crate::cell::{CellPtr, StableCell, CellType, Dtype, IntoScalarValExt, MSet, MMap, MValueRef};
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
@@ -285,13 +285,12 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
   fn block_mm(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool) -> CellPtr {
     panick_wrap(|| {
-      // FIXME FIXME: dtype scalar.
       self.block_mm_scale(l_block, l_blk_t, rhs, r_block, r_blk_t, 1.0_f32)
     })
   }
 
   #[track_caller]
-  fn block_mm_scale<T: DtypeExt>(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool, scale: T) -> CellPtr {
+  fn block_mm_scale<T: IntoScalarValExt>(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool, scale: T) -> CellPtr {
     panick_wrap(|| {
       let p = *self.borrow();
       let q = *rhs.borrow();
@@ -357,12 +356,20 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       };*/
       let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
         None => {
-          println!("ERROR: block_mm: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
+          println!("ERROR: block_mm_scale: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
           panic!();
         }
         Some(dty) => dty
       };
-      // FIXME FIXME: scale.
+      let o_scale = scale.into_scalar_val_();
+      let o_scale_dty = o_scale.dtype();
+      match o_scale_dty {
+        Dtype::Float32 => {}
+        _ => {
+          println!("ERROR: block_mm_scale: unsupported scale dtype: {:?}", o_scale_dty);
+          panic!();
+        }
+      }
       let op = BlockMatrixMulThunkSpec{
         //l_shape: [p_ty.shape[0], p_ty.shape[1]],
         //r_shape: [q_ty.shape[0], q_ty.shape[1]],
@@ -375,7 +382,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
         l_dtype: p_ty.dtype,
         r_dtype: q_ty.dtype,
         o_dtype,
-        //o_scale: scale,
+        o_scale,
       };
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(p);
@@ -818,7 +825,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   }
 
   #[track_caller]
-  fn init_cache(&self) /*-> Self */{
+  fn cache_init(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
       spine.init_cache_mux(*self.borrow());
@@ -827,12 +834,17 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   }
 
   #[track_caller]
-  fn cache_init(&self) /*-> Self */{ self.init_cache() }
+  fn init_cache(&self) /*-> Self */{ self.cache_init() }
 
   /*fn cache_init_futhark(self, fut_str: &str) -> Self {
     // TODO: ???
     unimplemented!();
   }*/
+
+  #[track_caller]
+  fn keep(&self) -> StableCell {
+    panick_wrap(|| StableCell::from(*self.borrow()))
+  }
 
   #[track_caller]
   fn set<X: AsRef<CellPtr>>(&self, _x: X) where Self: Sized {
@@ -972,7 +984,7 @@ pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
       drop(fut);
       let trie = ctx.futhark.borrow().trie.as_ref().unwrap().clone();
       let tokens = Tokenizer::new(trie, &*lam_src);
-      let mut parser = ExpParser::new(tokens);
+      let parser = ExpParser::new(tokens);
       parser.parse()
     });
     let mut wrap_parens = false;

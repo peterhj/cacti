@@ -59,6 +59,12 @@ impl GpuSnapshot {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum NvGpuInnerReg {
+  Mem{ptr: *mut c_void, size: usize},
+  VMem{dptr: u64, size: usize},
+}
+
 //#[derive(Clone)]
 pub struct GpuOuterCell {
   pub write:    Rc<GpuSnapshot>,
@@ -200,19 +206,7 @@ impl PCtxImpl for NvGpuPCtx {
   }
 
   fn fastest_locus(&self) -> Locus {
-    if self.info.integrated {
-      println!("DEBUG: NvGpuPCtx::fastest_locus: integrated: capability={}.{}",
-          self.info.capability_major, self.info.capability_minor);
-      if !self.info.unified_address {
-        println!("WARNING: NvGpuPCtx::fastest_locus: integrated but not unified address space");
-      }
-      if !self.info.managed_memory {
-        println!("WARNING: NvGpuPCtx::fastest_locus: integrated but not managed memory");
-      }
-      Locus::Mem
-    } else {
-      Locus::VMem
-    }
+    self.device_locus()
   }
 
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>) {
@@ -242,6 +236,9 @@ impl PCtxImpl for NvGpuPCtx {
         let addr = pctr.fresh_addr();
         assert!(self.page_map.alloc_map.borrow_mut().insert(addr, Rc::new(mem)).is_none());
         Ok(addr)
+      }
+      Locus::VMem => {
+        unimplemented!();
       }
       _ => unimplemented!()
     }
@@ -298,6 +295,22 @@ impl NvGpuPCtx {
     self.pctx.device()
   }
 
+  pub fn device_locus(&self) -> Locus {
+    if self.info.integrated {
+      println!("DEBUG: NvGpuPCtx::device_locus: integrated: capability={}.{}",
+          self.info.capability_major, self.info.capability_minor);
+      if !self.info.unified_address {
+        println!("WARNING: NvGpuPCtx::device_locus: integrated but not unified address space");
+      }
+      if !self.info.managed_memory {
+        println!("WARNING: NvGpuPCtx::device_locus: integrated but not managed memory");
+      }
+      Locus::Mem
+    } else {
+      Locus::VMem
+    }
+  }
+
   /*fn _fresh_inner_ref(&self) -> GpuInnerRef {
     let next = self.iref_ctr.get() + 1;
     assert!(next > 0);
@@ -306,8 +319,12 @@ impl NvGpuPCtx {
     GpuInnerRef(next)
   }*/
 
-  //pub fn find_dptr(&self, p: CellPtr) -> Option<u64> {}
+  /*//pub fn find_dptr(&self, p: CellPtr) -> Option<u64> {}
   pub fn find_dptr(&self, p: PAddr) -> Option<u64> {
+    unimplemented!();
+  }*/
+
+  pub fn find_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
     unimplemented!();
   }
 
@@ -399,7 +416,7 @@ impl NvGpuPCtx {
     let mut cel_map = self.cel_map.borrow_mut();
     match cel_map.remove(&x) {
       None => panic!("bug"),
-      Some(mut cel) => {
+      Some(cel) => {
         assert_eq!(cel.ptr.get(), x);
         cel.ptr.set(y);
         let mut alloc_map = self.mem_pool.alloc_map.borrow_mut();

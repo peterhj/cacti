@@ -12,6 +12,20 @@ use std::cmp::{Ordering};
 use std::collections::{HashMap, HashSet};
 //use std::mem::{swap};
 
+pub const INTRO_CODE:           u8 = b':';
+pub const CACHE_CODE:           u8 = b'C';
+pub const CACHE_INIT_CODE:      u8 = b'I';
+pub const YIELD_SET_CODE:       u8 = b'Y';
+pub const YIELD_INIT_CODE:      u8 = b'J';
+pub const ALIAS_CODE:           u8 = b'@';
+//pub const KEEP_CODE:            u8 = _;
+//pub const SNAPSHOT_CODE:        u8 = _;
+pub const PUSH_SEAL_CODE:       u8 = b',';
+pub const INITIALIZE_CODE:      u8 = b'0';
+pub const APPLY_CODE:           u8 = b'=';
+pub const ACCUMULATE_CODE:      u8 = b'+';
+pub const UNSAFE_WRITE_CODE:    u8 = b'!';
+
 pub enum SpineResume<'a> {
   _Top,
   PutMemV(CellPtr, &'a dyn Any),
@@ -70,6 +84,8 @@ pub enum SpineEntry {
   YieldSet(CellPtr, Locus),
   YieldInit(CellPtr, Locus),
   Alias(CellPtr, CellPtr),
+  //Keep(CellPtr),
+  //Snapshot(CellPtr, CellPtr, CellPtr, /*Clock*/),
   PushSeal(CellPtr),
   Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
@@ -931,10 +947,19 @@ impl Spine {
       }
       &SpineEntry::YieldInit(x, loc) => {
         println!("DEBUG: Spine::_step: YieldInit: x={:?} loc={:?} key={:?}", x, loc, item.key());
-        panic!();
+        unimplemented!();
       }
       &SpineEntry::PushSeal(x) => {
-        unimplemented!();
+        match env.lookup_ref(x) {
+          None => panic!("bug"),
+          Some(e) => {
+            assert!(e.state().flag.intro());
+            let xclk = e.state().clk;
+            assert!(!xclk.ctr().is_nil());
+            thunkenv.arg.push((x, xclk));
+            e.state().flag.set_seal();
+          }
+        }
       }
       &SpineEntry::Initialize(x, ith) => {
         /*match env.lookup_ref(x) {
@@ -1033,7 +1058,7 @@ impl Spine {
                   clo.borrow_mut().thunk_.push(th);
                   assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
                 }
-                _ => panic!("bug")
+                _ => panic!("bug: Spine::_step: Apply: cel={:?}", e.cel_.name())
               }
             }
           }
@@ -1359,7 +1384,7 @@ pub fn backward(tg: CellPtr) {
             /*let sink = match tg_ty_.dtype {
               Dtype::Float32 => {
                 let value = 1.0_f32;
-                ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_thunk_val()})
+                ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val()})
               }
               _ => unimplemented!()
             };*/

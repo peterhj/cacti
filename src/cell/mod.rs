@@ -168,8 +168,8 @@ impl StableCell {
     ctx_insert(ty).into()
   }
 
-  pub fn set_scalar<T: ThunkValExt>(value: T) -> StableCell {
-    ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_thunk_val()}).into()
+  pub fn set_scalar<T: IntoScalarValExt>(value: T) -> StableCell {
+    ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val()}).into()
   }
 
   pub fn array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
@@ -261,6 +261,53 @@ impl MCellPtr {
 
   pub fn is_nil(&self) -> bool {
     self.0 == 0
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub enum ScalarVal_ {
+  F64(TotalOrd<f64>),
+  F32(TotalOrd<f32>),
+  // TODO
+}
+
+impl ScalarVal_ {
+  pub fn dtype(self) -> Dtype {
+    match self {
+      ScalarVal_::F64(_) => Dtype::Float64,
+      ScalarVal_::F32(_) => Dtype::Float32,
+    }
+  }
+}
+
+pub trait IntoScalarValExt: DtypeExt {
+  type Val: DtypeExt + Copy + Eq + Any;
+
+  fn into_scalar_val(self) -> Self::Val;
+  fn into_scalar_val_(self) -> ScalarVal_;
+}
+
+impl IntoScalarValExt for f32 {
+  type Val = TotalOrd<f32>;
+
+  fn into_scalar_val(self) -> Self::Val {
+    self.into()
+  }
+
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    ScalarVal_::F32(self.into())
+  }
+}
+
+impl IntoScalarValExt for f64 {
+  type Val = TotalOrd<f64>;
+
+  fn into_scalar_val(self) -> Self::Val {
+    self.into()
+  }
+
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    ScalarVal_::F64(self.into())
   }
 }
 
@@ -469,8 +516,9 @@ pub trait DtypeExt {
   //fn is_zero(&self) -> bool;
 }
 
+impl DtypeExt for TotalOrd<f64> { fn dtype() -> Dtype { Dtype::Float64 } }
 impl DtypeExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Float32 } }
-impl DtypeExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Float32 } }
+//impl DtypeExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Float32 } }
 
 impl DtypeExt for f64 { fn dtype() -> Dtype { Dtype::Float64 } }
 impl DtypeExt for f32 { fn dtype() -> Dtype { Dtype::Float32 } }
@@ -835,6 +883,17 @@ impl PCell {
     }
   }
 
+  pub fn get(&mut self, q_clk: Clock, q_locus: Locus, q_pmach: PMach, ty: &CellType) -> PAddr {
+    match self.replicas.find((q_locus, q_pmach)) {
+      None => {}
+      Some((_, rep)) => {
+        return rep.addr;
+      }
+    }
+    // FIXME FIXME
+    unimplemented!();
+  }
+
   pub fn get_loc(&mut self, q_clk: Clock, q_locus: Locus, ty: &CellType) -> (PMach, PAddr) {
     let q_pmach = match self.lookup_loc(q_locus) {
       None => None,
@@ -897,7 +956,8 @@ impl PCell {
     unimplemented!();
   }
 
-  pub fn get(&mut self, q_clk: Clock) -> PAddr {
+  pub fn get_any(&mut self, q_clk: Clock) -> (Locus, PMach, PAddr) {
+    // FIXME FIXME
     unimplemented!();
   }
 
