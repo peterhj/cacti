@@ -480,6 +480,22 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   }
 
   #[track_caller]
+  fn log(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = LogFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      /*ctx_push_cell_tmp_out();*/
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn ln(&self) -> CellPtr {
+    panick_wrap(|| self.log())
+  }
+
+  #[track_caller]
   fn inner_max(&self) -> CellPtr {
     unimplemented!();
     /*

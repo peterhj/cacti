@@ -125,7 +125,8 @@ fn main() {
               .new_shape([ubat_sz * seq_len, num_head * seq_len]);
     let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
     let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, head_dim], false);
-    let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].o, [inner_dim, inner_dim], true);
+    let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].o, [inner_dim, inner_dim], true)
+                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     let stream = stream + o_proj;
     // FIXME FIXME: post layer norm, mlp.
     //let stream = post_layer_norm(stream);
@@ -185,6 +186,7 @@ fn main() {
       mem.copy_from_slice(&tok_buf);
     });
     // TODO
+    println!("boot: end of iter...");
     break;
   }
 }

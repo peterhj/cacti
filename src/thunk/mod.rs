@@ -167,6 +167,7 @@ impl Hash for ThunkKey {
 }
 
 pub trait ThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> { None }
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
@@ -182,6 +183,7 @@ pub trait ThunkSpec_ {
   fn as_any(&self) -> &dyn Any;
   fn as_bytes_repr(&self) -> &[u8];
   fn thunk_eq(&self, other: &dyn ThunkSpec_) -> Option<bool>;
+  fn debug_name(&self) -> Option<&'static str>;
   fn arity(&self) -> (u16, u16);
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
@@ -207,6 +209,10 @@ impl<T: ThunkSpec + Eq + Any> ThunkSpec_ for T {
 
   fn thunk_eq(&self, other: &dyn ThunkSpec_) -> Option<bool> {
     other.as_any().downcast_ref::<T>().map(|other| self == other)
+  }
+
+  fn debug_name(&self) -> Option<&'static str> {
+    ThunkSpec::debug_name(self)
   }
 
   fn arity(&self) -> (u16, u16) {
@@ -296,6 +302,7 @@ impl From<FutharkThunkCode> for Result<FutharkThunkCode, FutharkGenErr> {
 
 pub trait FutharkThunkSpec {
   //fn tag(&self) -> Option<&'static str> { None }
+  fn debug_name(&self) -> Option<&'static str> { None }
   /*fn arity(&self) -> (u16, u16);*/
   fn abi(&self) -> FutAbi;
   fn abi_param(&self, _param: &mut [FutAbiScalar]) -> usize { 0 }
@@ -314,6 +321,10 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
   /*fn tag(&self) -> Option<&'static str> {
     FutharkThunkSpec::tag(self)
   }*/
+
+  fn debug_name(&self) -> Option<&'static str> {
+    FutharkThunkSpec::debug_name(self)
+  }
 
   fn arity(&self) -> (u16, u16) {
     /*FutharkThunkSpec::arity(self)*/
@@ -472,37 +483,38 @@ impl FutharkThunkCode {
     match out0.ndim() {
       0 => {
         let mut code = FutharkThunkCode::default();
-        code.body.push(format!("let {{%0}} = ({}) in", val));
+        code.body.push(format!(r"let {{%0}} = ({}) in", val));
         code.into()
       }
       1 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_out0_shape = true;
-        code.body.push(format!("let {{%0}} = replicate {{%0.s[0]}} ({}) in", val));
+        code.body.push(format!(r"let {{%0}} = replicate {{%0.s[0]}} ({}) in", val));
         code.into()
       }
       2 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_out0_shape = true;
-        code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val));
-        code.body.push(format!("let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
+        code.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val));
+        code.body.push(format!(r"let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
         code.into()
       }
       3 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_out0_shape = true;
-        code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val));
-        code.body.push(format!("let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
+        code.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val));
+        code.body.push(format!(r"let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
         code.into()
       }
       4 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_out0_shape = true;
-        code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val));
-        code.body.push(format!("let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
+        code.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val));
+        code.body.push(format!(r"let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
         code.into()
       }
       _ => {
+        println!("WARNING: FutharkThunkCode::replicate_nd: not implemented");
         Err(FutharkGenErr::NotImpl)
       }
     }
@@ -513,39 +525,40 @@ impl FutharkThunkCode {
     match arg0.ndim() {
       0 => {
         let mut code = FutharkThunkCode::default();
-        code.body.push(format!("let {{%1}} = ({}) {{%0}} in", lam));
+        code.body.push(format!(r"let {{%1}} = ({}) {{%0}} in", lam));
         code.into()
       }
       1 => {
         let mut code = FutharkThunkCode::default();
-        code.body.push(format!("let {{%1}} = map ({}) {{%0}} in", lam));
+        code.body.push(format!(r"let {{%1}} = map ({}) {{%0}} in", lam));
         code.into()
       }
       2 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten {{%0}} in"));
-        code.body.push(format!("let t1 = map ({}) t0 in", lam));
-        code.body.push(format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"));
+        code.body.push(format!(r"let t0 = flatten {{%0}} in"));
+        code.body.push(format!(r"let t1 = map ({}) t0 in", lam));
+        code.body.push(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"));
         code.into()
       }
       3 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten_3d {{%0}} in"));
-        code.body.push(format!("let t1 = map ({}) t0 in", lam));
-        code.body.push(format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
+        code.body.push(format!(r"let t0 = flatten_3d {{%0}} in"));
+        code.body.push(format!(r"let t1 = map ({}) t0 in", lam));
+        code.body.push(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
         code.into()
       }
       4 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten_4d {{%0}} in"));
-        code.body.push(format!("let t1 = map ({}) t0 in", lam));
-        code.body.push(format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
+        code.body.push(format!(r"let t0 = flatten_4d {{%0}} in"));
+        code.body.push(format!(r"let t1 = map ({}) t0 in", lam));
+        code.body.push(format!(r"let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
         code.into()
       }
       _ => {
+        println!("WARNING: FutharkThunkCode::map_nd: not implemented");
         Err(FutharkGenErr::NotImpl)
       }
     }
@@ -556,42 +569,50 @@ impl FutharkThunkCode {
     match (arg0.ndim(), arg1.ndim()) {
       (0, 0) => {
         let mut code = FutharkThunkCode::default();
-        code.body.push(format!("let {{%2}} = ({}) {{%0}} {{%1}} in", lam));
+        code.body.push(format!(r"let {{%2}} = ({}) {{%0}} {{%1}} in", lam));
         code.into()
       }
       (1, 1) => {
         let mut code = FutharkThunkCode::default();
-        code.body.push(format!("let {{%2}} = map2 ({}) {{%0}} {{%1}} in", lam));
+        code.cfg.emit_arg_shapes = true;
+        code.body.push(format!(r"let a = {{%0.s[0]}} in"));
+        code.body.push(format!(r"let t0 = {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        code.body.push(format!(r"let t1 = {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        code.body.push(format!(r"let {{%2}} = map2 ({}) t0 t1 in", lam));
         code.into()
       }
       (2, 2) => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten {{%0}} in"));
-        code.body.push(format!("let t1 = flatten {{%1}} in"));
-        code.body.push(format!("let t2 = map2 ({}) t0 t1 in", lam));
-        code.body.push(format!("let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        code.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} in"));
+        code.body.push(format!(r"let t0 = flatten {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        code.body.push(format!(r"let t1 = flatten {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        code.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.body.push(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
         code.into()
       }
       (3, 3) => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten_3d {{%0}} in"));
-        code.body.push(format!("let t1 = flatten_3d {{%1}} in"));
-        code.body.push(format!("let t2 = map2 ({}) t0 t1 in", lam));
-        code.body.push(format!("let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
+        code.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
+        code.body.push(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        code.body.push(format!(r"let t1 = flatten_3d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        code.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.body.push(format!(r"let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
         code.into()
       }
       (4, 4) => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!("let t0 = flatten_4d {{%0}} in"));
-        code.body.push(format!("let t1 = flatten_4d {{%1}} in"));
-        code.body.push(format!("let t2 = map2 ({}) t0 t1 in", lam));
-        code.body.push(format!("let {{%2}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
+        code.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}} in"));
+        code.body.push(format!(r"let t0 = flatten_4d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        code.body.push(format!(r"let t1 = flatten_4d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        code.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.body.push(format!(r"let {{%2}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
         code.into()
       }
       _ => {
+        println!("WARNING: FutharkThunkCode::map2_nd: not implemented: {:?} {:?}", arg0, arg1);
         Err(FutharkGenErr::NotImpl)
       }
     }
@@ -606,7 +627,7 @@ pub struct FutharkThunkObject<B: FutBackend> {
 pub trait FutharkThunkImpl_<B: FutBackend> {
   fn _dropck(&mut self);
   unsafe fn _setup_object(obj: &mut FutObject<B>);
-  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str) -> Option<(FutObject<B>, Vec<(PAddr, StableCell)>)>;
+  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str, rst: Counter) -> Option<(FutObject<B>, Vec<(PAddr, StableCell)>)>;
 }
 
 pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
@@ -633,7 +654,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
   unsafe fn _setup_object(_obj: &mut FutObject<MulticoreBackend>) {
   }
 
-  fn _build_object(_ctr: &CtxCtr, _env: &mut CtxEnv, _config: &FutConfig, _source: &str) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
+  fn _build_object(_ctr: &CtxCtr, _env: &mut CtxEnv, _config: &FutConfig, _source: &str, _rst: Counter) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
     None
   }
 }
@@ -709,7 +730,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     //unimplemented!();
   }
 
-  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str) -> Option<(FutObject<CudaBackend>, Vec<(PAddr, StableCell)>)> {
+  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, source: &str, rst: Counter) -> Option<(FutObject<CudaBackend>, Vec<(PAddr, StableCell)>)> {
     assert!(TL_LIBNVRTC_BUILTINS_BARRIER.with(|&bar| bar));
     TL_PCTX.with(|pctx| {
       let dev = pctx.nvgpu.as_ref().unwrap().dev();
@@ -757,9 +778,10 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
                 /*let icel = Rc::downgrade(gpu_cel);
                 pcel.push_new_replica(locus, pmach, Some(icel));*/
                 // FIXME: check that this const clock definition is correct.
-                let mut clk: Clock = TL_CTX.with(|ctx| {
+                /*let mut clk: Clock = TL_CTX.with(|ctx| {
                   ctx.spine.borrow().ctr.into()
-                });
+                });*/
+                let mut clk: Clock = rst.into();
                 clk.up = 1;
                 pcel.push_new_replica(clk, locus, pmach, p);
                 env.insert_phy(x, ty, pcel);
@@ -868,7 +890,7 @@ impl FutharkThunkBuildConfig {
 }
 
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, mut cfg: FutharkThunkBuildConfig) {
+  pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, mut cfg: FutharkThunkBuildConfig, rst: Counter) {
     cfg = self.code.cfg.merge(cfg);
     let mut s = String::new();
     write!(&mut s, "entry kernel").unwrap();
@@ -906,7 +928,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
           let dim = self.spec_dim[self.abi.arityin as usize];
           if dim.ndim >= 1 && !cfg.emit_out0_shape {
             cfg.emit_out0_shape = true;
-            return self._try_build(ctr, env, mode, cfg);
+            return self._try_build(ctr, env, mode, cfg, rst);
           }
           let fty = if cfg.emit_out0_shape {
             _to_futhark_entry_out0_type(dim)
@@ -1065,7 +1087,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         config.include = prefix.join("include");
       }
     });
-    if let Some((obj, consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, &*self.source.borrow()) {
+    if let Some((obj, consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, &*self.source.borrow(), rst) {
       //*self.object.borrow_mut() = Some(obj);
       //*self.consts.borrow_mut() = consts;
       /*for key in self.modekeys.borrow().iter() {
@@ -1092,7 +1114,7 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     // FIXME
     if self.objects.borrow().find(ThunkMode::Apply0).is_none() {
-      self._try_build(ctr, env, ThunkMode::Apply0, FutharkThunkBuildConfig::default());
+      self._try_build(ctr, env, ThunkMode::Apply0, FutharkThunkBuildConfig::default(), oclk.ctr());
     }
     if self.objects.borrow().find(ThunkMode::Apply0).is_none() {
       panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
@@ -1137,7 +1159,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       }
     };
     if self.objects.borrow().find(mode).is_none() {
-      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
+      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default(), oclk.ctr());
     }
     if self.objects.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: build error");
@@ -1420,7 +1442,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     let mode = ThunkMode::Accumulate;
     if self.objects.borrow().find(mode).is_none() {
-      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default());
+      self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default(), oclk.ctr());
     }
     if self.objects.borrow().find(mode).is_none() {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: build error");
