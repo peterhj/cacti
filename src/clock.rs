@@ -111,6 +111,10 @@ impl Clock {
     Counter{rst: self.rst}
   }
 
+  pub fn is_nil(&self) -> bool {
+    self.rst == 0
+  }
+
   pub fn advance(&self) -> Clock {
     let mut next_rst = self.rst.wrapping_add(1);
     if next_rst == 0 {

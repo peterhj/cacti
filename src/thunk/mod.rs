@@ -1120,7 +1120,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
               match pcel.lookup(loc, PMach::NvGpu) {
                 None => ThunkMode::Apply0,
                 Some(rep) => {
-                  match gpu.find_reg(rep.addr) {
+                  match gpu.lookup_reg(rep.addr) {
                     None => ThunkMode::Apply0,
                     Some(NvGpuInnerReg::Mem{..}) |
                     Some(NvGpuInnerReg::VMem{..}) => {
@@ -1177,7 +1177,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         match e.cel_ {
           &mut Cell_::Phy(.., ref mut pcel) => {
             let addr = pcel.get(arg[k].1, &e.ty, loc, PMach::NvGpu);
-            let (dptr, size) = match gpu.find_reg(addr) {
+            /*let (dptr, size) = match gpu.lookup_reg(addr) {
               #[cfg(target_pointer_width = "64")]
               Some(NvGpuInnerReg::Mem{ptr, size}) => {
                 assert!(gpu.info.unified_address);
@@ -1185,7 +1185,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
               }
               Some(NvGpuInnerReg::VMem{dptr, size}) => (dptr, size),
               _ => panic!("bug")
-            };
+            };*/
+            let (dptr, size) = gpu.lookup_dev(addr).unwrap();
             a.set_mem_parts(dptr, size);
           }
           _ => panic!("bug")
@@ -1227,7 +1228,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
             match e.cel_ {
               &mut Cell_::Phy(.., ref mut pcel) => {
                 let addr = pcel.get(oclk, &e.ty, loc, PMach::NvGpu);
-                let (dptr, size) = match gpu.find_reg(addr) {
+                /*let (dptr, size) = match gpu.lookup_reg(addr) {
                   #[cfg(target_pointer_width = "64")]
                   Some(NvGpuInnerReg::Mem{ptr, size}) => {
                     assert!(gpu.info.unified_address);
@@ -1235,7 +1236,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
                   }
                   Some(NvGpuInnerReg::VMem{dptr, size}) => (dptr, size),
                   _ => panic!("bug")
-                };
+                };*/
+                let (dptr, size) = gpu.lookup_dev(addr).unwrap();
                 a.set_mem_parts(dptr, size);
               }
               _ => panic!("bug")
@@ -1365,7 +1367,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
                     // FIXME: defaults below are placeholders for...?
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
-                    let mut pcel = PCell::new_loc(optr, out_ty_[0].clone(), Locus::VMem);
+                    let mut pcel = PCell::new(optr, out_ty_[0].clone());
                     pcel.push_new_replica(oclk, Locus::VMem, PMach::NvGpu, p);
                     *e.cel_ = Cell_::Phy(state, clo, pcel);
                     f = true;

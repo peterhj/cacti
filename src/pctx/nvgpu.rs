@@ -5,7 +5,6 @@ use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::*;
-use crate::pctx::smp::{MemReg};
 
 use cacti_gpu_cu_ffi::*;
 //use cacti_gpu_cu_ffi::types::{CU_CTX_SCHED_YIELD, cudaErrorCudartUnloading, cudaErrorNotReady};
@@ -97,8 +96,8 @@ pub struct NvGpuInnerCell {
   pub sz:       usize,
   //pub write:    Rc<CudartEvent>,
   //pub lastuse:  Rc<CudartEvent>,
-  pub write:    Rc<GpuSnapshot>,
-  pub lastuse:  Rc<GpuSnapshot>,
+  //pub write:    Rc<GpuSnapshot>,
+  //pub lastuse:  Rc<GpuSnapshot>,
   //pub lastcopy: Rc<GpuSnapshot>,
   // FIXME
   //pub smp_dep:  Option<Rc<SmpInnerCell>>,
@@ -234,7 +233,7 @@ impl PCtxImpl for NvGpuPCtx {
       Locus::Mem => {
         let mem = NvGpuMemCell::try_alloc(sz)?;
         let addr = pctr.fresh_addr();
-        assert!(self.page_map.alloc_map.borrow_mut().insert(addr, Rc::new(mem)).is_none());
+        assert!(self.page_map.addr_tab.borrow_mut().insert(addr, Rc::new(mem)).is_none());
         Ok(addr)
       }
       Locus::VMem => {
@@ -338,7 +337,43 @@ impl NvGpuPCtx {
     unimplemented!();
   }
 
-  pub fn copy_mem_to_gpu(&self, cel: &GpuInnerCell, src_mem: *const u8, mem_sz: usize) {
+  pub fn hard_copy(&self, dst_loc: Locus, dst: PAddr, src_loc: Locus, src: PAddr) {
+    match (dst_loc, src_loc) {
+      (Locus::VMem, Locus::Mem) => {
+        let (dst_dptr, dst_sz) = match self.lookup_reg(dst) {
+          Some(NvGpuInnerReg::VMem{dptr, size}) => (dptr, size),
+          _ => panic!("bug")
+        };
+        let (src_ptr, src_sz) = match self.lookup_reg(src) {
+          Some(NvGpuInnerReg::Mem{ptr, size}) => (ptr, size),
+          _ => panic!("bug")
+        };
+        assert_eq!(dst_sz, src_sz);
+        println!("DEBUG: NvGpuPCtx::hard_copy: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
+            dst_dptr, src_ptr as usize, src_sz);
+        self.compute.sync().unwrap();
+        cuda_memcpy_h2d_async(dst_dptr, src_ptr, src_sz, &self.compute).unwrap();
+        self.compute.sync().unwrap();
+      }
+      _ => unimplemented!()
+    }
+  }
+
+  pub fn hard_copy_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
+    println!("DEBUG: NvGpuPCtx::hard_copy_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
+        dst_dptr, src_ptr as usize, sz);
+    self.compute.sync().unwrap();
+    cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
+    self.compute.sync().unwrap();
+  }
+
+  pub fn soft_copy_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
+    println!("DEBUG: NvGpuPCtx::soft_copy_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
+        dst_dptr, src_ptr as usize, sz);
+    cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
+  }
+
+  /*pub fn copy_mem_to_gpu(&self, cel: &GpuInnerCell, src_mem: *const u8, mem_sz: usize) {
     // FIXME
     cuda_memcpy_h2d_async(cel.dptr, src_mem as _, mem_sz, &self.copy_to).unwrap();
     cel.write.set_record();
@@ -357,7 +392,7 @@ impl NvGpuPCtx {
 
   pub fn copy_swap_from_gpu(&self, cel: &GpuInnerCell, dst: (), mem_sz: usize) {
     unimplemented!();
-  }
+  }*/
 
   pub fn try_pre_alloc(&self, query_sz: usize) -> Option<(usize, usize, usize)> {
     self.mem_pool.try_front_pre_alloc(query_sz)
@@ -371,8 +406,8 @@ impl NvGpuPCtx {
     /*cudart_set_cur_dev(self.dev()).unwrap();
     let write = Rc::new(CudartEvent::create_fastest().unwrap());
     let lastuse = Rc::new(CudartEvent::create_fastest().unwrap());*/
-    let write = GpuSnapshot::fresh(self.dev());
-    let lastuse = GpuSnapshot::fresh(self.dev());
+    //let write = GpuSnapshot::fresh(self.dev());
+    //let lastuse = GpuSnapshot::fresh(self.dev());
     let cel = Rc::new(GpuInnerCell{
       ptr: Cell::new(ptr),
       clk: Cell::new(Clock::default()),
@@ -381,8 +416,8 @@ impl NvGpuPCtx {
       dptr,
       off: offset,
       sz: req_sz,
-      write,
-      lastuse,
+      //write,
+      //lastuse,
       // FIXME
     });
     println!("DEBUG: GpuPCtx::alloc: p={:?} dptr=0x{:016x} sz={} off={}", ptr, dptr, req_sz, offset);
@@ -403,9 +438,9 @@ impl NvGpuPCtx {
         if c > 1 {
           return None;
         }*/
-        let mut sw = SpinWait::default();
+        /*let mut sw = SpinWait::default();
         cel.write.wait(&mut sw);
-        cel.lastuse.wait(&mut sw);
+        cel.lastuse.wait(&mut sw);*/
         // FIXME FIXME: remove from front.
         drop(cel);
         self.mem_pool.front_set.borrow_mut().remove(&ptr);
@@ -438,21 +473,21 @@ impl NvGpuPCtx {
     }
   }
 
-  pub fn lookup(&self, x: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+  /*pub fn lookup(&self, x: PAddr) -> Option<Rc<NvGpuInnerCell>> {
     match self.cel_map.borrow().get(&x) {
       None => None,
       Some(icel) => Some(icel.clone())
     }
-  }
+  }*/
 
-  pub fn lookup2(&self, x: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+  pub fn lookup_(&self, x: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
     match self.cel_map.borrow().get(&x) {
       None => {}
       Some(icel) => {
         return Some((Locus::VMem, icel.clone()));
       }
     }
-    match self.page_map.alloc_map.borrow().get(&x) {
+    match self.page_map.addr_tab.borrow().get(&x) {
       None => {}
       Some(icel) => {
         return Some((Locus::Mem, icel.clone()));
@@ -461,9 +496,9 @@ impl NvGpuPCtx {
     None
   }
 
-  pub fn find_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
+  /*pub fn find_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
     self.lookup_reg(p)
-  }
+  }*/
 
   pub fn lookup_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
     match self.cel_map.borrow().get(&p) {
@@ -475,13 +510,33 @@ impl NvGpuPCtx {
         });
       }
     }
-    match self.page_map.alloc_map.borrow().get(&p) {
+    match self.page_map.addr_tab.borrow().get(&p) {
       None => {}
       Some(icel) => {
         return Some(NvGpuInnerReg::Mem{
           ptr:  icel.ptr,
           size: icel.sz,
         });
+      }
+    }
+    None
+  }
+
+  pub fn lookup_dev(&self, p: PAddr) -> Option<(u64, usize)> {
+    match self.cel_map.borrow().get(&p) {
+      None => {}
+      Some(icel) => {
+        return Some((icel.dptr, icel.sz));
+      }
+    }
+    match self.page_map.addr_tab.borrow().get(&p) {
+      None => {}
+      Some(icel) => {
+        assert!(self.info.unified_address);
+        #[cfg(not(target_pointer_width = "64"))]
+        unimplemented!();
+        #[cfg(target_pointer_width = "64")]
+        return Some((icel.ptr as usize as u64, icel.sz));
       }
     }
     None
@@ -535,13 +590,22 @@ impl InnerCell for NvGpuMemCell {
 }
 
 pub struct NvGpuPageMap {
-  pub alloc_map:    RefCell<HashMap<PAddr, Rc<NvGpuMemCell>>>,
+  pub addr_tab: RefCell<HashMap<PAddr, Rc<NvGpuMemCell>>>,
+  pub back_buf: Rc<NvGpuMemCell>,
 }
 
 impl NvGpuPageMap {
   pub fn new() -> NvGpuPageMap {
+    let mem = match NvGpuMemCell::try_alloc(1 << 16) {
+      Err(_) => {
+        println!("ERROR: NvGpuPageMap: failed to allocate shadow back buffer");
+        panic!();
+      }
+      Ok(mem) => mem
+    };
     NvGpuPageMap{
-      alloc_map:    RefCell::new(HashMap::new()),
+      addr_tab: RefCell::new(HashMap::new()),
+      back_buf: Rc::new(mem),
     }
   }
 
@@ -640,7 +704,7 @@ impl GpuMemPool {
     let front_pad = (1 << 16);
     let boundary_pad = (1 << 16);
     let back_pad = (1 << 16);
-    let back_sz = (1 << 22);
+    let back_sz = (1 << 16);
     let front_sz = reserve_sz - (front_pad + boundary_pad + back_sz + back_pad);
     let front_base = reserve_base + front_pad as u64;
     let back_base = reserve_base + (front_pad + front_sz + boundary_pad) as u64;
@@ -753,7 +817,7 @@ impl GpuMemPool {
     mat.map(|(r, _)| r)
   }
 
-  pub fn back_alloc(&self, sz: usize) -> u64 {
+  /*pub fn back_alloc(&self, sz: usize) -> u64 {
   //pub fn try_back_alloc(&self, sz: usize) -> (Option<GpuInnerRef>, Option<Weak<GpuInnerCell>>) {}
     // FIXME: currently, we only use this to alloc int32's for futhark error vars.
     assert_eq!(sz, 4);
@@ -763,12 +827,12 @@ impl GpuMemPool {
     self.back_cursor.set(next_curs);
     println!("DEBUG: GpuMemPool::back_alloc: dptr=0x{:016x} sz={}", dptr, sz);
     dptr
-  }
+  }*/
 
-  pub fn back_free_all(&self) {
+  /*pub fn back_free_all(&self) {
     // FIXME FIXME
     //unimplemented!();
-  }
+  }*/
 }
 
 pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
@@ -802,7 +866,13 @@ pub extern "C" fn tl_pctx_gpu_back_alloc_hook(dptr: *mut u64, sz: usize) -> i32 
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
     // FIXME FIXME
-    let x = pctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);
+    /*let x = pctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);*/
+    if sz > 128 {
+      println!("ERROR: tl_pctx_gpu_back_alloc_hook: requested size={} greater than max size={}", sz, 128);
+      panic!();
+    }
+    let mem_pool = &pctx.nvgpu.as_ref().unwrap().mem_pool;
+    let x = mem_pool.back_base + mem_pool.back_cursor.get() as u64 - 128;
     unsafe {
       write(dptr, x);
     }
@@ -810,7 +880,7 @@ pub extern "C" fn tl_pctx_gpu_back_alloc_hook(dptr: *mut u64, sz: usize) -> i32 
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_back_free_hook(dptr: u64) -> i32 {
+pub extern "C" fn tl_pctx_gpu_back_free_hook(_dptr: u64) -> i32 {
   TL_PCTX.try_with(|_pctx| {
     // FIXME FIXME
     0

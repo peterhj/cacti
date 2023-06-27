@@ -110,48 +110,6 @@ pub fn cuda_device_get(rank: i32) -> CudaResult<i32> {
   Ok(dev)
 }
 
-pub struct CudaPrimaryCtx {
-  raw:  CUcontext,
-  dev:  i32,
-}
-
-impl Drop for CudaPrimaryCtx {
-  fn drop(&mut self) {
-    let e = (LIBCUDA.cuDevicePrimaryCtxRelease.as_ref().unwrap())(self.dev);
-    match e {
-      CUDA_SUCCESS | CUDA_ERROR_DEINITIALIZED => {}
-      _ => panic!("bug")
-    }
-  }
-}
-
-impl CudaPrimaryCtx {
-  pub fn retain(dev: i32) -> CudaResult<CudaPrimaryCtx> {
-    let mut raw = null_mut();
-    let e = (LIBCUDA.cuDevicePrimaryCtxRetain.as_ref().unwrap())(&mut raw, dev);
-    if e != CUDA_SUCCESS {
-      return Err(e);
-    }
-    Ok(CudaPrimaryCtx{dev, raw})
-  }
-
-  pub fn set_flags(&self, flags: u32) -> CudaResult {
-    let e = (LIBCUDA.cuDevicePrimaryCtxSetFlags.as_ref().unwrap())(self.dev, flags);
-    if e != CUDA_SUCCESS {
-      return Err(e);
-    }
-    Ok(())
-  }
-
-  pub fn as_ptr(&self) -> CUcontext {
-    self.raw
-  }
-
-  pub fn device(&self) -> i32 {
-    self.dev
-  }
-}
-
 pub fn cuda_device_attribute_get(dev: i32, key: i32) -> CudaResult<i32> {
   let mut val = -1;
   let e = (LIBCUDA.cuDeviceGetAttribute.as_ref().unwrap())(&mut val, key, dev);
@@ -179,6 +137,64 @@ impl TryFrom<i32> for CudaComputeMode {
       CU_COMPUTEMODE_EXCLUSIVE_PROCESS => CudaComputeMode::ExclusiveProcess,
       _ => return Err(val)
     })
+  }
+}
+
+pub fn cudart_device_reset() -> CudartResult {
+  let e = (LIBCUDART.cudaDeviceReset.as_ref().unwrap())();
+  if e != cudaSuccess {
+    return Err(e);
+  }
+  Ok(())
+}
+
+pub struct CudaPrimaryCtx {
+  raw:  CUcontext,
+  dev:  i32,
+}
+
+impl Drop for CudaPrimaryCtx {
+  fn drop(&mut self) {
+    let e = (LIBCUDA.cuDevicePrimaryCtxRelease.as_ref().unwrap())(self.dev);
+    match e {
+      CUDA_SUCCESS | CUDA_ERROR_DEINITIALIZED => {}
+      _ => panic!("bug")
+    }
+  }
+}
+
+impl CudaPrimaryCtx {
+  pub fn reset(dev: i32) -> CudaResult {
+    let e = (LIBCUDA.cuDevicePrimaryCtxReset.as_ref().unwrap())(dev);
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn retain(dev: i32) -> CudaResult<CudaPrimaryCtx> {
+    let mut raw = null_mut();
+    let e = (LIBCUDA.cuDevicePrimaryCtxRetain.as_ref().unwrap())(&mut raw, dev);
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    Ok(CudaPrimaryCtx{dev, raw})
+  }
+
+  pub fn set_flags(&self, flags: u32) -> CudaResult {
+    let e = (LIBCUDA.cuDevicePrimaryCtxSetFlags.as_ref().unwrap())(self.dev, flags);
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn as_ptr(&self) -> CUcontext {
+    self.raw
+  }
+
+  pub fn device(&self) -> i32 {
+    self.dev
   }
 }
 
@@ -572,6 +588,29 @@ impl CublasContext {
   }
 }
 
+pub fn cublas_gemm(
+    ctx: &CublasContext,
+    tr_a: bool,
+    tr_b: bool,
+    m: i32,
+    n: i32,
+    k: i32,
+    alpha: *const c_void,
+    a: CUdeviceptr,
+    a_ty: cudaDataType_t,
+    lda: i32,
+    b: CUdeviceptr,
+    b_ty: cudaDataType_t,
+    ldb: i32,
+    beta: *const c_void,
+    c: CUdeviceptr,
+    c_ty: cudaDataType_t,
+    ldc: i32,
+    stream_raw: &CUstream,
+) -> CublasResult {
+  unimplemented!();
+}
+
 pub fn cublas_gemm_batched(
     ctx: &CublasContext,
     tr_a: bool,
@@ -580,21 +619,25 @@ pub fn cublas_gemm_batched(
     n: i32,
     k: i32,
     alpha: *const c_void,
-    a: &[CUdeviceptr],
+    //a: &[CUdeviceptr],
+    a: CUdeviceptr,
     a_ty: cudaDataType_t,
     lda: i32,
-    b: &[CUdeviceptr],
+    //b: &[CUdeviceptr],
+    b: CUdeviceptr,
     b_ty: cudaDataType_t,
     ldb: i32,
     beta: *const c_void,
-    c: &[CUdeviceptr],
+    //c: &[CUdeviceptr],
+    c: CUdeviceptr,
     c_ty: cudaDataType_t,
     ldc: i32,
+    nblk: i32,
     stream_raw: &CUstream,
 ) -> CublasResult {
-  assert_eq!(a.len(), c.len());
-  assert_eq!(b.len(), c.len());
-  assert!(c.len() <= i32::max_value() as usize);
+  //assert_eq!(a.len(), c.len());
+  //assert_eq!(b.len(), c.len());
+  //assert!(c.len() <= i32::max_value() as usize);
   ctx.set_stream(stream_raw).unwrap();
   ctx.set_pointer_mode(CublasPointerMode::Host).unwrap();
   let mut flags = CUBLAS_DEFAULT_MATH;
@@ -607,11 +650,15 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        a.as_ptr() as *const usize as *const *const _, lda,
-        b.as_ptr() as *const usize as *const *const _, ldb,
+        //a.as_ptr() as *const usize as *const *const _, lda,
+        //b.as_ptr() as *const usize as *const *const _, ldb,
+        a as usize as *const *const _, lda,
+        b as usize as *const *const _, ldb,
         beta as *const _,
-        c.as_ptr() as *const usize as *const *mut _, ldc,
-        c.len() as i32,
+        //c.as_ptr() as *const usize as *const *mut _, ldc,
+        c as usize as *const *mut _, ldc,
+        //c.len() as i32,
+        nblk,
       )
     }
     (CUDA_R_32F, CUDA_R_32F, CUDA_R_32F) => {
@@ -622,11 +669,15 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        a.as_ptr() as *const usize as *const *const _, lda,
-        b.as_ptr() as *const usize as *const *const _, ldb,
+        //a.as_ptr() as *const usize as *const *const _, lda,
+        //b.as_ptr() as *const usize as *const *const _, ldb,
+        a as usize as *const *const _, lda,
+        b as usize as *const *const _, ldb,
         beta as *const _,
-        c.as_ptr() as *const usize as *const *mut _, ldc,
-        c.len() as i32,
+        //c.as_ptr() as *const usize as *const *mut _, ldc,
+        c as usize as *const *mut _, ldc,
+        //c.len() as i32,
+        nblk,
       )
     }
     (CUDA_R_16F, CUDA_R_16F, CUDA_R_16F) |
@@ -636,6 +687,7 @@ pub fn cublas_gemm_batched(
     (CUDA_R_16F, CUDA_R_32F, CUDA_R_32F) |
     (CUDA_R_32F, CUDA_R_16F, CUDA_R_32F) |
     (CUDA_R_32F, CUDA_R_32F, CUDA_R_16F) => {
+      println!("DEBUG: cublas_gemm_batched: fp16/mixed-precision mode");
       flags |= CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION;
       ctx.set_math_mode(flags).unwrap();
       (LIBCUBLAS.cublasGemmBatchedEx.as_ref().unwrap())(
@@ -644,11 +696,15 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        a.as_ptr() as *const usize as *const *const _, a_ty, lda,
-        b.as_ptr() as *const usize as *const *const _, b_ty, ldb,
+        //a.as_ptr() as *const usize as *const *const _, a_ty, lda,
+        //b.as_ptr() as *const usize as *const *const _, b_ty, ldb,
+        a as usize as *const *const _, a_ty, lda,
+        b as usize as *const *const _, b_ty, ldb,
         beta as *const _,
-        c.as_ptr() as *const usize as *const *mut _, c_ty, ldc,
-        c.len() as i32,
+        //c.as_ptr() as *const usize as *const *mut _, c_ty, ldc,
+        c as usize as *const *mut _, c_ty, ldc,
+        //c.len() as i32,
+        nblk,
         // TODO: check these parameters.
         CUBLAS_COMPUTE_32F,
         CUBLAS_GEMM_DEFAULT,

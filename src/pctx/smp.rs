@@ -1,9 +1,7 @@
 use super::*;
 use crate::algo::{RevSortMap8};
-use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::*;
-use crate::panick::*;
 #[cfg(feature = "gpu")]
 use crate::pctx::nvgpu::{GpuOuterCell};
 #[cfg(feature = "gpu")]
@@ -18,113 +16,9 @@ use libc::{__errno_location};
 use libc::{__errno as __errno_location};
 use libc::{ENOMEM, free, malloc};
 
-use std::borrow::{Borrow};
 use std::cell::{Cell};
-use std::cmp::{min};
 use std::ffi::{c_void};
-use std::io::{Read};
-use std::mem::{align_of};
 //use std::rc::{Rc};
-use std::slice::{from_raw_parts, from_raw_parts_mut};
-
-#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct MemReg {
-  pub ptr:  *mut c_void,
-  pub sz:   usize,
-}
-
-impl MemReg {
-  #[track_caller]
-  pub fn copy_from_slice<T: DtypeExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
-    panick_wrap(|| self._copy_from_slice(src_buf))
-  }
-
-  pub fn _copy_from_slice<T: DtypeExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
-    //let src_buf = src_buf.borrow();
-    let src_len = src_buf.len();
-    let dsz = <T as DtypeExt>::dtype().size_bytes();
-    let src_sz = dsz * src_len;
-    assert_eq!(self.sz, src_sz);
-    let src_start = src_buf.as_ptr() as usize;
-    let src_end = src_start + src_sz;
-    let dst_start = self.ptr as usize;
-    let dst_end = dst_start + self.sz;
-    if !(src_end <= dst_start || dst_end <= src_start) {
-      panic!("bug: MemReg::_copy_from: overlapping src and dst");
-    }
-    unsafe {
-      std::intrinsics::copy_nonoverlapping(src_buf.as_ptr() as *const u8, self.ptr as *mut u8, self.sz);
-    }
-  }
-
-  #[track_caller]
-  pub fn copy_from_reader<R: Read>(&self, src: R) {
-    panick_wrap(|| self._copy_from_reader(src))
-  }
-
-  pub fn _copy_from_reader<R: Read>(&self, mut src: R) {
-    let dst_buf = unsafe { from_raw_parts_mut(self.ptr as *mut u8, self.sz) };
-    let mut dst_off = 0;
-    loop {
-      match src.read(&mut dst_buf[dst_off .. ]) {
-        Err(_) => panic!("ERROR: I/O error"),
-        Ok(0) => break,
-        Ok(n) => {
-          dst_off += n;
-        }
-      }
-    }
-  }
-
-  pub fn _debug_dump_f32(&self) {
-    let len = self.sz / 4;
-    assert_eq!(0, self.sz % 4);
-    assert_eq!(0, (self.ptr as usize) % align_of::<f32>());
-    let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const f32, len) };
-    let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start * 4);
-    for i in start .. min(start + 8, len) {
-      let x = buf[i];
-      print!(" {}", x);
-    }
-    println!();
-    if len <= 0 {
-      return;
-    }
-    let start = (len - 1) - ((len - 1) & (8 - 1));
-    print!("DEBUG: MemReg: {:08x} :", start * 4);
-    for i in start .. min(start + 8, len) {
-      let x = buf[i];
-      print!(" {}", x);
-    }
-    println!();
-  }
-
-  pub fn _debug_dump_f16(&self) {
-    let len = self.sz / 2;
-    assert_eq!(0, self.sz % 2);
-    assert_eq!(0, (self.ptr as usize) % align_of::<u16>());
-    let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const u16, len) };
-    let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start * 2);
-    for i in start .. min(start + 8, len) {
-      let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
-    }
-    println!();
-    if len <= 0 {
-      return;
-    }
-    let start = (len - 1) - ((len - 1) & (8 - 1));
-    print!("DEBUG: MemReg: {:08x} :", start * 2);
-    for i in start .. min(start + 8, len) {
-      let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
-    }
-    println!();
-  }
-}
 
 #[repr(C)]
 pub struct MemCell {

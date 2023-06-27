@@ -384,6 +384,10 @@ impl<K: Copy, V> SortMap8<K, V> {
 }
 
 impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
+  pub fn iter(&self) -> impl Iterator<Item=(&K, &V)> {
+    self.buf.iter().map(|&(ref k, ref v)| (k, v))
+  }
+
   pub fn probe(&self, query: &SortKey8<K>) -> u8 {
     let mut p = query.probe.get();
     let len = self.buf.len();

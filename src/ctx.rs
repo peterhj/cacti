@@ -1,7 +1,7 @@
 use crate::cell::*;
 use crate::clock::{Clock};
 use crate::panick::{panick_wrap};
-use crate::pctx::smp::{MemReg};
+use crate::pctx::{MemReg};
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -361,6 +361,7 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
         }
         let new_ty = CellType{dtype: new_dtype, shape: e.ty.shape.clone()};
         let x = ctx.ctr.fresh_cel();
+        println!("DEBUG: ctx_alias_bits: og={:?} old dtype={:?} x={:?} new dtype={:?}", og, e.ty.dtype, x, new_dtype);
         env.insert_alias(x, new_ty, og);
         let mut spine = ctx.spine.borrow_mut();
         spine.alias(x, og);
@@ -379,10 +380,11 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
         let new_ty = CellType{shape: new_shape, dtype: e.ty.dtype};
         let cmp = new_ty.shape_compat(&e.ty);
         if !(cmp == ShapeCompat::Equal || cmp == ShapeCompat::NewShape) {
-          println!("ERROR: ctx_alias_new_shape: og={:?} old shape={:?} new shape={:?} compat={:?}", og, &e.ty.shape, &new_ty.shape, cmp);
+          println!("ERROR: ctx_alias_new_shape: shape mismatch: og={:?} old shape={:?} new shape={:?} compat={:?}", og, &e.ty.shape, &new_ty.shape, cmp);
           panic!();
         }
         let x = ctx.ctr.fresh_cel();
+        println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} x={:?} new shape={:?} compat={:?}", og, &e.ty.shape, x, &new_ty.shape, cmp);
         env.insert_alias(x, new_ty, og);
         let mut spine = ctx.spine.borrow_mut();
         spine.alias(x, og);
@@ -530,7 +532,13 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
     match ctx.env.borrow().lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
-        let xclk = e.state().clk;
+        //let xclk = Clock::default();
+        //let xclk = e.state().clk;
+        let xclk = ctx.spine.borrow()._version(x).unwrap();
+        if xclk.is_nil() {
+          println!("ERROR: ctx_push_cell_arg: tried to push an uninitialized thunk argument: {:?}", x);
+          panic!();
+        }
         ctx.thunkenv.borrow_mut().arg.push((x, xclk))
       }
     }
@@ -804,9 +812,10 @@ pub struct ThunkEnvEntry {
   pub pthunk:   PThunk,
 }
 
+#[derive(Debug)]
 pub struct ThunkClosure {
-  pub arg:      Vec<(CellPtr, Clock)>,
   pub pthunk:   ThunkPtr,
+  pub arg:      Vec<(CellPtr, Clock)>,
 }
 
 #[derive(Default)]
@@ -830,7 +839,7 @@ impl CtxThunkEnv {
         // FIXME: where to typecheck?
         assert_eq!(arg.len(), te.pthunk.arityin as usize);
         assert_eq!(1, te.pthunk.arityout);
-        let tclo = ThunkClosure{arg, pthunk: tp};
+        let tclo = ThunkClosure{pthunk: tp, arg};
         self.update.insert((y, yclk), tclo);
       }
     }

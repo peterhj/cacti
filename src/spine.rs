@@ -2,10 +2,10 @@ use crate::cell::*;
 use crate::clock::{Counter, Clock};
 use crate::ctx::*;
 use crate::panick::{panick_wrap};
-use crate::pctx::{TL_PCTX, Locus};
-use crate::pctx::smp::{MemReg};
+use crate::pctx::{TL_PCTX, Locus, MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
+use crate::util::time::{Stopwatch};
 
 use std::any::{Any};
 use std::cmp::{Ordering};
@@ -747,6 +747,7 @@ impl Spine {
           self.ctr, self.ctlp, self.hltp, self.curp, retp);
       return SpineRet::Halt;
     }
+    let _ = Stopwatch::tl_lap();
     let mut ret = SpineRet::_Top;
     let entry = &self.log[self.ctlp as usize];
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
@@ -949,6 +950,10 @@ impl Spine {
         println!("DEBUG: Spine::_step: YieldInit: x={:?} loc={:?} key={:?}", x, loc, item.key());
         unimplemented!();
       }
+      &SpineEntry::Alias(x, og) => {
+        // FIXME FIXME
+        //unimplemented!();
+      }
       &SpineEntry::PushSeal(x) => {
         match env.lookup_ref(x) {
           None => panic!("bug"),
@@ -1043,12 +1048,25 @@ impl Spine {
             None => panic!("bug"),
             Some(tclo) => tclo
           };
+          println!("DEBUG: Spine::_step: Apply: x={:?} xclk={:?} th={:?} tclo={:?}",
+              x, xclk, th, tclo);
           assert_eq!(tclo.pthunk, th);
           let te = match thunkenv.thunktab.get(&th) {
             None => panic!("bug"),
             Some(te) => te
           };
-          te.pthunk.apply(ctr, env, &tclo.arg, th, x, xclk);
+          let ret = te.pthunk.apply(ctr, env, &tclo.arg, th, x, xclk);
+          match ret {
+            ThunkRet::NotImpl => {
+              println!("ERROR: Spine::_step: Apply: thunk not implemented");
+              panic!();
+            }
+            ThunkRet::Failure => {
+              println!("ERROR: Spine::_step: Apply: unrecoverable thunk failure");
+              panic!();
+            }
+            ThunkRet::Success => {}
+          }
           match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
@@ -1099,7 +1117,18 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, xclk);
+          let ret = te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, xclk);
+          match ret {
+            ThunkRet::NotImpl => {
+              println!("ERROR: Spine::_step: Accumulate: thunk not implemented");
+              panic!();
+            }
+            ThunkRet::Failure => {
+              println!("ERROR: Spine::_step: Accumulate: unrecoverable thunk failure");
+              panic!();
+            }
+            ThunkRet::Success => {}
+          }
           match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
@@ -1198,15 +1227,14 @@ impl Spine {
           }
         }
       }
-      /*&SpineEntry::Alias(x, y) => {
-        unimplemented!();
-      }*/
       &SpineEntry::Bot => {
         ret = SpineRet::Bot;
       }
       //_ => unimplemented!()
       e => panic!("bug: Spine::_step: unimplemented: {:?}", e)
     }
+    let d = Stopwatch::tl_lap();
+    println!("DEBUG: Spine::_step:   d={:.09} s", d);
     ret
   }
 
