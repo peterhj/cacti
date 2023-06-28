@@ -2,11 +2,11 @@ use super::*;
 use crate::algo::{RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::{GpuOuterCell};
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use cacti_gpu_cu_ffi::{cuda_mem_free_host, cuda_mem_alloc_host};
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use cacti_gpu_cu_ffi::types::{CUDA_ERROR_OUT_OF_MEMORY, CUDA_ERROR_DEINITIALIZED};
 use cacti_smp_c_ffi::*;
 
@@ -38,7 +38,7 @@ impl Drop for MemCell {
         }
       }
       1 => {
-        #[cfg(feature = "gpu")]
+        #[cfg(feature = "nvgpu")]
         unsafe {
           match cuda_mem_free_host(self.ptr) {
             Ok(_) => {}
@@ -70,12 +70,12 @@ impl MemCell {
     }
   }
 
-  #[cfg(not(feature = "gpu"))]
+  #[cfg(not(feature = "nvgpu"))]
   pub fn try_alloc_page_locked(sz: usize) -> Result<MemCell, PMemErr> {
     unimplemented!();
   }
 
-  #[cfg(feature = "gpu")]
+  #[cfg(feature = "nvgpu")]
   pub fn try_alloc_page_locked(sz: usize) -> Result<MemCell, PMemErr> {
     // FIXME: assure 64-bit ptr.
     assert!(sz <= 0x00ff_ffff_ffff_ffff);
@@ -111,7 +111,7 @@ pub struct SmpInnerCell {
   pub clk:  Cell<Clock>,
   pub mem:  MemCell,
   // FIXME
-  //#[cfg(feature = "gpu")]
+  //#[cfg(feature = "nvgpu")]
   //pub gpu:  Option<GpuOuterCell>,
   // TODO
 }

@@ -76,7 +76,7 @@ impl PickleDir {
     self.tensor_key.clone()
   }
 
-  pub fn open(&self, key: &SmolStr) -> (CellType, /*CellLayout,*/ PickleSlice) {
+  pub fn get(&self, key: &SmolStr) -> (CellType, /*CellLayout,*/ PickleSlice) {
     match self.tensor_map.get(key) {
       None => panic!("bug"),
       Some(&(_, ref t)) => {

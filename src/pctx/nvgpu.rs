@@ -367,7 +367,7 @@ impl NvGpuPCtx {
     self.compute.sync().unwrap();
   }
 
-  pub fn soft_copy_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
+  pub fn hard_copy_nb_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
     println!("DEBUG: NvGpuPCtx::soft_copy_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
         dst_dptr, src_ptr as usize, sz);
     cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();

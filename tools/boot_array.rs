@@ -1,6 +1,7 @@
 extern crate cacti;
 
 use cacti::*;
+use cacti::librarium::llama::*;
 use cacti::util::cell::*;
 use cacti::util::pickle::*;
 
@@ -18,7 +19,7 @@ fn main() {
   //let mut pickdir = PickleDir::from("data/openlm/open_llama_7b");
   //let mut pickdir = PickleDir::from("data/openlm/open_llama_13b");
   assert!(pickdir._reload().is_ok());
-  let mut matcher = CellMatcher::new();
+  /*let mut matcher = CellMatcher::new();
   let in_tok = StableCell::array([ubat_sz, seq_len], u16::dtype());
   //let out_next_tok_logit = StableCell::array([ubat_sz, seq_len, tok_dim], f32::dtype());
   //let out_next_tok_prob = StableCell::array([ubat_sz, seq_len, tok_dim], f32::dtype());
@@ -72,12 +73,33 @@ fn main() {
   matcher.insert("norm", head_norm.clone());
   matcher.insert("lm_head", lm_head.clone());
   let matches = matcher.match_(pickdir.clone_keys());
-  let inv_matches = matches.inv();
+  let inv_matches = matches.inv();*/
+  let cfg = LlamaConfig{
+    /*ubat_sz: 1,
+    seq_len: 512,
+    tok_dim: 32000,
+    head_dim: 64,
+    num_head: 50,
+    mlp_inner_dim: 8640,
+    num_layer: 26,*/
+    ubat_sz,
+    seq_len,
+    tok_dim,
+    head_dim,
+    num_head,
+    mlp_inner_dim,
+    num_layer,
+  };
+  let model = Llama::from(cfg);
+  let inv_matches = model.match_pickle_dir(&pickdir);
+  let input = model.make_input();
+  let in_tok = input.in_tok;
   //println!("boot: matches: {:?}", &matches.mat);
   for &(ref cel, ref key) in inv_matches.mat.iter() {
     println!("boot: matches: key={:?} cel={:?}", key, cel);
   }
   for iter_nr in 0 .. 2 {
+    println!("boot: start iter...");
     reset();
     if iter_nr == 0 {
       //embed.mem_set_yield_();
@@ -93,21 +115,22 @@ fn main() {
       //w.cache();
     }
     in_tok.mem_set_yield_();
-    let stream = in_tok.inner_one_hot(tok_dim, f16::dtype());
+    input.in_lm_tok.mem_set_yield_();
+    /*let stream = in_tok.inner_one_hot(tok_dim, f16::dtype());
     let stream = stream.new_shape([ubat_sz * seq_len, tok_dim])
-                       .block_mm([ubat_sz * seq_len, tok_dim], false, &embed, [tok_dim, inner_dim], false)
+                       .block_mm([ubat_sz * seq_len, tok_dim], false, &model.embed, [tok_dim, inner_dim], false)
                        .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     // FIXME FIXME: layer norm.
     let prenrm = stream;
     //let prenrm = pre_layer_norm(&stream);
     let q_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].q, [inner_dim, inner_dim], true)
+                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].q, [inner_dim, inner_dim], true)
                        .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     let k_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].k, [inner_dim, inner_dim], true)
+                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].k, [inner_dim, inner_dim], true)
                        .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     let v_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].v, [inner_dim, inner_dim], true)
+                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].v, [inner_dim, inner_dim], true)
                        .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     // FIXME FIXME: rotary embedding.
     /*
@@ -125,28 +148,35 @@ fn main() {
               .new_shape([ubat_sz * seq_len, num_head * seq_len]);
     let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
     let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, head_dim], false);
-    let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].o, [inner_dim, inner_dim], true)
+    let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].o, [inner_dim, inner_dim], true)
                        .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     let stream = stream + o_proj;
     // FIXME FIXME: post layer norm, mlp.
     //let stream = post_layer_norm(stream);
     let up_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                        .block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].up, [mlp_inner_dim, inner_dim], true);
+                        .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].up, [mlp_inner_dim, inner_dim], true);
     let gate_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                          .block_mm([ubat_sz * seq_len, inner_dim], false, &layers[0].gate, [mlp_inner_dim, inner_dim], true);
+                          .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].gate, [mlp_inner_dim, inner_dim], true);
     //let gate_proj = activation(gate_proj);
     let gate_up = gate_proj * up_proj;
-    let down_proj = gate_up.block_mm([ubat_sz * seq_len, mlp_inner_dim], false, &layers[0].down, [inner_dim, mlp_inner_dim], true)
+    let down_proj = gate_up.block_mm([ubat_sz * seq_len, mlp_inner_dim], false, &model.layers[0].down, [inner_dim, mlp_inner_dim], true)
                            .new_shape([ubat_sz, seq_len, num_head, head_dim]);
     let stream = stream + down_proj;
     /*
     // TODO
     // ...
     */
-    let out_logit = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                          .block_mm([1, inner_dim], false, &lm_head, [tok_dim, inner_dim], true)
-                          .new_shape([ubat_sz, seq_len, tok_dim]);
-    let out_prob = out_logit.inner_softmax();
+    let out_lm_logit = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
+                             .block_mm([1, inner_dim], false, &model.lm_head, [tok_dim, inner_dim], true)
+                             .new_shape([ubat_sz, seq_len, tok_dim]);
+    let out_lm_prob = out_lm_logit.inner_softmax();*/
+    let out = model.apply(&in_tok, &input.in_lm_tok);
+    println!("boot: in_lm_tok.shape={:?}", input.in_lm_tok.shape());
+    println!("boot: in_lm_tok.dtype={:?}", input.in_lm_tok.dtype());
+    println!("boot: out_lm_prob.shape={:?}", out.out_lm_prob.shape());
+    println!("boot: out_lm_prob.dtype={:?}", out.out_lm_prob.dtype());
+    println!("boot: out_lm_loss.shape={:?}", out.out_lm_loss.shape());
+    println!("boot: out_lm_loss.dtype={:?}", out.out_lm_loss.dtype());
     compile();
     resume();
     if iter_nr == 0 {
@@ -154,14 +184,14 @@ fn main() {
       //resume_put_mem_val(&w, &0.0_f32);
       //resume_put_mem_fun(&embed, |_, mem| mem.copy_from_slice(&[0.0_f32]));
       /*resume_put_mem_fun(&embed, |ty, mem| {
-        let (pickty, pickfile) = pickdir.open(inv_matches.get(&embed));
+        let (pickty, pickfile) = pickdir.get(inv_matches.get(&embed));
         assert_eq!(ty, pickty);
         mem.copy_from_reader(pickfile);
         mem._debug_dump_f16();
       });*/
       for (cel, key) in inv_matches.iter() {
         resume_put_mem_fun(cel, |ty, mem| {
-          let (pickty, pickfile) = pickdir.open(inv_matches.get(cel));
+          let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
           if ty != pickty {
             panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
           }
@@ -185,8 +215,16 @@ fn main() {
       }
       mem.copy_from_slice(&tok_buf);
     });
+    resume_put_mem_fun(&input.in_lm_tok, |_, mem| {
+      println!("boot: set in_lm_tok...");
+      let mut tok_buf = Vec::with_capacity(seq_len as _);
+      for _ in 0 .. seq_len {
+        tok_buf.push(0_u16);
+      }
+      mem.copy_from_slice(&tok_buf);
+    });
     // TODO
-    println!("boot: end of iter...");
+    println!("boot: end iter");
     break;
   }
 }

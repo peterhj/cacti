@@ -5,14 +5,15 @@ use crate::clock::*;
 use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 //use crate::op::*;
 use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr};
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
 //use crate::pctx::smp::*;
 //use crate::spine::{Spine};
+use crate::util::time::{Stopwatch};
 use cacti_cfg_env::*;
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use cacti_gpu_cu_ffi::{LIBCUDA, LIBCUDART, LIBNVRTC, TL_LIBNVRTC_BUILTINS_BARRIER};
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use cacti_gpu_cu_ffi::{cuda_memcpy_d2h, cuda_memcpy_d2h_async, CudartStream, cudart_set_cur_dev};
 
 use aho_corasick::{AhoCorasick};
@@ -27,7 +28,7 @@ use futhark_ffi::{
   AbiSpace as FutAbiSpace,
   FutharkFloatFormatter,
 };
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 use futhark_ffi::{
   CudaBackend,
   ArrayDev as FutArrayDev,
@@ -384,11 +385,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           objects: RefCell::new(SortMap8::new()),
         })
       }
-      #[cfg(not(feature = "gpu"))]
+      #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         panic!("ERROR: not compiled with gpu support");
       }
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
         abi.space = FutAbiSpace::Device;
         Rc::new(FutharkThunkImpl::<CudaBackend>{
@@ -659,7 +660,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
   }
 }
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
   fn _dropck(&mut self) {
     assert!(LIBCUDA._inner.is_some());
@@ -701,6 +702,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     (obj.ffi.ctx_cfg_set_cuMemcpyAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyAsync.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuMemcpyHtoDAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoDAsync.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuMemcpyDtoHAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoHAsync.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuStreamSynchronize.as_ref().unwrap())(obj.cfg, LIBCUDA.cuStreamSynchronize.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cudaEventCreate.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventCreate.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cudaEventDestroy.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventDestroy.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cudaEventRecord.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventRecord.as_ref().unwrap().as_ptr() as _);
@@ -724,7 +726,11 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     obj.ctx = (obj.ffi.ctx_new.as_ref().unwrap())(obj.cfg);
     assert!(!obj.ctx.is_null());
     // FIXME FIXME: read out the main stream from gpu pctx.
-    (obj.ffi.ctx_set_stream.as_ref().unwrap())(obj.ctx, CudartStream::null().as_ptr() as *mut _);
+    /*(obj.ffi.ctx_set_stream.as_ref().unwrap())(obj.ctx, CudartStream::null().as_ptr() as *mut _);*/
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      (obj.ffi.ctx_set_stream.as_ref().unwrap())(obj.ctx, gpu.compute.as_ptr() as *mut _);
+    });
     println!("DEBUG: FutharkThunkImpl::_setup_object: ctx done");
     // FIXME FIXME
     //unimplemented!();
@@ -1123,7 +1129,7 @@ impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
   }
 }
 
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
     /*let mode = ThunkMode::Apply;*/
@@ -1276,12 +1282,14 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         }
       }
     }
-    let mut out_raw_arr = Vec::with_capacity(self.abi.arityout as usize);
+    //let mut out_raw_arr = Vec::with_capacity(self.abi.arityout as usize);
+    let mut out_arr = Vec::with_capacity(self.abi.arityout as usize);
     for k in 0 .. self.abi.arityout as usize {
       let ty_ = &out_ty_[k];
       assert_eq!(self.spec_dim[self.abi.arityin as usize + k], ty_.to_dim());
       // FIXME FIXME
-      out_raw_arr.push(null_mut());
+      //out_raw_arr.push(null_mut());
+      out_arr.push(FutArrayDev::null());
     }
     let mut objects = self.objects.borrow_mut();
     let obj = &mut objects.find_mut(mode).unwrap().1.obj;
@@ -1296,9 +1304,21 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     spec_.set_param(&mut param);*/
     /*obj.unify_abi(self.abi).unwrap();*/
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_raw_arr={:?}", &out_raw_arr);
+    //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_raw_arr={:?}", &out_raw_arr);
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: enter kernel...");
-    let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_raw_arr);
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      gpu.compute.sync().unwrap();
+    });
+    let _ = Stopwatch::tl_lap();
+    let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      gpu.compute.sync().unwrap();
+    });
+    let t1 = Stopwatch::tl_lap();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: hard runtime error");
@@ -1315,9 +1335,12 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     // FIXME: at this point, the remaining memblocks are the outputs.
     // but, if any of the inputs were clobbered, then we have to unset those.
     // so, do some kind of unification here.
-    let mut out_arr = Vec::with_capacity(self.abi.arityout as usize);
-    for (k, raw) in out_raw_arr.into_iter().enumerate() {
-      out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
+    //let mut out_arr = Vec::with_capacity(self.abi.arityout as usize);
+    //for (k, raw) in out_raw_arr.into_iter().enumerate() {}
+    for k in 0 .. self.abi.arityout as usize {
+      //out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
+      assert!(!out_arr[k].as_ptr().is_null());
+      out_arr[k]._set_ndim(max(1, out_ty_[k].ndim()));
     }
     /*let out_arr: Vec<_> =
         out_raw_arr.into_iter()
@@ -1406,10 +1429,10 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
           }
         }
       }
-    });
     // TODO TODO
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
-    let ret = CudartStream::null().sync();
+    /*let ret = CudartStream::null().sync();*/
+    let ret = gpu.compute.sync();
     if ret.is_err() {
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: cuda stream sync failed: {:?}", ret);
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: source:");
@@ -1421,7 +1444,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       dst_buf.set_len(mem_size + 4096);
       let mut dst_ptr = dst_buf.as_mut_ptr() as usize;
       dst_ptr = (dst_ptr + (4096 - 1)) / 4096 * 4096;
-      //let ret = cuda_memcpy_d2h_async(dst_buf.as_mut_ptr(), mem_dptr, mem_size, &CudartStream::null());
+      /*let ret = cuda_memcpy_d2h_async(dst_buf.as_mut_ptr(), mem_dptr, mem_size, &CudartStream::null());*/
       let ret = cuda_memcpy_d2h(dst_ptr as *mut _, mem_dptr, mem_size);
       if ret.is_err() {
         println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: cuda memcpy failed: {:?}", ret);
@@ -1431,6 +1454,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       let out_val = *(dst_buf.as_ptr() as *const f32);
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: val={:?}", out_val);
     }
+    });
     {
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: drop arg_arr...");
@@ -1500,12 +1524,14 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         out_ty_.push(ty_);
       }
     }
-    let mut out_raw_arr = Vec::with_capacity(1);
+    //let mut out_raw_arr = Vec::with_capacity(1);
+    let mut out_arr = Vec::with_capacity(1);
     for k in 0 .. 1 {
       let ty_ = &out_ty_[k];
       assert_eq!(self.spec_dim[self.abi.arityin as usize + k], ty_.to_dim());
       // FIXME FIXME
-      out_raw_arr.push(null_mut());
+      //out_raw_arr.push(null_mut());
+      out_arr.push(FutArrayDev::null());
     }
     /*let mut obj = self.object.borrow_mut();
     let obj = obj.as_mut().unwrap();*/
@@ -1518,7 +1544,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     env.reset_tmp();
     ctr.reset_tmp();
     /*obj.unify_abi(self.abi).unwrap();*/
-    let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_raw_arr);
+    let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_arr);
     if o_ret.is_err() || (obj.may_fail() && obj.sync().is_err()) {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: runtime error");
@@ -1527,9 +1553,12 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     drop(obj);
     // FIXME: because of uniqueness, the lone output should the same memblock as
     // the last input; so, make sure not to double free.
-    let mut out_arr = Vec::with_capacity(1);
-    for (k, raw) in out_raw_arr.into_iter().enumerate() {
-      out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
+    //let mut out_arr = Vec::with_capacity(1);
+    //for (k, raw) in out_raw_arr.into_iter().enumerate() {}
+    for k in 0 .. 1 {
+      //out_arr.push(FutArrayDev::from_raw(raw, max(1, out_ty_[k].ndim())));
+      assert!(!out_arr[0].as_ptr().is_null());
+      out_arr[0]._set_ndim(max(1, out_ty_[k].ndim()));
     }
     /*assert_eq!(arg_arr[self.abi.arityin as usize].as_ptr(), out_arr[0].as_ptr());*/
     /*let (out_ptr, out_ndim) = arg_arr.pop().unwrap().into_raw();*/

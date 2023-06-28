@@ -163,9 +163,9 @@ pub struct PCtx {
   pub plmatrix: RevSortMap8<(PMach, Locus), ()>,
   //pub addrtab:  RefCell<HashMap<PAddr, PAddrTabEntry>>,
   pub smp:      SmpPCtx,
-  #[cfg(feature = "gpu")]
+  #[cfg(feature = "nvgpu")]
   pub nvgpu_ct: i32,
-  #[cfg(feature = "gpu")]
+  #[cfg(feature = "nvgpu")]
   pub nvgpu:    Option<NvGpuPCtx>,
   /*pub nvgpu:    Vec<NvGpuPCtx>,*/
 }
@@ -179,12 +179,12 @@ impl PCtx {
       lpmatrix: RevSortMap8::default(),
       plmatrix: RevSortMap8::default(),
       smp:      SmpPCtx::new(),
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       nvgpu_ct: 0,
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       nvgpu:    None,
     };
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "nvgpu")]
     {
       let gpu_ct = NvGpuPCtx::dev_count();
       pctx.nvgpu_ct = gpu_ct;
@@ -195,7 +195,7 @@ impl PCtx {
     }
     pctx.smp.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
     pctx.pmset.insert(PMach::Smp);
-    #[cfg(feature = "gpu")]
+    #[cfg(feature = "nvgpu")]
     if let Some(gpu) = pctx.nvgpu.as_ref() {
       gpu.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
       pctx.pmset.insert(PMach::NvGpu);
@@ -238,11 +238,11 @@ impl PCtx {
 
   pub fn alloc(&self, ty: &CellType, locus: Locus, pmach: PMach) -> PAddr {
     match pmach {
-      #[cfg(not(feature = "gpu"))]
+      #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         unimplemented!();
       }
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
         let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, locus, ty) {
           Err(e) => {
@@ -283,11 +283,11 @@ impl PCtx {
 
   pub fn lookup_pm(&self, pmach: PMach, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
     match pmach {
-      #[cfg(not(feature = "gpu"))]
+      #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         unimplemented!();
       }
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
         self.nvgpu.as_ref().unwrap().lookup_(addr)
       }
@@ -299,7 +299,7 @@ impl PCtx {
 
   pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr) {
     match (dst_pm, src_pm) {
-      #[cfg(feature = "gpu")]
+      #[cfg(feature = "nvgpu")]
       (PMach::NvGpu, PMach::NvGpu) => {
         self.nvgpu.as_ref().unwrap().hard_copy(dst_loc, dst, src_loc, src)
       }

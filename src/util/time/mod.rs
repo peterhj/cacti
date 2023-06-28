@@ -9,7 +9,9 @@ thread_local! {
   pub static TL_WATCH: RefCell<Stopwatch> = RefCell::new(Stopwatch::new());
 }
 
+#[cfg(not(target_os = "linux"))]
 mod default;
+#[cfg(target_os = "linux")]
 mod linux;
 
 impl Stopwatch {

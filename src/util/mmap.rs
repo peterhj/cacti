@@ -1,4 +1,4 @@
-#[cfg(unix)] use libc::{MAP_FAILED, MAP_SHARED, PROT_READ, mmap, munmap};
+#[cfg(unix)] use libc::{MAP_FAILED, MAP_ANON, MAP_PRIVATE, MAP_SHARED, PROT_READ, PROT_WRITE, mmap, munmap};
 
 use std::ffi::{c_void};
 use std::fs::{File};
@@ -28,8 +28,23 @@ impl Drop for MmapBuf {
 
 impl MmapBuf {
   #[cfg(not(unix))]
+  pub fn new_anon(_size: usize) -> Result<MmapBuf, ()> {
+    unimplemented!();
+  }
+
+  #[cfg(not(unix))]
   pub fn from_file(_f: &File) -> Result<MmapBuf, ()> {
     unimplemented!();
+  }
+
+  #[cfg(unix)]
+  pub fn new_anon(size: usize) -> Result<MmapBuf, ()> {
+    let ptr = unsafe { mmap(null_mut(), size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0) };
+    if ptr == MAP_FAILED {
+      return Err(());
+    }
+    assert!(!ptr.is_null());
+    Ok(MmapBuf{ptr, size})
   }
 
   #[cfg(unix)]

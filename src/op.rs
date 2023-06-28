@@ -10,7 +10,7 @@ use futhark_syntax::*;
 
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
-use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div};
+use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
 impl AddAssign<f32> for CellPtr {
@@ -213,17 +213,13 @@ impl<'l, R: Borrow<CellPtr>> Div<R> for &'l CellPtr {
 
   #[track_caller]
   fn div(self, rhs: R) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = self.into();
-    let q = rhs.into();
-    let op = DivThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = DivFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 }
 
@@ -233,6 +229,77 @@ impl<R: Borrow<CellPtr>> Div<R> for CellPtr {
   #[track_caller]
   fn div(self, rhs: R) -> CellPtr {
     panick_wrap(|| (&self).div(rhs))
+  }
+}
+
+impl<'l, R: Borrow<CellPtr>> Div<R> for &'l StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().div(rhs))
+  }
+}
+
+impl<R: Borrow<CellPtr>> Div<R> for StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().div(rhs))
+  }
+}
+
+impl<'l> Neg for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn neg(self) -> CellPtr {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      let x_dtype = ctx_lookup_dtype(x);
+      match x_dtype {
+        Dtype::Float16 => {
+          let op = NegF16FutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
+        _ => {
+          let op = NegFutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
+      }
+    })
+  }
+}
+
+impl Neg for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn neg(self) -> CellPtr {
+    panick_wrap(|| (&self).neg())
+  }
+}
+
+impl<'l> Neg for &'l StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn neg(self) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().neg())
+  }
+}
+
+impl Neg for StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn neg(self) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().neg())
   }
 }
 
@@ -756,6 +823,22 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
       let op = InnerOneHotFutThunkSpec{inner_len, /*org_dtype,*/ new_dtype};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(x);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn inner_select<R: Borrow<CellPtr>>(&self, rank: R) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: inner_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = InnerSelectFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
       ctx_pop_thunk(op)
     })
   }

@@ -1,7 +1,7 @@
 extern crate aho_corasick;
 extern crate byteorder;
 extern crate cacti_cfg_env;
-#[cfg(feature = "gpu")]
+#[cfg(feature = "nvgpu")]
 extern crate cacti_gpu_cu_ffi;
 extern crate cacti_smp_c_ffi;
 extern crate futhark_ffi;
@@ -21,6 +21,8 @@ pub mod algo;
 pub mod cell;
 pub mod clock;
 pub mod ctx;
+#[cfg(feature = "librarium")]
+pub mod librarium;
 pub mod op;
 pub mod panick;
 pub mod pctx;

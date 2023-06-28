@@ -57,6 +57,9 @@ pub struct Libcuda {
   pub cuMemcpyAsync:            Option<Symbol<extern "C" fn (CUdeviceptr, CUdeviceptr, usize, CUstream) -> CUresult>>,
   pub cuMemcpyHtoDAsync:        Option<Symbol<extern "C" fn (CUdeviceptr, *const c_void, usize, CUstream) -> CUresult>>,
   pub cuMemcpyDtoHAsync:        Option<Symbol<extern "C" fn (*mut c_void, CUdeviceptr, usize, CUstream) -> CUresult>>,
+  pub cuStreamCreate:           Option<Symbol<extern "C" fn (*mut CUstream, c_uint) -> CUresult>>,
+  pub cuStreamDestroy:          Option<Symbol<extern "C" fn (CUstream) -> CUresult>>,
+  pub cuStreamSynchronize:      Option<Symbol<extern "C" fn (CUstream) -> CUresult>>,
   pub cuModuleLoadData:         Option<Symbol<extern "C" fn (*mut CUmodule, *const c_void) -> CUresult>>,
   pub cuModuleUnload:           Option<Symbol<extern "C" fn (CUmodule) -> CUresult>>,
   pub cuModuleGetFunction:      Option<Symbol<extern "C" fn (*mut CUfunction, CUmodule, *const c_char) -> CUresult>>,
@@ -111,6 +114,9 @@ impl Libcuda {
     self.cuMemcpyAsync = library.get(b"cuMemcpyAsync").ok();
     self.cuMemcpyHtoDAsync = library.get(b"cuMemcpyHtoDAsync_v2").ok();
     self.cuMemcpyDtoHAsync = library.get(b"cuMemcpyDtoHAsync_v2").ok();
+    self.cuStreamCreate = library.get(b"cuStreamCreate").ok();
+    self.cuStreamDestroy = library.get(b"cuStreamDestroy_v2").ok();
+    self.cuStreamSynchronize = library.get(b"cuStreamSynchronize").ok();
     self.cuModuleLoadData = library.get(b"cuModuleLoadData").ok();
     self.cuModuleUnload = library.get(b"cuModuleUnload").ok();
     self.cuModuleGetFunction = library.get(b"cuModuleGetFunction").ok();
@@ -142,6 +148,7 @@ impl Libcuda {
     i += 1; self.cuMemcpyAsync.as_ref().ok_or(i)?;
     i += 1; self.cuMemcpyHtoDAsync.as_ref().ok_or(i)?;
     i += 1; self.cuMemcpyDtoHAsync.as_ref().ok_or(i)?;
+    i += 1; self.cuStreamSynchronize.as_ref().ok_or(i)?;
     i += 1; self.cuModuleLoadData.as_ref().ok_or(i)?;
     i += 1; self.cuModuleUnload.as_ref().ok_or(i)?;
     i += 1; self.cuModuleGetFunction.as_ref().ok_or(i)?;

@@ -5,8 +5,6 @@ use smol_str::{SmolStr};
 //use std::borrow::{Borrow};
 use std::collections::{HashMap, HashSet};
 
-// TODO
-
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Pat {
   Int(i32),
@@ -36,13 +34,6 @@ impl<'a> From<&'a str> for Pat {
   fn from(x: S) -> Pat {
     Pat::Str(x.borrow().into())
   }
-}*/
-
-/*#[derive(Debug)]
-pub enum Match_ {
-  NoMat,
-  Mat(SmolStr),
-  Amb(SmolStr, SmolStr),
 }*/
 
 pub struct CellMatcher {
@@ -201,6 +192,8 @@ impl CellMatches {
   }
 }
 
+pub type CellInvMatches = CellInvertedMatches;
+
 pub struct CellInvertedMatches {
   pub mat:  Vec<(StableCell, SmolStr)>,
   pub map:  HashMap<StableCell, usize>,
@@ -223,13 +216,4 @@ impl CellInvertedMatches {
       }
     }
   }
-
-  /*pub fn get<V>(&self, cel: &StableCell, map: &HashMap<SmolStr, V>) -> Option<&V> {
-    match self.map.get(cel) {
-      None => panic!("bug"),
-      Some(&idx) => {
-        map.get(&self.mat[idx].1)
-      }
-    }
-  }*/
 }
