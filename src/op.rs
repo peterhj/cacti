@@ -1,4 +1,4 @@
-use crate::cell::{CellPtr, StableCell, CellType, Dtype, IntoScalarValExt, MSet, MMap, MValueRef};
+use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, MSet, MMap, MValueRef};
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
@@ -21,9 +21,41 @@ impl AddAssign<f32> for CellPtr {
     /*panick_wrap(|| {
       let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
       assert!(ctx_clean_arg());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk_mux(op, self.into())
     })*/
+  }
+}
+
+impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
+  #[track_caller]
+  fn add_assign(&mut self, rhs: R) {
+    panick_wrap(|| {
+      let op = NopFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_accumulate_thunk(op, *self)
+    })
+  }
+}
+
+impl<'l, R: Borrow<CellPtr>> AddAssign<R> for &'l mut CellPtr {
+  #[track_caller]
+  fn add_assign(&mut self, rhs: R) {
+    panick_wrap(|| (*self).add_assign(rhs))
+  }
+}
+
+impl<R: Borrow<CellPtr>> AddAssign<R> for StableCell {
+  #[track_caller]
+  fn add_assign(&mut self, rhs: R) {
+    panick_wrap(|| self.as_ptr_mut().add_assign(rhs))
+  }
+}
+
+impl<'l, R: Borrow<CellPtr>> AddAssign<R> for &'l mut StableCell {
+  #[track_caller]
+  fn add_assign(&mut self, rhs: R) {
+    panick_wrap(|| self.as_ptr_mut().add_assign(rhs))
   }
 }
 
@@ -35,8 +67,7 @@ impl<'l> Add<f32> for &'l CellPtr {
     panick_wrap(|| {
       let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self.into());
-      /*ctx_push_cell_tmp_out();*/
+      ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
     })
   }
@@ -259,7 +290,7 @@ impl<'l> Neg for &'l CellPtr {
       let x = *self.borrow();
       let x_dtype = ctx_lookup_dtype(x);
       match x_dtype {
-        Dtype::Float16 => {
+        Dtype::Fp16 => {
           let op = NegF16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
@@ -324,29 +355,6 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   /*#[track_caller]
   fn mm(&self, lt: bool, rhs: R, rt: bool) -> CellPtr {
     unimplemented!();
-  }*/
-
-  /*#[track_caller]
-  fn blockl_mm(&self, l_block: [i64; 2], lt: bool, rhs: R, rt: bool) -> CellPtr {
-    panick_wrap(|| {
-      unimplemented!();
-      // FIXME FIXME
-      /*
-      let o_dtype = p_ty.dtype.max(q_ty.dtype).unwrap();
-      let op = BlockLMatrixMulThunkSpec{
-        l_block,
-        lt,
-        rt,
-        l_dtype: p_ty.dtype,
-        r_dtype: q_ty.dtype,
-        o_dtype,
-      };
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(p);
-      ctx_push_cell_arg(q);
-      ctx_pop_thunk(op)
-      */
-    })
   }*/
 
   #[track_caller]
@@ -431,7 +439,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let o_scale = scale.into_scalar_val_();
       let o_scale_dty = o_scale.dtype();
       match o_scale_dty {
-        Dtype::Float32 => {}
+        Dtype::Fp32 => {}
         _ => {
           println!("ERROR: block_mm_scale: unsupported scale dtype: {:?}", o_scale_dty);
           panic!();
@@ -463,12 +471,36 @@ impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> MathBinaryOps<R> for L {}
 
 pub trait MathUnaryOps: Borrow<CellPtr> {
   #[track_caller]
+  fn square(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = SquareFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn recip(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = RecipFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn reciprocal(&self) -> CellPtr {
+    panick_wrap(|| self.recip())
+  }
+
+  #[track_caller]
   fn sqrt(&self) -> CellPtr {
     panick_wrap(|| {
       let op = SqrtFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -479,7 +511,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = RsqrtFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -490,7 +521,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = CosFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -501,7 +531,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = SinFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -512,7 +541,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = ExpFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -523,7 +551,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = TanhFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -534,10 +561,9 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let p = *self.borrow();
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(p);
-      /*ctx_push_cell_tmp_out();*/
       match ctx_lookup_dtype(p) {
         // FIXME FIXME
-        Dtype::Float32 => {
+        Dtype::Fp32 => {
           let op = PowiF32FutThunkSpec{exp};
           ctx_pop_thunk(op)
         }
@@ -552,7 +578,6 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       let op = LogFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
-      /*ctx_push_cell_tmp_out();*/
       ctx_pop_thunk(op)
     })
   }
@@ -564,82 +589,35 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
 
   #[track_caller]
   fn inner_max(&self) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = *self.borrow();
-    let ty = ctx_lookup_type(p);
-    match ty.shape.len() {
-      3 => {
-        let op = InnerMax3dThunkOp::default();
-        assert!(ctx_clean_arg());
-        ctx_push_cell_arg(p);
-        //ctx_push_cell_out(_);
-        ctx_pop_thunk(op)
-      }
-      _ => unimplemented!()
-    }
-    */
-  }
-
-  #[track_caller]
-  fn inner_mean(&self) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = *self.borrow();
-    let ty = ctx_lookup_type(p);
-    match ty.shape.len() {
-      3 => {
-        let op = InnerMean3dThunkOp::default();
-        assert!(ctx_clean_arg());
-        ctx_push_cell_arg(p);
-        //ctx_push_cell_out(_);
-        ctx_pop_thunk(op)
-      }
-      _ => unimplemented!()
-    }
-    */
+    panick_wrap(|| {
+      unimplemented!();
+      /*let op = InnerMaxFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)*/
+    })
   }
 
   #[track_caller]
   fn inner_sum(&self) -> CellPtr {
-    unimplemented!();
-    /*
-    let p = *self.borrow();
-    let ty = ctx_lookup_type(p);
-    match ty.shape.len() {
-      3 => {
-        let op = InnerSum3dThunkOp::default();
-        assert!(ctx_clean_arg());
-        ctx_push_cell_arg(p);
-        //ctx_push_cell_out(_);
-        ctx_pop_thunk(op)
-      }
-      _ => unimplemented!()
-    }
-    */
+    panick_wrap(|| {
+      unimplemented!();
+      /*let op = InnerSumFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)*/
+    })
   }
 
-  /*fn mean_1d(self, dim: i64) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = Mean1dThunkOp{dim};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+  #[track_caller]
+  fn inner_mean(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerMeanFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
   }
-
-  fn sum_1d(self, dim: i64) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = Sum1dThunkOp{dim};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
-  }*/
 
   #[track_caller]
   fn inner_softmax(&self) -> CellPtr {
@@ -654,6 +632,7 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   #[track_caller]
   fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
+      // FIXME FIXME
       let p = *self.borrow();
       let ty_ = ctx_lookup_type(p);
       match ty_.ndim() {
@@ -686,6 +665,71 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       }
     })
   }
+
+  #[track_caller]
+  fn block_pad<T: IntoScalarValExt>(&self, new_block: [i64; 2], pad_val: T) -> CellPtr where Self: Sized {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      let x_ty = ctx_lookup_type(x);
+      let x_nd = x_ty.ndim() as usize;
+      assert!(x_nd >= 3);
+      let org_block = [x_ty.shape[x_nd - 3], x_ty.shape[x_nd - 1]];
+      //println!("DEBUG: block_pad: org block={:?} new_block={:?}", org_block, new_block);
+      if org_block == new_block {
+        //println!("DEBUG: block_unpad:   snapshot");
+        return x.snapshot();
+      }
+      let pad_val = pad_val.into_scalar_val_();
+      let op = BlockPadFutThunkSpec{org_block, new_block, pad_val};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn block_unpad(&self, new_block: [i64; 2]) -> CellPtr {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      let x_ty = ctx_lookup_type(x);
+      let x_nd = x_ty.ndim() as usize;
+      assert!(x_nd >= 3);
+      let org_block = [x_ty.shape[x_nd - 3], x_ty.shape[x_nd - 1]];
+      //println!("DEBUG: block_unpad: org block={:?} new_block={:?}", org_block, new_block);
+      if org_block == new_block {
+        //println!("DEBUG: block_unpad:   snapshot");
+        return x.snapshot();
+      }
+      let pad_val = ScalarVal_::Bot;
+      let op = BlockPadFutThunkSpec{org_block, new_block, pad_val};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn block_tri_elem_affine<T: IntoScalarValExt>(&self, diag_scale: T, diag_shift: T, lo_scale: T, lo_shift: T, up_scale: T, up_shift: T) -> CellPtr where Self: Sized {
+    panick_wrap(|| {
+      let diag_scale = diag_scale.into_scalar_val_();
+      let diag_shift = diag_shift.into_scalar_val_();
+      let lo_scale = lo_scale.into_scalar_val_();
+      let lo_shift = lo_shift.into_scalar_val_();
+      let up_scale = up_scale.into_scalar_val_();
+      let up_shift = up_shift.into_scalar_val_();
+      let op = BlockTriElemAffineFutThunkSpec{
+        diag_scale,
+        diag_shift,
+        lo_scale,
+        lo_shift,
+        up_scale,
+        up_shift,
+      };
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
 }
 
 impl<P: Borrow<CellPtr>> MathUnaryOps for P {}
@@ -716,26 +760,26 @@ pub trait CastOps: Borrow<CellPtr> {
         return x;
       }
       match (org_dtype, new_dtype) {
-        (Dtype::Float32, Dtype::Float16) |
-        (Dtype::Float16, Dtype::Float32) => {
+        (Dtype::Fp32, Dtype::Fp16) |
+        (Dtype::Fp16, Dtype::Fp32) => {
           let op = CastFutThunkSpec{org_dtype, new_dtype};
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        (Dtype::Float32, Dtype::BFloat16) => {
+        (Dtype::Fp32, Dtype::Bfloat16) => {
           let op = CastF32Bf16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        (Dtype::BFloat16, Dtype::Float16) => {
+        (Dtype::Bfloat16, Dtype::Fp16) => {
           let op = CastBf16F16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        (Dtype::BFloat16, Dtype::Float32) => {
+        (Dtype::Bfloat16, Dtype::Fp32) => {
           let op = CastBf16F32FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
@@ -836,6 +880,22 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
         panic!("ERROR: inner_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
       }
       let op = InnerSelectFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn inner_inv_select<R: Borrow<CellPtr>>(&self, rank: R, inner_len: i64) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: inner_inv_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = InnerInvSelectFutThunkSpec{inner_len};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
       ctx_push_cell_arg(rank);
@@ -1029,17 +1089,12 @@ pub trait Ops: Borrow<CellPtr> + Sized {
 
   #[track_caller]
   fn version(&self) -> Clock {
-    panick_wrap(|| {
-      ctx_lookup_clk(*self.borrow())
-    })
+    panick_wrap(|| ctx_lookup_clk(*self.borrow()))
   }
 
   #[track_caller]
   fn snapshot(&self) -> CellPtr {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut env = ctx.env.borrow_mut();
-      env.snapshot(&ctx.ctr, *self.borrow())
-    }))
+    panick_wrap(|| ctx_snapshot(*self.borrow()))
   }
 
   /*#[track_caller]

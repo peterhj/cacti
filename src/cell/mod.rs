@@ -168,7 +168,7 @@ impl StableCell {
   }
 
   pub fn set_scalar<T: IntoScalarValExt>(value: T) -> StableCell {
-    ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val()}).into()
+    ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val_()}).into()
   }
 
   pub fn array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
@@ -202,7 +202,14 @@ impl StableCell {
   pub fn as_ptr_ref(&self) -> &CellPtr {
     // SAFETY: The following is safe as `StableCell` has the same
     // (transparent) repr as `CellPtr`.
-    unsafe { &*((self as *const StableCell) as *const CellPtr) as &CellPtr }
+    unsafe { &*((self as *const StableCell) as *const CellPtr) }
+  }
+
+  #[inline]
+  pub fn as_ptr_mut(&mut self) -> &mut CellPtr {
+    // SAFETY: The following is safe as `StableCell` has the same
+    // (transparent) repr as `CellPtr`.
+    unsafe { &mut *((self as *mut StableCell) as *mut CellPtr) }
   }
 }
 
@@ -267,31 +274,104 @@ impl MCellPtr {
 pub enum ScalarVal_ {
   F64(TotalOrd<f64>),
   F32(TotalOrd<f32>),
+  F16(TotalOrd<f16>),
+  Bot,
   // TODO
 }
 
 impl ScalarVal_ {
+  pub fn zero(dtype: Dtype) -> ScalarVal_ {
+    match dtype {
+      Dtype::Fp64 => ScalarVal_::F64(f64::zero().into()),
+      Dtype::Fp32 => ScalarVal_::F32(f32::zero().into()),
+      Dtype::Fp16 => ScalarVal_::F16(f16::zero().into()),
+      _ => unimplemented!()
+    }
+  }
+
+  pub fn is_bot(self) -> bool {
+    match self {
+      ScalarVal_::Bot => true,
+      _ => false
+    }
+  }
+
   pub fn dtype(self) -> Dtype {
     match self {
-      ScalarVal_::F64(_) => Dtype::Float64,
-      ScalarVal_::F32(_) => Dtype::Float32,
+      ScalarVal_::F64(_) => Dtype::Fp64,
+      ScalarVal_::F32(_) => Dtype::Fp32,
+      ScalarVal_::F16(_) => Dtype::Fp16,
+      ScalarVal_::Bot => Dtype::_Bot,
+      _ => unimplemented!()
+    }
+  }
+
+  pub fn format_futhark(&self) -> SmolStr {
+    // FIXME: use the formatter.
+    match self {
+      ScalarVal_::F64(x) => {
+        format!("{}f64", x.0).into()
+      }
+      ScalarVal_::F32(x) => {
+        if x.0.is_infinite() {
+          if x.0 < 0.0 {
+            format!("-f32.inf").into()
+          } else {
+            format!("f32.inf").into()
+          }
+        } else {
+          format!("{}f32", x.0).into()
+        }
+      }
+      ScalarVal_::F16(x) => {
+        // FIXME FIXME
+        if x.0.to_bits() == 0 {
+          "0.0f16".into()
+        } else {
+          unimplemented!();
+        }
+      }
+      ScalarVal_::Bot => {
+        panic!("bug");
+      }
+      _ => {
+        unimplemented!();
+      }
     }
   }
 }
 
-pub trait IntoScalarValExt: DtypeExt {
-  type Val: DtypeExt + Copy + Eq + Any;
+pub trait IntoScalarValExt/*: DtypeExt*/ {
+  /*type Val: DtypeExt + Copy + Eq + Any;
 
-  fn into_scalar_val(self) -> Self::Val;
+  fn into_scalar_val(self) -> Self::Val;*/
   fn into_scalar_val_(self) -> ScalarVal_;
 }
 
-impl IntoScalarValExt for f32 {
-  type Val = TotalOrd<f32>;
+impl IntoScalarValExt for ScalarVal_ {
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    self
+  }
+}
+
+impl IntoScalarValExt for f16 {
+  /*type Val = TotalOrd<f16>;
 
   fn into_scalar_val(self) -> Self::Val {
     self.into()
+  }*/
+
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    ScalarVal_::F16(self.into())
   }
+}
+
+impl IntoScalarValExt for f32 {
+  /*type Val = TotalOrd<f32>;
+
+  fn into_scalar_val(self) -> Self::Val {
+    self.into()
+  }*/
 
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F32(self.into())
@@ -299,11 +379,11 @@ impl IntoScalarValExt for f32 {
 }
 
 impl IntoScalarValExt for f64 {
-  type Val = TotalOrd<f64>;
+  /*type Val = TotalOrd<f64>;
 
   fn into_scalar_val(self) -> Self::Val {
     self.into()
-  }
+  }*/
 
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F64(self.into())
@@ -314,10 +394,10 @@ impl IntoScalarValExt for f64 {
 #[repr(u8)]
 pub enum Dtype {
   _Top,
-  Float64,
-  Float32,
-  Float16,
-  BFloat16,
+  Fp64,
+  Fp32,
+  Fp16,
+  Bfloat16,
   Int64,
   Int32,
   Int16,
@@ -326,6 +406,7 @@ pub enum Dtype {
   UInt32,
   UInt16,
   UInt8,
+  _Bot,
 }
 
 impl TryFrom<TorchDtype> for Dtype {
@@ -334,10 +415,10 @@ impl TryFrom<TorchDtype> for Dtype {
 
   fn try_from(t: TorchDtype) -> Result<Dtype, SmolStr> {
     Ok(match t {
-      TorchDtype::Float64 => Dtype::Float64,
-      TorchDtype::Float32 => Dtype::Float32,
-      TorchDtype::Float16 => Dtype::Float16,
-      TorchDtype::BFloat16 => Dtype::BFloat16,
+      TorchDtype::Float64 => Dtype::Fp64,
+      TorchDtype::Float32 => Dtype::Fp32,
+      TorchDtype::Float16 => Dtype::Fp16,
+      TorchDtype::Bfloat16 => Dtype::Bfloat16,
       TorchDtype::Int64 => Dtype::Int64,
       TorchDtype::Int32 => Dtype::Int32,
       TorchDtype::Int16 => Dtype::Int16,
@@ -384,13 +465,13 @@ impl FromStr for Dtype {
   fn from_str(s: &str) -> Result<Dtype, SmolStr> {
     Ok(match s {
       "f64"     |
-      "float64" => Dtype::Float64,
+      "float64" => Dtype::Fp64,
       "f32"     |
-      "float32" => Dtype::Float32,
+      "float32" => Dtype::Fp32,
       "f16"     |
-      "float16" => Dtype::Float16,
+      "float16" => Dtype::Fp16,
       "bf16"    |
-      "bfloat16" => Dtype::BFloat16,
+      "bfloat16" => Dtype::Bfloat16,
       "i64"     |
       "int64"   => Dtype::Int64,
       "i32"     |
@@ -420,10 +501,10 @@ impl Dtype {
   pub fn format_futhark(self) -> &'static str {
     match self {
       Dtype::_Top       => panic!("bug"),
-      Dtype::Float64    => "f64",
-      Dtype::Float32    => "f32",
-      Dtype::Float16    => "f16",
-      Dtype::BFloat16   => unimplemented!(),
+      Dtype::Fp64       => "f64",
+      Dtype::Fp32       => "f32",
+      Dtype::Fp16       => "f16",
+      Dtype::Bfloat16   => unimplemented!(),
       Dtype::Int64      => "i64",
       Dtype::Int32      => "i32",
       Dtype::Int16      => "i16",
@@ -432,16 +513,17 @@ impl Dtype {
       Dtype::UInt32     => "u32",
       Dtype::UInt16     => "u16",
       Dtype::UInt8      => "u8",
+      Dtype::_Bot       => panic!("bug"),
     }
   }
 
   pub fn size_bytes(self) -> usize {
     match self {
       Dtype::_Top       => panic!("bug"),
-      Dtype::Float64    => 8,
-      Dtype::Float32    => 4,
-      Dtype::Float16    => 2,
-      Dtype::BFloat16   => 2,
+      Dtype::Fp64       => 8,
+      Dtype::Fp32       => 4,
+      Dtype::Fp16       => 2,
+      Dtype::Bfloat16   => 2,
       Dtype::Int64      => 8,
       Dtype::Int32      => 4,
       Dtype::Int16      => 2,
@@ -450,6 +532,7 @@ impl Dtype {
       Dtype::UInt32     => 4,
       Dtype::UInt16     => 2,
       Dtype::UInt8      => 1,
+      Dtype::_Bot       => panic!("bug"),
     }
   }
 
@@ -460,30 +543,30 @@ impl Dtype {
 
   pub fn is_float(self) -> bool {
     match self {
-      Dtype::Float64    |
-      Dtype::Float32    |
-      Dtype::Float16    |
-      Dtype::BFloat16   => true,
+      Dtype::Fp64 |
+      Dtype::Fp32 |
+      Dtype::Fp16 |
+      Dtype::Bfloat16 => true,
       _ => false
     }
   }
 
   pub fn is_signed_int(self) -> bool {
     match self {
-      Dtype::Int64      |
-      Dtype::Int32      |
-      Dtype::Int16      |
-      Dtype::Int8       => true,
+      Dtype::Int64 |
+      Dtype::Int32 |
+      Dtype::Int16 |
+      Dtype::Int8 => true,
       _ => false
     }
   }
 
   pub fn is_unsigned_int(self) -> bool {
     match self {
-      Dtype::UInt64     |
-      Dtype::UInt32     |
-      Dtype::UInt16     |
-      Dtype::UInt8      => true,
+      Dtype::UInt64 |
+      Dtype::UInt32 |
+      Dtype::UInt16 |
+      Dtype::UInt8 => true,
       _ => false
     }
   }
@@ -496,13 +579,13 @@ impl Dtype {
     match (self, rhs) {
       (Dtype::_Top, _) |
       (_, Dtype::_Top) => Some(Dtype::_Top),
-      (Dtype::Float32, Dtype::Float32) |
-      (Dtype::Float32, Dtype::Float16) |
-      (Dtype::Float32, Dtype::BFloat16) |
-      (Dtype::Float16, Dtype::Float32) |
-      (Dtype::BFloat16, Dtype::Float32) => Some(Dtype::Float32),
-      (Dtype::Float16, Dtype::Float16) => Some(Dtype::Float16),
-      (Dtype::BFloat16, Dtype::BFloat16) => Some(Dtype::BFloat16),
+      (Dtype::Fp32, Dtype::Fp32) |
+      (Dtype::Fp32, Dtype::Fp16) |
+      (Dtype::Fp32, Dtype::Bfloat16) |
+      (Dtype::Fp16, Dtype::Fp32) |
+      (Dtype::Bfloat16, Dtype::Fp32) => Some(Dtype::Fp32),
+      (Dtype::Fp16, Dtype::Fp16) => Some(Dtype::Fp16),
+      (Dtype::Bfloat16, Dtype::Bfloat16) => Some(Dtype::Bfloat16),
       _ => None
     }
   }
@@ -515,33 +598,37 @@ impl Dtype {
 }*/
 
 pub trait DtypeExt {
-  fn dtype() -> Dtype where Self: Sized;
   // FIXME FIXME
   //fn is_zero(&self) -> bool;
 }
 
-impl DtypeExt for TotalOrd<f64> { fn dtype() -> Dtype { Dtype::Float64 } }
-impl DtypeExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Float32 } }
-//impl DtypeExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Float32 } }
+pub trait DtypeConstExt {
+  fn dtype() -> Dtype where Self: Sized;
+}
 
-impl DtypeExt for f64 { fn dtype() -> Dtype { Dtype::Float64 } }
-impl DtypeExt for f32 { fn dtype() -> Dtype { Dtype::Float32 } }
-impl DtypeExt for f16 { fn dtype() -> Dtype { Dtype::Float16 } }
-impl DtypeExt for bf16 { fn dtype() -> Dtype { Dtype::BFloat16 } }
-impl DtypeExt for i64 { fn dtype() -> Dtype { Dtype::Int64 } }
-impl DtypeExt for i32 { fn dtype() -> Dtype { Dtype::Int32 } }
-impl DtypeExt for i16 { fn dtype() -> Dtype { Dtype::Int16 } }
-impl DtypeExt for i8  { fn dtype() -> Dtype { Dtype::Int8 } }
-impl DtypeExt for u64 { fn dtype() -> Dtype { Dtype::UInt64 } }
-impl DtypeExt for u32 { fn dtype() -> Dtype { Dtype::UInt32 } }
-impl DtypeExt for u16 { fn dtype() -> Dtype { Dtype::UInt16 } }
-impl DtypeExt for u8  { fn dtype() -> Dtype { Dtype::UInt8 } }
+impl DtypeConstExt for TotalOrd<f64> { fn dtype() -> Dtype { Dtype::Fp64 } }
+impl DtypeConstExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Fp32 } }
+//impl DtypeConstExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Fp32 } }
+impl DtypeConstExt for TotalOrd<f16> { fn dtype() -> Dtype { Dtype::Fp16 } }
 
-pub fn dtype<T: DtypeExt>() -> Dtype {
+impl DtypeConstExt for f64 { fn dtype() -> Dtype { Dtype::Fp64 } }
+impl DtypeConstExt for f32 { fn dtype() -> Dtype { Dtype::Fp32 } }
+impl DtypeConstExt for f16 { fn dtype() -> Dtype { Dtype::Fp16 } }
+impl DtypeConstExt for bf16 { fn dtype() -> Dtype { Dtype::Bfloat16 } }
+impl DtypeConstExt for i64 { fn dtype() -> Dtype { Dtype::Int64 } }
+impl DtypeConstExt for i32 { fn dtype() -> Dtype { Dtype::Int32 } }
+impl DtypeConstExt for i16 { fn dtype() -> Dtype { Dtype::Int16 } }
+impl DtypeConstExt for i8  { fn dtype() -> Dtype { Dtype::Int8 } }
+impl DtypeConstExt for u64 { fn dtype() -> Dtype { Dtype::UInt64 } }
+impl DtypeConstExt for u32 { fn dtype() -> Dtype { Dtype::UInt32 } }
+impl DtypeConstExt for u16 { fn dtype() -> Dtype { Dtype::UInt16 } }
+impl DtypeConstExt for u8  { fn dtype() -> Dtype { Dtype::UInt8 } }
+
+pub fn dtype<T: DtypeConstExt>() -> Dtype {
   T::dtype()
 }
 
-pub fn dtype_of<T: DtypeExt>(_: T) -> Dtype {
+pub fn dtype_of<T: DtypeConstExt>(_: T) -> Dtype {
   T::dtype()
 }
 

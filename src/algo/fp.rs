@@ -55,6 +55,57 @@ impl<'a, F: Copy> Borrow<F> for &'a TotalOrd<F> {
   }
 }
 
+impl From<f16> for TotalOrd<f16> {
+  fn from(x: f16) -> TotalOrd<f16> {
+    TotalOrd(x)
+  }
+}
+
+impl PartialEq for TotalOrd<f16> {
+  fn eq(&self, other: &TotalOrd<f16>) -> bool {
+    match self.cmp(other) {
+      Ordering::Equal => true,
+      _ => false
+    }
+  }
+}
+
+impl Eq for TotalOrd<f16> {}
+
+impl PartialOrd for TotalOrd<f16> {
+  fn partial_cmp(&self, other: &TotalOrd<f16>) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+impl Ord for TotalOrd<f16> {
+  fn cmp(&self, other: &TotalOrd<f16>) -> Ordering {
+    self.to_signed_bits().cmp(&other.to_signed_bits())
+  }
+}
+
+impl Hash for TotalOrd<f16> {
+  fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.to_bits().hash(hasher);
+  }
+}
+
+impl TotalOrd<f16> {
+  #[inline]
+  pub fn to_bits(&self) -> u16 {
+    // NB: This should be the same 1-to-1 mapping as done by `total_cmp`
+    // in libcore.
+    let mut bits = (self.0).to_bits();
+    bits ^= ((((bits as i16) >> 15) as u16) >> 1);
+    bits
+  }
+
+  #[inline]
+  pub fn to_signed_bits(&self) -> i16 {
+    self.to_bits() as i16
+  }
+}
+
 impl From<f32> for TotalOrd<f32> {
   fn from(x: f32) -> TotalOrd<f32> {
     TotalOrd(x)
@@ -216,3 +267,43 @@ impl Ord for NonNan<f32> {
     (self.0).to_bits().hash(hasher)
   }
 }*/*/
+
+pub trait FpConstExt: Sized {
+  fn zero()     -> Self;
+  fn neg_zero() -> Self;
+  fn one()      -> Self;
+  fn neg_one()  -> Self;
+  fn inf()      -> Self;
+  fn neg_inf()  -> Self;
+  fn some_nan() -> Self;
+}
+
+impl FpConstExt for f16 {
+  fn zero()     -> f16 { f16::from_bits(0) }
+  fn neg_zero() -> f16 { f16::from_bits(0x8000) }
+  fn one()      -> f16 { f16::from_bits(0x3c00) }
+  fn neg_one()  -> f16 { f16::from_bits(0xbc00) }
+  fn inf()      -> f16 { f16::INFINITY }
+  fn neg_inf()  -> f16 { f16::NEG_INFINITY }
+  fn some_nan() -> f16 { f16::NAN }
+}
+
+impl FpConstExt for f32 {
+  fn zero()     -> f32 { 0.0_f32 }
+  fn neg_zero() -> f32 { -0.0_f32 }
+  fn one()      -> f32 { 1.0_f32 }
+  fn neg_one()  -> f32 { -1.0_f32 }
+  fn inf()      -> f32 { f32::INFINITY }
+  fn neg_inf()  -> f32 { f32::NEG_INFINITY }
+  fn some_nan() -> f32 { f32::NAN }
+}
+
+impl FpConstExt for f64 {
+  fn zero()     -> f64 { 0.0_f64 }
+  fn neg_zero() -> f64 { -0.0_f64 }
+  fn one()      -> f64 { 1.0_f64 }
+  fn neg_one()  -> f64 { -1.0_f64 }
+  fn inf()      -> f64 { f64::INFINITY }
+  fn neg_inf()  -> f64 { f64::NEG_INFINITY }
+  fn some_nan() -> f64 { f64::NAN }
+}

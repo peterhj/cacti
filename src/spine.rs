@@ -84,8 +84,9 @@ pub enum SpineEntry {
   YieldSet(CellPtr, Locus),
   YieldInit(CellPtr, Locus),
   Alias(CellPtr, CellPtr),
-  //Keep(CellPtr),
+  Snapshot(CellPtr, CellPtr),
   //Snapshot(CellPtr, CellPtr, CellPtr, /*Clock*/),
+  //Keep(CellPtr),
   PushSeal(CellPtr),
   Initialize(CellPtr, ThunkPtr),
   Apply(CellPtr, ThunkPtr),
@@ -119,6 +120,7 @@ impl SpineEntry {
       &SpineEntry::YieldSet(..)   => SpineEntryName::YieldSet,
       &SpineEntry::YieldInit(..)  => SpineEntryName::YieldInit,
       &SpineEntry::Alias(..)      => SpineEntryName::Alias,
+      &SpineEntry::Snapshot(..)   => SpineEntryName::Snapshot,
       &SpineEntry::PushSeal(..)   => SpineEntryName::PushSeal,
       &SpineEntry::Initialize(..) => SpineEntryName::Initialize,
       &SpineEntry::Apply(..)      => SpineEntryName::Apply,
@@ -150,6 +152,7 @@ pub enum SpineEntryName {
   YieldSet,
   YieldInit,
   Alias,
+  Snapshot,
   PushSeal,
   Initialize,
   Apply,
@@ -240,6 +243,7 @@ impl SpineEnv {
     // FIXME FIXME
     println!("DEBUG: SpineEnv::step: idx={} e={:?}", sp, e);
     match e {
+      &SpineEntry::_Top => {}
       &SpineEntry::OIntro(x, _) => {
         /*self.cache.insert(x, sp);*/
         // FIXME FIXME
@@ -418,6 +422,21 @@ impl SpineEnv {
           }
         }
       }
+      &SpineEntry::Snapshot(x, og) => {
+        // FIXME FIXME
+        /*match self.state.get(&x) {
+          None => {
+            self.state.insert(x, CellState::default());
+          }
+          _ => {}
+        }*/
+        match self.state.get(&og) {
+          None => panic!("bug"),
+          Some(state) => {
+            self.state.insert(x, state.clone());
+          }
+        }
+      }
       &SpineEntry::PushSeal(x) => {
         match self.state.get_mut(&x) {
           None => {
@@ -510,7 +529,7 @@ impl SpineEnv {
         match self.state.get_mut(&x) {
           None => panic!("bug"),
           Some(state) => {
-            assert!(state.mode != CellMode::_Top);
+            /*assert!(state.mode != CellMode::_Top);*/
             assert!(state.flag.intro());
             // NB: idempotent seal.
             /*assert!(!state.flag.seal());*/
@@ -522,7 +541,7 @@ impl SpineEnv {
         match self.state.get_mut(&x) {
           None => panic!("bug"),
           Some(state) => {
-            assert!(state.mode != CellMode::_Top);
+            /*assert!(state.mode != CellMode::_Top);*/
             // NB: idempotent unseal.
             /*assert!(state.flag.seal());*/
             state.flag.unset_seal();
@@ -632,6 +651,14 @@ impl Spine {
     let sp = self.curp;
     self.curp += 1;
     let e = SpineEntry::Alias(x, og);
+    self.cur_env.step(sp, &e);
+    self.log.push(e);
+  }
+
+  pub fn snapshot(&mut self, x: CellPtr, og: CellPtr) {
+    let sp = self.curp;
+    self.curp += 1;
+    let e = SpineEntry::Snapshot(x, og);
     self.cur_env.step(sp, &e);
     self.log.push(e);
   }
@@ -754,6 +781,7 @@ impl Spine {
         self.ctr, self.ctlp, self.hltp, self.curp, retp, entry.name());
     match entry {
       // TODO
+      &SpineEntry::_Top => {}
       &SpineEntry::Yield_ => {
         ret = SpineRet::Yield_(());
       }
@@ -862,7 +890,7 @@ impl Spine {
           Some(e) => {
             println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
             match e.ty.dtype {
-              Dtype::Float32 => {
+              Dtype::Fp32 => {
                 //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
                 match &item {
                   SpineResume::_Top => {
@@ -951,6 +979,10 @@ impl Spine {
         unimplemented!();
       }
       &SpineEntry::Alias(x, og) => {
+        // FIXME FIXME
+        //unimplemented!();
+      }
+      &SpineEntry::Snapshot(x, og) => {
         // FIXME FIXME
         //unimplemented!();
       }
@@ -1328,7 +1360,7 @@ impl Backward {
                 }
               }
               drop(spine);
-              match spec_.pop_adj(&arg, dy, &arg_adj) {
+              match spec_.pop_adj(&arg, y, yclk, dy, &mut arg_adj) {
                 Err(_) => unimplemented!(),
                 Ok(_) => {}
               }
@@ -1411,7 +1443,7 @@ pub fn backward(tg: CellPtr) {
             let tg_ty_ = ctx_lookup_type(tg);
             // FIXME: make this a special cow constant.
             /*let sink = match tg_ty_.dtype {
-              Dtype::Float32 => {
+              Dtype::Fp32 => {
                 let value = 1.0_f32;
                 ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val()})
               }
@@ -1447,7 +1479,7 @@ pub fn backward(tg: CellPtr) {
                   assert!(spine.cur_env.gradr.insert((tg, x, tg_clk), dx).is_none());
                 }
                 drop(spine);
-                match spec_.pop_adj(&arg, sink, &arg_adj) {
+                match spec_.pop_adj(&arg, y, yclk, sink, &mut arg_adj) {
                   Err(_) => unimplemented!(),
                   Ok(_) => {}
                 }

@@ -2,7 +2,7 @@ use self::nvgpu::{NvGpuPCtx};
 use self::smp::{SmpPCtx};
 use crate::algo::{RevSortMap8};
 use crate::algo::fp::*;
-use crate::cell::{CellPtr, CellType, DtypeExt, InnerCell, InnerCell_};
+use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
 use crate::panick::*;
 
 use std::borrow::{Borrow};
@@ -333,14 +333,14 @@ pub struct MemReg {
 
 impl MemReg {
   #[track_caller]
-  pub fn copy_from_slice<T: DtypeExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
+  pub fn copy_from_slice<T: DtypeConstExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
     panick_wrap(|| self._copy_from_slice(src_buf))
   }
 
-  pub fn _copy_from_slice<T: DtypeExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
+  pub fn _copy_from_slice<T: DtypeConstExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
     //let src_buf = src_buf.borrow();
     let src_len = src_buf.len();
-    let dsz = <T as DtypeExt>::dtype().size_bytes();
+    let dsz = <T as DtypeConstExt>::dtype().size_bytes();
     let src_sz = dsz * src_len;
     assert_eq!(self.sz, src_sz);
     let src_start = src_buf.as_ptr() as usize;

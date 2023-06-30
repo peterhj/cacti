@@ -20,12 +20,16 @@ impl PanickOnceCtx {
       PANICK_TL_CTX.with(|ctx| {
         let stack = ctx.stack.borrow();
         // TODO TODO: full backtrace?
-        match stack.first() {
+        /*match stack.first() {
           None => {}
           Some(frame) => {
             let loc = frame.loc;
             eprintln!("panick: {}:{}:{}", loc.file(), loc.line(), loc.column());
           }
+        }*/
+        for frame in stack.iter().rev() {
+          let loc = frame.loc;
+          eprintln!("panick: {}:{}:{}", loc.file(), loc.line(), loc.column());
         }
       });
       og_hook(info)

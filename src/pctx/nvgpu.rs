@@ -368,7 +368,7 @@ impl NvGpuPCtx {
   }
 
   pub fn hard_copy_nb_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
-    println!("DEBUG: NvGpuPCtx::soft_copy_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
+    println!("DEBUG: NvGpuPCtx::hard_copy_nb_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
         dst_dptr, src_ptr as usize, sz);
     cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
   }
@@ -481,16 +481,33 @@ impl NvGpuPCtx {
   }*/
 
   pub fn lookup_(&self, x: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
-    match self.cel_map.borrow().get(&x) {
-      None => {}
-      Some(icel) => {
-        return Some((Locus::VMem, icel.clone()));
+    let page_tab = self.page_map.addr_tab.borrow();
+    let cel_map = self.cel_map.borrow();
+    if page_tab.len() <= cel_map.len() {
+      match page_tab.get(&x) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::Mem, icel.clone()));
+        }
       }
-    }
-    match self.page_map.addr_tab.borrow().get(&x) {
-      None => {}
-      Some(icel) => {
-        return Some((Locus::Mem, icel.clone()));
+      match cel_map.get(&x) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::VMem, icel.clone()));
+        }
+      }
+    } else {
+      match cel_map.get(&x) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::VMem, icel.clone()));
+        }
+      }
+      match page_tab.get(&x) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::Mem, icel.clone()));
+        }
       }
     }
     None
@@ -501,22 +518,45 @@ impl NvGpuPCtx {
   }*/
 
   pub fn lookup_reg(&self, p: PAddr) -> Option<NvGpuInnerReg> {
-    match self.cel_map.borrow().get(&p) {
-      None => {}
-      Some(icel) => {
-        return Some(NvGpuInnerReg::VMem{
-          dptr: icel.dptr,
-          size: icel.sz,
-        });
+    let page_tab = self.page_map.addr_tab.borrow();
+    let cel_map = self.cel_map.borrow();
+    if page_tab.len() <= cel_map.len() {
+      match page_tab.get(&p) {
+        None => {}
+        Some(icel) => {
+          return Some(NvGpuInnerReg::Mem{
+            ptr:  icel.ptr,
+            size: icel.sz,
+          });
+        }
       }
-    }
-    match self.page_map.addr_tab.borrow().get(&p) {
-      None => {}
-      Some(icel) => {
-        return Some(NvGpuInnerReg::Mem{
-          ptr:  icel.ptr,
-          size: icel.sz,
-        });
+      match cel_map.get(&p) {
+        None => {}
+        Some(icel) => {
+          return Some(NvGpuInnerReg::VMem{
+            dptr: icel.dptr,
+            size: icel.sz,
+          });
+        }
+      }
+    } else {
+      match cel_map.get(&p) {
+        None => {}
+        Some(icel) => {
+          return Some(NvGpuInnerReg::VMem{
+            dptr: icel.dptr,
+            size: icel.sz,
+          });
+        }
+      }
+      match page_tab.get(&p) {
+        None => {}
+        Some(icel) => {
+          return Some(NvGpuInnerReg::Mem{
+            ptr:  icel.ptr,
+            size: icel.sz,
+          });
+        }
       }
     }
     None

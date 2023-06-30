@@ -10,11 +10,13 @@ fn main() {
   let seq_len = 512;
   //let seq_len = 2048;
   let tok_dim = 32000;
-  let head_dim = 64;
-  let num_head = 50;
+  let head_dim = 100;
+  let num_head = 32;
   let inner_dim = head_dim * num_head;
   let mlp_inner_dim = 8640;
   let num_layer = 26;
+  let rms_norm_eps = 1.0e-6_f32;
+  let dtype = f16::dtype();
   let mut pickdir = PickleDir::from("data/openlm/open_llama_3b");
   //let mut pickdir = PickleDir::from("data/openlm/open_llama_7b");
   //let mut pickdir = PickleDir::from("data/openlm/open_llama_13b");
@@ -89,6 +91,8 @@ fn main() {
     num_head,
     mlp_inner_dim,
     num_layer,
+    rms_norm_eps,
+    dtype,
   };
   let model = Llama::from(cfg);
   let inv_matches = model.match_pickle_dir(&pickdir);

@@ -8,7 +8,7 @@ extern crate once_cell;
 use crate::bindings::*;
 use crate::types::*;
 
-use libc::{c_void, c_int};
+use libc::{c_void};
 use once_cell::sync::{Lazy};
 
 use std::convert::{TryFrom};

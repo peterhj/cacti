@@ -361,7 +361,7 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
         }
         let new_ty = CellType{dtype: new_dtype, shape: e.ty.shape.clone()};
         let x = ctx.ctr.fresh_cel();
-        println!("DEBUG: ctx_alias_bits: og={:?} old dtype={:?} x={:?} new dtype={:?}", og, e.ty.dtype, x, new_dtype);
+        //println!("DEBUG: ctx_alias_bits: og={:?} old dtype={:?} x={:?} new dtype={:?}", og, e.ty.dtype, x, new_dtype);
         env.insert_alias(x, new_ty, og);
         let mut spine = ctx.spine.borrow_mut();
         spine.alias(x, og);
@@ -384,13 +384,23 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
           panic!();
         }
         let x = ctx.ctr.fresh_cel();
-        println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} x={:?} new shape={:?} compat={:?}", og, &e.ty.shape, x, &new_ty.shape, cmp);
+        //println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} x={:?} new shape={:?} compat={:?}", og, &e.ty.shape, x, &new_ty.shape, cmp);
         env.insert_alias(x, new_ty, og);
         let mut spine = ctx.spine.borrow_mut();
         spine.alias(x, og);
         x
       }
     }
+  })
+}
+
+pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
+  TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let x = env.snapshot(&ctx.ctr, og);
+    let mut spine = ctx.spine.borrow_mut();
+    spine.snapshot(x, og);
+    x
   })
 }
 
@@ -481,12 +491,12 @@ pub fn ctx_opaque(og: CellPtr) -> CellPtr {
 
 pub fn ctx_init_zeros(ty: CellType) -> CellPtr {
   match ty.dtype {
-    Dtype::Float32 => {
+    Dtype::Fp32 => {
       let value = 0.0_f32;
       //let x = ctx_fresh();
       match ty.ndim() {
         0 => {
-          ctx_pop_init_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val()}, ty)
+          ctx_pop_init_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val_()}, ty)
         }
         1 => {
           unimplemented!();
@@ -501,11 +511,11 @@ pub fn ctx_init_zeros(ty: CellType) -> CellPtr {
 
 pub fn ctx_set_ones(ty: CellType) -> CellPtr {
   match ty.dtype {
-    Dtype::Float32 => {
+    Dtype::Fp32 => {
       let value = 1.0_f32;
       match ty.ndim() {
         0 => {
-          ctx_pop_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val()}, ty)
+          ctx_pop_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val_()}, ty)
         }
         1 => {
           unimplemented!();

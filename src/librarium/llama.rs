@@ -16,6 +16,8 @@ pub struct LlamaConfig {
   pub mlp_inner_dim: i64,
   pub seq_len: i64,
   pub ubat_sz: i64,
+  pub rms_norm_eps: f32,
+  pub dtype: Dtype,
 }
 
 #[derive(Clone)]
@@ -62,7 +64,7 @@ impl From<LlamaConfig> for Llama {
       let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
       let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
       let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let inv_freq = StableCell::array([num_head], f32::dtype());
+      let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
       let pre_norm = StableCell::array([inner_dim], f16::dtype());
       let post_norm = StableCell::array([inner_dim], f16::dtype());
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
@@ -105,8 +107,12 @@ impl Llama {
 
   pub fn apply<X: Borrow<CellPtr>, Y: Borrow<CellPtr>>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
     fn block_causal_attention_mask(x: CellPtr) -> CellPtr {
-      x
-      //unimplemented!();
+      x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
+    }
+    fn rms_norm(x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype) -> CellPtr {
+      let m = x.cast(f32::dtype()).square().inner_mean();
+      let x = x * (m + eps).rsqrt();
+      (weight * x).cast(dtype)
     }
     let ubat_sz = self.cfg.ubat_sz;
     let seq_len = self.cfg.seq_len;
@@ -115,6 +121,7 @@ impl Llama {
     let inner_dim = num_head * head_dim;
     let mlp_inner_dim = self.cfg.mlp_inner_dim;
     let tok_dim = self.cfg.tok_dim;
+    let rms_norm_eps = self.cfg.rms_norm_eps;
     let mut stream = *in_tok.borrow();
     stream = stream.inner_one_hot(tok_dim, f16::dtype());
     stream = stream
@@ -125,7 +132,7 @@ impl Llama {
     for i in 0 .. 1 {
       // FIXME FIXME: layer norm.
       let pre_nrm = stream;
-      //let pre_nrm = pre_layer_norm(&stream);
+      //let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
                   .new_shape([ubat_sz * seq_len, num_head * head_dim])
                   .block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[i].q, [inner_dim, inner_dim], true)
@@ -153,14 +160,26 @@ impl Llama {
                 .inner_softmax()
                 .cast(f16::dtype())
                 .new_shape([ubat_sz * seq_len, num_head * seq_len]);
+      // FIXME FIXME: need pad for fp16 gemm.
+      /*
       let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
       let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, head_dim], false);
+      */
+      let pad_head_dim = ((head_dim + 8 - 1) / 8) * 8;
+      let v_proj = v_proj
+                  .block_pad([seq_len, pad_head_dim], f16::zero())
+                  .new_shape([ubat_sz * seq_len, num_head * pad_head_dim]);
+      let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, pad_head_dim], false)
+                  .new_shape([ubat_sz, seq_len, num_head, pad_head_dim])
+                  .block_unpad([seq_len, head_dim])
+                  .new_shape([ubat_sz * seq_len, num_head * head_dim]);
       let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[0].o, [inner_dim, inner_dim], true)
                          .new_shape([ubat_sz, seq_len, num_head, head_dim]);
       stream = stream + o_proj;
       // FIXME FIXME: post layer norm, mlp.
       let post_nrm = stream;
       //let post_nrm = post_layer_norm(stream);
+      //let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
       let up_proj = post_nrm
                    .new_shape([ubat_sz * seq_len, num_head * head_dim])
                    .block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[0].up, [mlp_inner_dim, inner_dim], true);
@@ -175,12 +194,13 @@ impl Llama {
       stream = stream + down_proj;
     }
     // TODO TODO
+    //let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
                       .new_shape([ubat_sz * seq_len, num_head * head_dim])
                       .block_mm([1, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
                       .new_shape([ubat_sz, seq_len, tok_dim])
                       .keep();
-    let out_lm_prob = out_lm_logit.inner_softmax().keep();
+    let out_lm_prob = out_lm_logit.cast(f32::dtype()).inner_softmax().keep();
     let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();
     LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
   }
