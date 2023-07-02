@@ -1,7 +1,7 @@
 #[cfg(not(target_os = "linux"))]
-pub use self::default::Stopwatch;
+pub use self::default::{Stopwatch, Timestamp};
 #[cfg(target_os = "linux")]
-pub use self::linux::Stopwatch;
+pub use self::linux::{Stopwatch, Timestamp};
 
 use std::cell::{RefCell};
 
@@ -18,6 +18,12 @@ impl Stopwatch {
   pub fn tl_clone() -> Stopwatch {
     TL_WATCH.with(|watch| {
       *watch.borrow()
+    })
+  }
+
+  pub fn tl_stamp() -> Timestamp {
+    TL_WATCH.with(|watch| {
+      watch.borrow_mut().stamp()
     })
   }
 

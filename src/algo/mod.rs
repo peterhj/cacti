@@ -4,6 +4,7 @@ use std::fmt::{Debug};
 use std::mem::{swap};
 
 pub mod fp;
+pub mod hash;
 //pub mod int;
 pub mod sync;
 

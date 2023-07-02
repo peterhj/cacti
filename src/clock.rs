@@ -81,6 +81,24 @@ impl Counter {
   }
 }
 
+impl PartialOrd for Counter {
+  fn partial_cmp(&self, r_ctr: &Counter) -> Option<Ordering> {
+    match rst_signed_distance(self.rst, r_ctr.rst) {
+      None => None,
+      Some(0) => {
+        Some(Ordering::Equal)
+      }
+      Some(d) => {
+        if d > 0 {
+          Some(Ordering::Greater)
+        } else {
+          Some(Ordering::Less)
+        }
+      }
+    }
+  }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Clock {
   pub rst:  u32,
@@ -126,6 +144,10 @@ impl Clock {
   pub fn finish(&self) -> Clock {
     assert!(self.up != u32::max_value());
     Clock{rst: self.rst, up: u32::max_value()}
+  }
+
+  pub fn init(&self) -> Clock {
+    Clock{rst: self.rst, up: 0}
   }
 
   pub fn update(&self) -> Clock {

@@ -96,8 +96,8 @@ pub enum SpineEntry {
   Unseal(CellPtr),
   //Eval(CellPtr),
   //Uneval(CellPtr),
+  Unlive(CellPtr),
   Unsync(CellPtr),
-  //Cache(CellPtr),
   // TODO
   Bot,
 }
@@ -129,6 +129,7 @@ impl SpineEntry {
       &SpineEntry::Seal(..)       => SpineEntryName::Seal,
       &SpineEntry::Unseal(..)     => SpineEntryName::Unseal,
       //&SpineEntry::Eval(..)       => SpineEntryName::Eval,
+      &SpineEntry::Unlive(..)     => SpineEntryName::Unlive,
       &SpineEntry::Unsync(..)     => SpineEntryName::Unsync,
       &SpineEntry::Bot            => SpineEntryName::Bot,
     }
@@ -162,6 +163,7 @@ pub enum SpineEntryName {
   Unseal,
   //Eval,
   //Uneval,
+  Unlive,
   Unsync,
   // TODO
   Bot,
@@ -774,7 +776,7 @@ impl Spine {
           self.ctr, self.ctlp, self.hltp, self.curp, retp);
       return SpineRet::Halt;
     }
-    let _ = Stopwatch::tl_lap();
+    let t0 = Stopwatch::tl_stamp();
     let mut ret = SpineRet::_Top;
     let entry = &self.log[self.ctlp as usize];
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
@@ -814,7 +816,7 @@ impl Spine {
               CellMode::Aff => {}
               _ => panic!("bug")
             }*/
-            // FIXME FIXME
+            /*// FIXME FIXME
             //unimplemented!();
             let flag = !e.state().flag.set_cache();
             let mode = match e.state().mode.set_aff() {
@@ -822,8 +824,24 @@ impl Spine {
               Ok(prev) => !prev
             };
             assert!(flag);
-            assert!(mode);
-            assert!(self.ctr.succeeds(e.state().clk));
+            //assert!(mode);
+            assert!(self.ctr.succeeds(e.state().clk));*/
+            let prev_clk = e.state().clk;
+            let base_clk: Clock = self.ctr.into();
+            let next_clk = base_clk.update();
+            if prev_clk >= next_clk {
+              panic!("bug");
+            } else if prev_clk < next_clk {
+              e.state().mode = CellMode::Aff;
+              e.state().flag.set_intro();
+              e.state().flag.unset_seal();
+              // FIXME FIXME
+              //e.state().clk = next_clk;
+              e.clock_sync(prev_clk, next_clk, env);
+            /*} else {
+              assert!(e.state().flag.intro());
+              assert_eq!(e.state().mode, CellMode::Aff);*/
+            }
           }
         }
       }
@@ -922,22 +940,26 @@ impl Spine {
           let xclk = match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
-              assert!(!e.state().flag.intro());
-              assert!(!e.state().flag.seal());
-              // FIXME: concise condition.
-              //assert_eq!(e.state().clk.ctr(), self.ctr);
-              assert!(e.state().clk.ctr().is_nil() || e.state().clk.ctr() == self.ctr);
-              assert_eq!(e.state().clk.up, 0);
-              // FIXME
-              println!("DEBUG: Spine::_step: YieldSet:   prev clk={:?}", e.state().clk);
-              /*let next_clk = e.state().clk.update();*/
+              let prev_clk = e.state().clk;
               let base_clk: Clock = self.ctr.into();
-              println!("DEBUG: Spine::_step: YieldSet:   base clk={:?}", base_clk);
               let next_clk = base_clk.update();
+              println!("DEBUG: Spine::_step: YieldSet:   prev clk={:?}", prev_clk);
+              println!("DEBUG: Spine::_step: YieldSet:   base clk={:?}", base_clk);
               println!("DEBUG: Spine::_step: YieldSet:   next clk={:?}", next_clk);
-              e.state().mode = CellMode::Aff;
-              e.state().flag.set_intro();
-              e.state().clk = next_clk;
+              if prev_clk >= next_clk {
+                panic!("bug");
+              } else if prev_clk < next_clk {
+                /*//assert!(!e.state().flag.intro());
+                //assert!(!e.state().flag.seal());
+                // FIXME: concise condition.
+                assert_eq!(e.state().clk.ctr(), self.ctr);
+                assert!(prev_clk.ctr().is_nil() || prev_clk.ctr() == self.ctr);
+                assert_eq!(prev_clk.up, 0);*/
+                e.state().mode = CellMode::Aff;
+                e.state().flag.set_intro();
+                e.state().flag.unset_seal();
+                e.clock_sync(prev_clk, next_clk, env);
+              }
               next_clk
             }
           };
@@ -962,8 +984,23 @@ impl Spine {
                       unimplemented!();
                     }
                   }
-                  clo.borrow_mut().thunk_.push(ThunkPtr::nil());
-                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
+                  let mut clo = clo.borrow_mut();
+                  let mut tgc = clo.thunk_.len();
+                  for (i, &(tctr, th)) in clo.thunk_.iter().enumerate() {
+                    if tctr >= xclk.ctr() {
+                      tgc = i;
+                      break;
+                    }
+                  }
+                  let len_gc = clo.thunk_.len() - tgc;
+                  clo.thunk_.copy_within(tgc .., 0);
+                  clo.thunk_.resize_with(len_gc, || unreachable!());
+                  clo.thunk_.push((xclk.ctr(), ThunkPtr::nil()));
+                  if clo.thunk_.len() != xclk.up as usize {
+                    println!("DEBUG: Spine::_step: YieldSet:   x={:?} xclk={:?} clo={:?}",
+                        x, xclk, clo);
+                  }
+                  assert_eq!(clo.thunk_.len(), xclk.up as usize);
                 }
                 _ => panic!("bug")
               }
@@ -992,8 +1029,12 @@ impl Spine {
           Some(e) => {
             assert!(e.state().flag.intro());
             let xclk = e.state().clk;
+            if xclk.ctr().is_nil() {
+              println!("DEBUG: Spine::_step: PushSeal: x={:?} xclk={:?}", x, xclk);
+            }
             assert!(!xclk.ctr().is_nil());
-            thunkenv.arg.push((x, xclk));
+            /*println!("DEBUG: Spine::_step: PushSeal: thunkenv.arg.push: x={:?} xclk={:?}", x, xclk);
+            thunkenv.arg.push((x, xclk));*/
             e.state().flag.set_seal();
           }
         }
@@ -1105,7 +1146,7 @@ impl Spine {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
-                  clo.borrow_mut().thunk_.push(th);
+                  clo.borrow_mut().thunk_.push((xclk.ctr(), th));
                   assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
                 }
                 _ => panic!("bug: Spine::_step: Apply: cel={:?}", e.cel_.name())
@@ -1167,7 +1208,7 @@ impl Spine {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
-                  clo.borrow_mut().thunk_.push(th);
+                  clo.borrow_mut().thunk_.push((xclk.ctr(), th));
                   assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
                 }
                 _ => panic!("bug")
@@ -1265,7 +1306,9 @@ impl Spine {
       //_ => unimplemented!()
       e => panic!("bug: Spine::_step: unimplemented: {:?}", e)
     }
-    let d = Stopwatch::tl_lap();
+    let t1 = Stopwatch::tl_stamp();
+    let d = t1 - t0;
+    //println!("DEBUG: Spine::_step:   t1={}.{:09} s", t1.s(), t1.sub_ns());
     println!("DEBUG: Spine::_step:   d={:.09} s", d);
     ret
   }

@@ -1038,11 +1038,16 @@ impl PCell {
           // FIXME: depends on whether we want fresh or non-fresh get...
           match self.find_any(q_clk, ty) {
             None => {
+              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+                  self.optr, &self.ogty,
+                  prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr,
+              );
               println!("ERROR: PCell::get: no replica to copy from");
               panic!();
             }
             Some((o_loc, o_pm, o_addr)) => {
-              println!("DEBUG: PCell::get: prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+                  self.optr, &self.ogty,
                   prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr,
                   o_loc, o_pm, o_addr,
               );

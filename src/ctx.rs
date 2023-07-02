@@ -1,5 +1,5 @@
 use crate::cell::*;
-use crate::clock::{Clock};
+use crate::clock::*;
 use crate::panick::{panick_wrap};
 use crate::pctx::{MemReg};
 use crate::spine::*;
@@ -228,7 +228,7 @@ pub fn ctx_fresh() -> CellPtr {
   })
 }
 
-pub fn ctx_tmp_fresh() -> CellPtr {
+/*pub fn ctx_tmp_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.ctr.fresh_tmp()
   })
@@ -257,7 +257,7 @@ pub fn ctx_unify(x: CellPtr, uty: Option<CellType>) -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.env.borrow_mut().unify(&ctx.ctr, x, uty)
   })
-}
+}*/
 
 pub fn ctx_retain(x: CellPtr) {
   TL_CTX.with(|ctx| {
@@ -549,6 +549,7 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
           println!("ERROR: ctx_push_cell_arg: tried to push an uninitialized thunk argument: {:?}", x);
           panic!();
         }
+        //println!("DEBUG: ctx_push_cell_arg: x={:?} xclk={:?}", x, xclk);
         ctx.thunkenv.borrow_mut().arg.push((x, xclk))
       }
     }
@@ -834,12 +835,17 @@ pub struct CtxThunkEnv {
   pub thunkidx: HashMap<(u16, u16, Vec<Dim>, ThunkKey, ), ThunkPtr>,
   pub update:   HashMap<(CellPtr, Clock), ThunkClosure>,
   pub arg:      Vec<(CellPtr, Clock)>,
+  pub accumulate_in_place: bool,
 }
 
 impl CtxThunkEnv {
   pub fn reset(&mut self) {
     // FIXME FIXME
     //self.update.clear();
+  }
+
+  pub fn _set_accumulate_in_place(&mut self, flag: bool) {
+    self.accumulate_in_place = flag;
   }
 
   pub fn update(&mut self, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>) {
@@ -893,10 +899,10 @@ impl CtxThunkEnv {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CellClosure {
-  pub ithunk:   Option<ThunkPtr>,
-  pub thunk_:   Vec<ThunkPtr>,
+  pub ithunk:   Option<(Counter, ThunkPtr)>,
+  pub thunk_:   Vec<(Counter, ThunkPtr)>,
 }
 
 impl Default for CellClosure {
@@ -1087,6 +1093,38 @@ impl<'a> CellEnvEntryRef<'a> {
   pub fn state(&self) -> RefMut<CellState> {
     self.cel_.state_mut()
   }
+
+  pub fn clock_sync(self, prev_clk: Clock, next_clk: Clock, env: &CtxEnv) {
+    let mut cursor = self;
+    loop {
+      assert_eq!(cursor.cel_.state_ref().clk, prev_clk);
+      cursor.cel_.state_mut().clk = next_clk;
+      match cursor.cel_ {
+        &Cell_::Top(..) => {
+          break;
+        }
+        &Cell_::Phy(.., ref pcel) => {
+          for (_, rep) in pcel.replicas.iter() {
+            if rep.clk.get() == prev_clk {
+              rep.clk.set(next_clk);
+            }
+          }
+          break;
+        }
+        &Cell_::Cow(.., ref cow) => {
+          // FIXME FIXME
+          //unimplemented!();
+          match env.lookup_ref(cow.pcel) {
+            None => panic!("bug"),
+            Some(e) => {
+              cursor = e;
+            }
+          }
+        }
+        _ => panic!("bug")
+      }
+    }
+  }
 }
 
 pub struct CellEnvEntryMutRef<'a> {
@@ -1111,9 +1149,10 @@ pub struct MCellEnvEntry {
 //#[derive(Default)]
 pub struct CtxEnv {
   // FIXME
-  pub tmptab:   HashMap<CellPtr, CellPtr>,
+  //pub tmptab:   HashMap<CellPtr, CellPtr>,
   pub alias_root:   RefCell<HashMap<CellPtr, CellPtr>>,
   pub cow_root:     RefCell<HashMap<CellPtr, (CellPtr, Clock)>>,
+  //pub stable:   HashSet<CellPtr>,
   pub celtab:   HashMap<CellPtr, CellEnvEntry>,
   pub snapshot: HashMap<(CellPtr, Clock), Vec<CellPtr>>,
   /*pub atomtab:  HashMap<Atom, ()>,*/
@@ -1129,7 +1168,7 @@ pub struct CtxEnv {
 impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
-      tmptab:   HashMap::new(),
+      //tmptab:   HashMap::new(),
       alias_root:   RefCell::new(HashMap::new()),
       cow_root:     RefCell::new(HashMap::new()),
       celtab:   HashMap::new(),
@@ -1787,7 +1826,7 @@ impl CtxEnv {
     unimplemented!();
   }*/
 
-  pub fn reset_tmp(&mut self) {
+  /*pub fn reset_tmp(&mut self) {
     self.tmptab.clear();
   }
 
@@ -1829,7 +1868,7 @@ impl CtxEnv {
         }
       }
     }
-  }
+  }*/
 
   pub fn gc_prepare(&self, gc_list: &mut Vec<CellPtr>) {
     // FIXME FIXME: temporarily commented out for debugging.

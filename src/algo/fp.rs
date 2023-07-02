@@ -86,7 +86,7 @@ impl Ord for TotalOrd<f16> {
 
 impl Hash for TotalOrd<f16> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_bits().hash(hasher);
+    self.to_signed_bits().hash(hasher);
   }
 }
 
@@ -137,7 +137,7 @@ impl Ord for TotalOrd<f32> {
 
 impl Hash for TotalOrd<f32> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_bits().hash(hasher);
+    self.to_signed_bits().hash(hasher);
   }
 }
 
@@ -188,7 +188,7 @@ impl Ord for TotalOrd<f64> {
 
 impl Hash for TotalOrd<f64> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_bits().hash(hasher);
+    self.to_signed_bits().hash(hasher);
   }
 }
 

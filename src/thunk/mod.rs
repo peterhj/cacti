@@ -1,5 +1,6 @@
 use crate::algo::{SortKey8, SortMap8, RevSortMap8};
 use crate::algo::fp::*;
+use crate::algo::hash::*;
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
@@ -19,6 +20,7 @@ use cacti_gpu_cu_ffi::{cuda_memcpy_d2h, cuda_memcpy_d2h_async, CudartStream, cud
 use aho_corasick::{AhoCorasick};
 use futhark_ffi::{
   Config as FutConfig,
+  Stage as FutStage,
   Object as FutObject,
   ObjectExt,
   Backend as FutBackend,
@@ -171,7 +173,7 @@ impl Eq for ThunkKey {}
 
 impl Hash for ThunkKey {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    (self.0).as_bytes_repr().hash(hasher)
+    (self.0).hash(hasher)
   }
 }
 
@@ -198,7 +200,8 @@ pub trait ThunkSpec {
 
 pub trait ThunkSpec_ {
   fn as_any(&self) -> &dyn Any;
-  fn as_bytes_repr(&self) -> &[u8];
+  //fn as_bytes_repr(&self) -> &[u8];
+  fn hash(&self, hasher: &mut dyn Hasher);
   fn thunk_eq(&self, other: &dyn ThunkSpec_) -> Option<bool>;
   fn debug_name(&self) -> Option<&'static str>;
   fn cost_r0(&self) -> Option<ThunkCostR0>;
@@ -213,16 +216,21 @@ pub trait ThunkSpec_ {
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr>;
 }
 
-impl<T: ThunkSpec + Sized + Eq + Any> ThunkSpec_ for T {
+impl<T: ThunkSpec + Sized + Eq + Hash + Any> ThunkSpec_ for T {
   fn as_any(&self) -> &dyn Any {
     self
   }
 
-  fn as_bytes_repr(&self) -> &[u8] {
+  /*fn as_bytes_repr(&self) -> &[u8] {
     // SAFETY: This is safe as the type is `Sized`.
     let ptr = (self as *const T) as *const u8;
     let len = size_of::<T>();
     unsafe { from_raw_parts(ptr, len) }
+  }*/
+
+  fn hash(&self, inner: &mut dyn Hasher) {
+    let mut h = Hasher_{inner};
+    Hash::hash(self, &mut h);
   }
 
   fn thunk_eq(&self, other: &dyn ThunkSpec_) -> Option<bool> {
@@ -757,16 +765,20 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       let dev = pctx.nvgpu.as_ref().unwrap().dev();
       cudart_set_cur_dev(dev).unwrap();
     });
-    match config.cached_or_new_object::<CudaBackend>(source.as_bytes()) {
+    let t0 = Stopwatch::tl_stamp();
+    match config.build::<CudaBackend>(FutStage::Dylib, source.as_bytes()) {
       Err(e) => {
         println!("WARNING: FutharkThunkImpl::<CudaBackend>::_build_object: build error: {:?}", e);
         None
       }
-      Ok(mut obj) => {
+      Ok(None) => panic!("bug"),
+      Ok(Some(mut obj)) => {
+        let t1 = Stopwatch::tl_stamp();
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0);
         // FIXME FIXME: object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
-        env.reset_tmp();
-        ctr.reset_tmp();
+        //env.reset_tmp();
+        //ctr.reset_tmp();
         let pstart = TL_PCTX.with(|pctx| {
           pctx.ctr.next_addr()
         });
@@ -1303,8 +1315,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let obj = &mut objects.find_mut(mode).unwrap().1.obj;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
-    env.reset_tmp();
-    ctr.reset_tmp();
+    //env.reset_tmp();
+    //ctr.reset_tmp();
     /*// FIXME FIXME: param.
     let np = self.abi.num_param();
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
@@ -1319,14 +1331,14 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
     });
-    let _ = Stopwatch::tl_lap();
+    let t0 = Stopwatch::tl_stamp();
     let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
     });
-    let t1 = Stopwatch::tl_lap();
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1);
+    let t1 = Stopwatch::tl_stamp();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1 - t0);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: hard runtime error");
@@ -1439,7 +1451,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       }
     // TODO TODO
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
-    let ret = gpu.compute.sync();
+    /*let ret = gpu.compute.sync();
     if ret.is_err() {
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: cuda stream sync failed: {:?}", ret);
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: source:");
@@ -1460,13 +1472,13 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       }
       let out_val = *(dst_buf.as_ptr() as *const f32);
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: val={:?}", out_val);
-    }
+    }*/
     });
-    {
+    /*{
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: drop arg_arr...");
       drop(arg_arr);
-    }
+    }*/
     ThunkRet::Success
   }
 
@@ -1548,8 +1560,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let obj = &mut objects.find_mut(mode).unwrap().1.obj;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
-    env.reset_tmp();
-    ctr.reset_tmp();
+    //env.reset_tmp();
+    //ctr.reset_tmp();
     /*obj.unify_abi(self.abi).unwrap();*/
     let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_arr);
     if o_ret.is_err() || (obj.may_fail() && obj.sync().is_err()) {

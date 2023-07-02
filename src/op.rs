@@ -30,10 +30,32 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
   #[track_caller]
   fn add_assign(&mut self, rhs: R) {
     panick_wrap(|| {
+      let this = *self;
+      let rhs = *rhs.borrow();
+      if TL_CTX.with(|ctx| {
+        let mut success = false;
+        let mut thunkenv = ctx.thunkenv.borrow_mut();
+        if thunkenv.accumulate_in_place {
+          let spine = ctx.spine.borrow();
+          let mut this_clk = spine._version(this).unwrap();
+          let rhs_clk = spine._version(rhs).unwrap();
+          if rhs_clk.up == 1 &&
+             !thunkenv.update.contains_key(&(rhs, rhs_clk.init()))
+          {
+            this_clk.up += 1;
+            let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
+            assert!(thunkenv.update.insert((this, this_clk), tclo).is_none());
+            success = true;
+          }
+        }
+        success
+      }) {
+        return;
+      }
       let op = NopFutThunkSpec;
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*rhs.borrow());
-      ctx_pop_accumulate_thunk(op, *self)
+      ctx_push_cell_arg(rhs);
+      ctx_pop_accumulate_thunk(op, this)
     })
   }
 }
