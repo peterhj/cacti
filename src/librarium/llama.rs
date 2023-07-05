@@ -197,11 +197,13 @@ impl Llama {
     //let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
                       .new_shape([ubat_sz * seq_len, num_head * head_dim])
-                      .block_mm([1, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
+                      .block_mm([ubat_sz * seq_len, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
                       .new_shape([ubat_sz, seq_len, tok_dim])
                       .keep();
-    let out_lm_prob = out_lm_logit.cast(f32::dtype()).inner_softmax().keep();
-    let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();
+    let logit32 = out_lm_logit.cast(f32::dtype());
+    let out_lm_prob = logit32.inner_softmax().keep();
+    //let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();
+    let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
     LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
   }
 }

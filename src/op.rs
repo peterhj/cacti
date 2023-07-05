@@ -170,6 +170,44 @@ impl<R: Borrow<CellPtr>> Add<R> for StableCell {
   }
 }
 
+impl<'l, R: Borrow<CellPtr>> Sub<R> for &'l CellPtr {
+  type Output = CellPtr;
+
+  fn sub(self, rhs: R) -> CellPtr {
+    panick_wrap(|| {
+      let op = SubFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl<R: Borrow<CellPtr>> Sub<R> for CellPtr {
+  type Output = CellPtr;
+
+  fn sub(self, rhs: R) -> CellPtr {
+    panick_wrap(|| (&self).sub(rhs))
+  }
+}
+
+impl<'l, R: Borrow<CellPtr>> Sub<R> for &'l StableCell {
+  type Output = CellPtr;
+
+  fn sub(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().sub(rhs))
+  }
+}
+
+impl<R: Borrow<CellPtr>> Sub<R> for StableCell {
+  type Output = CellPtr;
+
+  fn sub(self, rhs: R) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().sub(rhs))
+  }
+}
+
 impl<'l> Mul<f32> for &'l CellPtr {
   type Output = CellPtr;
 
@@ -360,6 +398,17 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
   fn pow(&self, rhs: R) -> CellPtr {
     unimplemented!();
+  }
+
+  #[track_caller]
+  fn inner_softmax_categorical_nll(&self, rank: R) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerSoftmaxCategoricalNLLFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rank.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 
   /*#[track_caller]
@@ -654,7 +703,11 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   #[track_caller]
   fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
-      // FIXME FIXME
+      let op = FlatSumFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+      /*// FIXME FIXME
       let p = *self.borrow();
       let ty_ = ctx_lookup_type(p);
       match ty_.ndim() {
@@ -684,7 +737,7 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
           ctx_pop_thunk(op)
         }
         _ => unimplemented!()
-      }
+      }*/
     })
   }
 

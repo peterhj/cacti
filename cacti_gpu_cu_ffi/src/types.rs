@@ -11,6 +11,7 @@ pub const CUDA_ERROR_DEINITIALIZED: CUresult = 4;
 pub const CUDA_ERROR_INVALID_CONTEXT: CUresult = 201;
 pub const CUDA_ERROR_ILLEGAL_ADDRESS: CUresult = 700;
 pub const CUDA_ERROR_MISALIGNED_ADDRESS: CUresult = 716;
+pub const CUDA_ERROR_UNKNOWN: CUresult = 999;
 
 pub type CUdevice = c_int;
 pub type CUdevice_attribute = c_int;

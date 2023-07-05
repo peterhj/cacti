@@ -1,4 +1,5 @@
 use std::cell::{Cell};
+pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::cmp::{Ordering};
 use std::fmt::{Debug};
 use std::mem::{swap};
@@ -6,6 +7,7 @@ use std::mem::{swap};
 pub mod fp;
 pub mod hash;
 //pub mod int;
+pub mod str;
 pub mod sync;
 
 #[derive(Clone, Copy)]
@@ -108,7 +110,7 @@ impl Bitvec64 {
   }
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 pub struct MergeVecDeque<T> {
   buf:      Vec<T>,
   front:    usize,
@@ -271,7 +273,7 @@ impl ExtentVecList {
     }
     self.list.push_front(e0);
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Region {

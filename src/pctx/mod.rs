@@ -1,6 +1,6 @@
 use self::nvgpu::{NvGpuPCtx};
 use self::smp::{SmpPCtx};
-use crate::algo::{RevSortMap8};
+use crate::algo::{HashMap, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
 use crate::panick::*;
@@ -31,9 +31,9 @@ pub enum Locus {
 }
 
 impl Locus {
-  pub fn fastest() -> Locus {
+  /*pub fn fastest() -> Locus {
     TL_PCTX.with(|pctx| pctx.fastest_locus())
-  }
+  }*/
 
   pub fn max(self, rhs: Locus) -> Locus {
     max(self, rhs)
@@ -155,12 +155,65 @@ impl PCtxCtr {
   }
 }
 
+#[derive(Clone, Default)]
+pub struct TagUnifier {
+  root: HashMap<u16, u16>,
+}
+
+impl TagUnifier {
+  pub fn parse_tag(tag_s: &[u8]) -> Result<u16, ()> {
+    for i in (0 .. tag_s.len()).rev() {
+      let c = tag_s[i];
+      if !(c >= b'0' && c <= b'9') {
+        assert_eq!(c, b'_');
+        return String::from_utf8_lossy(&tag_s[i + 1 .. ]).parse().map_err(|_| ());
+      }
+    }
+    panic!("bug");
+  }
+
+  pub fn reset(&mut self) {
+    self.root.clear();
+  }
+
+  pub fn find(&mut self, tag: u16) -> u16 {
+    if !self.root.contains_key(&tag) {
+      self.root.insert(tag, tag);
+      return tag;
+    }
+    let mut cursor = tag;
+    loop {
+      let next = match self.root.get(&cursor) {
+        None => panic!("bug"),
+        Some(&t) => t
+      };
+      if cursor == next {
+        return cursor;
+      }
+      cursor = next;
+    }
+  }
+
+  pub fn unify(&mut self, ltag: u16, rtag: u16) {
+    let ltag = self.find(ltag);
+    if ltag == rtag {
+      return;
+    }
+    let rtag = self.find(rtag);
+    if ltag == rtag {
+      return;
+    }
+    assert_eq!(self.root.insert(ltag, rtag), Some(ltag));
+  }
+}
+
 pub struct PCtx {
   // TODO TODO
   pub ctr:      PCtxCtr,
   pub pmset:    PMachSet,
   pub lpmatrix: RevSortMap8<(Locus, PMach), ()>,
   pub plmatrix: RevSortMap8<(PMach, Locus), ()>,
+  pub tagunify: RefCell<TagUnifier>,
   //pub addrtab:  RefCell<HashMap<PAddr, PAddrTabEntry>>,
   pub smp:      SmpPCtx,
   #[cfg(feature = "nvgpu")]
@@ -178,6 +231,7 @@ impl PCtx {
       pmset:    PMachSet::default(),
       lpmatrix: RevSortMap8::default(),
       plmatrix: RevSortMap8::default(),
+      tagunify: RefCell::new(TagUnifier::default()),
       smp:      SmpPCtx::new(),
       #[cfg(feature = "nvgpu")]
       nvgpu_ct: 0,

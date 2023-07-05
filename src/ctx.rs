@@ -1,7 +1,8 @@
+use crate::algo::{HashMap, HashSet};
 use crate::cell::*;
 use crate::clock::*;
 use crate::panick::{panick_wrap};
-use crate::pctx::{MemReg};
+use crate::pctx::{Locus, MemReg};
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -12,15 +13,15 @@ use futhark_syntax::re::{ReTrie};
 use std::any::{Any};
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell, Ref, RefMut};
-use std::collections::{HashMap, HashSet};
 use std::mem::{swap};
 use std::rc::{Rc};
 
 thread_local! {
   pub static TL_CTX_CFG: CtxCfg = CtxCfg::default();
   pub static TL_CTX: Ctx = {
-    let ctx = Ctx::new();
+    let mut ctx = Ctx::new();
     TL_CTX_CFG.with(|cfg| cfg._seal.set(true));
+    ctx.thunkenv.borrow_mut()._set_accumulate_in_place(true);
     ctx
   };
 }
@@ -899,7 +900,7 @@ impl CtxThunkEnv {
   }
 }
 
-#[derive(Clone, Debug)]
+/*#[derive(Clone, Debug)]
 pub struct CellClosure {
   pub ithunk:   Option<(Counter, ThunkPtr)>,
   pub thunk_:   Vec<(Counter, ThunkPtr)>,
@@ -911,6 +912,52 @@ impl Default for CellClosure {
       ithunk:   None,
       thunk_:   Vec::new(),
     }
+  }
+}*/
+
+#[derive(Clone, Debug)]
+pub struct CellClosure {
+  pub ctr:      Counter,
+  pub thunk:    Vec<ThunkPtr>,
+}
+
+impl Default for CellClosure {
+  fn default() -> CellClosure {
+    CellClosure{
+      ctr:      Counter::default(),
+      thunk:    Vec::new(),
+    }
+  }
+}
+
+impl CellClosure {
+  pub fn init(&mut self, clk: Clock, th: ThunkPtr) {
+    assert_eq!(clk.up, 0);
+    if self.ctr > clk.ctr() {
+      panic!("bug");
+    } else if self.ctr < clk.ctr() {
+      self.ctr = clk.ctr();
+      self.thunk.clear();
+    }
+    assert_eq!(clk.up as usize, self.thunk.len());
+    self.thunk.push(th);
+  }
+
+  pub fn update(&mut self, clk: Clock, th: ThunkPtr) {
+    assert!(clk.up > 0);
+    if self.ctr > clk.ctr() {
+      panic!("bug");
+    } else if self.ctr < clk.ctr() {
+      self.ctr = clk.ctr();
+      self.thunk.clear();
+      self.thunk.push(ThunkPtr::nil());
+    }
+    if clk.up as usize != self.thunk.len() {
+      println!("DEBUG: CellClosure::update: clk={:?} th={:?} self.ctr={:?} self.thunk={:?}",
+          clk, th, &self.ctr, &self.thunk);
+    }
+    assert_eq!(clk.up as usize, self.thunk.len());
+    self.thunk.push(th);
   }
 }
 
@@ -1113,13 +1160,45 @@ impl<'a> CellEnvEntryRef<'a> {
         }
         &Cell_::Cow(.., ref cow) => {
           // FIXME FIXME
-          //unimplemented!();
-          match env.lookup_ref(cow.pcel) {
+          unimplemented!();
+          /*match env.lookup_ref(cow.pcel) {
             None => panic!("bug"),
             Some(e) => {
               cursor = e;
             }
+          }*/
+        }
+        _ => panic!("bug")
+      }
+    }
+  }
+
+  pub fn clock_sync_loc(self, loc: Locus, prev_clk: Clock, next_clk: Clock, env: &CtxEnv) {
+    let mut cursor = self;
+    loop {
+      assert_eq!(cursor.cel_.state_ref().clk, prev_clk);
+      cursor.cel_.state_mut().clk = next_clk;
+      match cursor.cel_ {
+        &Cell_::Top(..) => {
+          break;
+        }
+        &Cell_::Phy(.., ref pcel) => {
+          for (key, rep) in pcel.replicas.iter() {
+            if key.as_ref().0 == loc && rep.clk.get() == prev_clk {
+              rep.clk.set(next_clk);
+            }
           }
+          break;
+        }
+        &Cell_::Cow(.., ref cow) => {
+          // FIXME FIXME
+          unimplemented!();
+          /*match env.lookup_ref(cow.pcel) {
+            None => panic!("bug"),
+            Some(e) => {
+              cursor = e;
+            }
+          }*/
         }
         _ => panic!("bug")
       }

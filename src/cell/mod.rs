@@ -1,4 +1,4 @@
-use crate::algo::{RevSortKey8, RevSortMap8};
+use crate::algo::{HashMap, RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
@@ -12,7 +12,6 @@ use smol_str::{SmolStr};
 use std::any::{Any};
 use std::borrow::{Borrow};
 use std::cell::{Cell};
-use std::collections::{HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of, swap};

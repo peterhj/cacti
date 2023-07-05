@@ -1,9 +1,9 @@
+use crate::algo::{HashMap, HashSet};
 use crate::cell::{StableCell};
 
 use smol_str::{SmolStr};
 
 //use std::borrow::{Borrow};
-use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Pat {

@@ -1,3 +1,4 @@
+use crate::algo::{HashMap, HashSet};
 use crate::cell::*;
 use crate::clock::{Counter, Clock};
 use crate::ctx::*;
@@ -9,7 +10,6 @@ use crate::util::time::{Stopwatch};
 
 use std::any::{Any};
 use std::cmp::{Ordering};
-use std::collections::{HashMap, HashSet};
 //use std::mem::{swap};
 
 pub const INTRO_CODE:           u8 = b':';
@@ -285,7 +285,7 @@ impl SpineEnv {
             match self.apply_.get_mut(&x) {
               None => panic!("bug"),
               Some(thlist) => {
-                thlist.push((sp, ThunkPtr::nil(), next_clk));
+                thlist.push((sp, ThunkPtr::opaque(), next_clk));
                 assert_eq!(thlist.len(), next_clk.up as _);
               }
             }
@@ -379,7 +379,7 @@ impl SpineEnv {
             match self.apply_.get_mut(&x) {
               None => panic!("bug"),
               Some(thlist) => {
-                thlist.push((sp, ThunkPtr::nil(), next_clk));
+                thlist.push((sp, ThunkPtr::opaque(), next_clk));
                 assert_eq!(thlist.len(), next_clk.up as _);
               }
             }
@@ -404,7 +404,7 @@ impl SpineEnv {
             state.mode = CellMode::Init;
             state.flag.set_intro();
             let next_clk = self.ctr.into();
-            assert!(self.iapply.insert(x, (sp, ThunkPtr::nil(), next_clk)).is_none());
+            assert!(self.iapply.insert(x, (sp, ThunkPtr::opaque(), next_clk)).is_none());
             state.clk = next_clk;
           }
         }
@@ -958,7 +958,7 @@ impl Spine {
                 e.state().mode = CellMode::Aff;
                 e.state().flag.set_intro();
                 e.state().flag.unset_seal();
-                e.clock_sync(prev_clk, next_clk, env);
+                e.clock_sync_loc(Locus::Mem, prev_clk, next_clk, env);
               }
               next_clk
             }
@@ -984,7 +984,7 @@ impl Spine {
                       unimplemented!();
                     }
                   }
-                  let mut clo = clo.borrow_mut();
+                  /*let mut clo = clo.borrow_mut();
                   let mut tgc = clo.thunk_.len();
                   for (i, &(tctr, th)) in clo.thunk_.iter().enumerate() {
                     if tctr >= xclk.ctr() {
@@ -995,12 +995,13 @@ impl Spine {
                   let len_gc = clo.thunk_.len() - tgc;
                   clo.thunk_.copy_within(tgc .., 0);
                   clo.thunk_.resize_with(len_gc, || unreachable!());
-                  clo.thunk_.push((xclk.ctr(), ThunkPtr::nil()));
+                  clo.thunk_.push((xclk.ctr(), ThunkPtr::opaque()));
                   if clo.thunk_.len() != xclk.up as usize {
                     println!("DEBUG: Spine::_step: YieldSet:   x={:?} xclk={:?} clo={:?}",
                         x, xclk, clo);
                   }
-                  assert_eq!(clo.thunk_.len(), xclk.up as usize);
+                  assert_eq!(clo.thunk_.len(), xclk.up as usize);*/
+                  clo.borrow_mut().update(xclk, ThunkPtr::opaque());
                 }
                 _ => panic!("bug")
               }
@@ -1039,7 +1040,7 @@ impl Spine {
           }
         }
       }
-      &SpineEntry::Initialize(x, ith) => {
+      &SpineEntry::Initialize(x, th) => {
         /*match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
@@ -1088,7 +1089,57 @@ impl Spine {
           }
         }*/
         // FIXME FIXME
-        unimplemented!();
+        let xclk = match env.lookup_mut_ref(x) {
+          None => panic!("bug"),
+          Some(e) => {
+            match e.state().mode {
+              CellMode::Init => {}
+              _ => panic!("bug")
+            }
+            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert!(e.state().flag.intro());
+            assert!(!e.state().flag.seal());
+            // FIXME FIXME
+            let next_clk = e.state().clk.update();
+            e.state().clk = next_clk;
+            next_clk
+          }
+        };
+        {
+          let tclo = match thunkenv.update.get(&(x, xclk)) {
+            None => panic!("bug"),
+            Some(tclo) => tclo
+          };
+          assert_eq!(tclo.pthunk, th);
+          let te = match thunkenv.thunktab.get(&th) {
+            None => panic!("bug"),
+            Some(te) => te
+          };
+          let ret = te.pthunk.initialize(ctr, env, &tclo.arg, th, x, xclk);
+          match ret {
+            ThunkRet::NotImpl => {
+              println!("ERROR: Spine::_step: Initialize: thunk not implemented");
+              panic!();
+            }
+            ThunkRet::Failure => {
+              println!("ERROR: Spine::_step: Initialize: unrecoverable thunk failure");
+              panic!();
+            }
+            ThunkRet::Success => {}
+          }
+          match env.lookup_ref(x) {
+            None => panic!("bug"),
+            Some(e) => {
+              match e.cel_ {
+                &Cell_::Phy(_, ref clo, _) |
+                &Cell_::Cow(_, ref clo, _) => {
+                  clo.borrow_mut().init(xclk, th);
+                }
+                _ => panic!("bug")
+              }
+            }
+          }
+        }
       }
       &SpineEntry::Apply(x, th) => {
         let xclk = match env.lookup_mut_ref(x) {
@@ -1146,8 +1197,9 @@ impl Spine {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
-                  clo.borrow_mut().thunk_.push((xclk.ctr(), th));
-                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
+                  /*clo.borrow_mut().thunk_.push((xclk.ctr(), th));
+                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);*/
+                  clo.borrow_mut().update(xclk, th);
                 }
                 _ => panic!("bug: Spine::_step: Apply: cel={:?}", e.cel_.name())
               }
@@ -1208,8 +1260,9 @@ impl Spine {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
-                  clo.borrow_mut().thunk_.push((xclk.ctr(), th));
-                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);
+                  /*clo.borrow_mut().thunk_.push((xclk.ctr(), th));
+                  assert_eq!(clo.borrow().thunk_.len(), xclk.up as usize);*/
+                  clo.borrow_mut().update(xclk, th);
                 }
                 _ => panic!("bug")
               }

@@ -1,3 +1,4 @@
+use crate::algo::{HashMap, HashSet};
 use crate::cell::{CellType, Dtype};
 
 use glob::{glob};
@@ -10,7 +11,6 @@ pub use repugnant_pickle::torch::{
 use smol_str::{SmolStr};
 
 use std::cmp::{min};
-use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom};
 use std::fs::{File};
 use std::io::{Read, Seek, SeekFrom, Error as IoError};

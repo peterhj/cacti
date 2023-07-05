@@ -1,11 +1,12 @@
 use crate::algo::{SortKey8, SortMap8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::algo::hash::*;
+use crate::algo::str::*;
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 //use crate::op::*;
-use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr};
+use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier};
 #[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
 //use crate::pctx::smp::*;
@@ -70,6 +71,10 @@ impl ThunkPtr {
     ThunkPtr(0)
   }
 
+  pub fn opaque() -> ThunkPtr {
+    ThunkPtr(i32::min_value())
+  }
+
   pub fn from_unchecked(p: i32) -> ThunkPtr {
     ThunkPtr(p)
   }
@@ -83,8 +88,8 @@ impl ThunkPtr {
   }
 
   pub fn as_bytes_repr(&self) -> &[u8] {
-    // SAFETY: This should be safe as the type is `Copy`.
-    let ptr = (self as *const ThunkPtr) as *const u8;
+    // SAFETY: This is safe because the type is `Copy` and transparent.
+    let ptr = ((self as *const ThunkPtr) as *const i32) as *const u8;
     let len = size_of::<ThunkPtr>();
     assert_eq!(len, 4);
     unsafe { from_raw_parts(ptr, len) }
@@ -648,6 +653,8 @@ impl FutharkThunkCode {
 pub struct FutharkThunkObject<B: FutBackend> {
   pub obj:      FutObject<B>,
   pub consts:   Vec<(PAddr, StableCell)>,
+  //pub out0_tag: Option<Vec<u8>>,
+  pub out0_tag: Option<(TagUnifier, u16)>,
 }
 
 pub trait FutharkThunkImpl_<B: FutBackend> {
@@ -703,8 +710,9 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     //(obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemFree.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_alloc_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_free_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_back_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_back_alloc_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_back_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_back_free_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_unify.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_unify_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_global_failure_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_failarg_alloc_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_global_failure_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_failarg_free_hook as *const c_void as _);
     // TODO TODO
     (obj.ffi.ctx_cfg_set_cuGetErrorString.as_ref().unwrap())(obj.cfg, LIBCUDA.cuGetErrorString.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuInit.as_ref().unwrap())(obj.cfg, LIBCUDA.cuInit.as_ref().unwrap().as_ptr() as _);
@@ -775,63 +783,45 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       Ok(Some(mut obj)) => {
         let t1 = Stopwatch::tl_stamp();
         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0);
-        // FIXME FIXME: object ctx may create constants that need to be tracked.
+        // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
-        //env.reset_tmp();
-        //ctr.reset_tmp();
         let pstart = TL_PCTX.with(|pctx| {
+          let gpu = pctx.nvgpu.as_ref().unwrap();
+          gpu.mem_pool.borrow().set_back_alloc(true);
           pctx.ctr.next_addr()
         });
         unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
-        //let x0 = ctr.peek_tmp();
         let pfin = TL_PCTX.with(|pctx| {
+          let gpu = pctx.nvgpu.as_ref().unwrap();
+          gpu.mem_pool.borrow().set_back_alloc(false);
           pctx.ctr.peek_addr()
         });
-        /*let tmp_ct = -x0.to_unchecked();
-        if tmp_ct > 0 {
-          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: alloc tmp: {}", tmp_ct);
-        }*/
-        //for x in (x0.to_unchecked() .. 0).rev() {}
         for p in (pstart.to_unchecked() ..= pfin.to_unchecked()) {
-          //let x = CellPtr::from_unchecked(x);
           let p = PAddr::from_unchecked(p);
           let x = ctr.fresh_cel();
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: const: {:?} {:?}", p, x);
-          // FIXME FIXME: futhark consts should be marked pin.
+          // FIXME: futhark consts should be marked pin.
           TL_PCTX.with(|pctx| {
-            match pctx.nvgpu.as_ref().unwrap().cel_map.borrow().get(&p) {
+            // FIXME: the type of the constant could probably be inferred,
+            // but easier to defer it until unification.
+            let ty = CellType::top();
+            let mut pcel = PCell::new(x, ty.clone());
+            let pmach = PMach::NvGpu;
+            let locus = match pctx.nvgpu.as_ref().unwrap().lookup_reg(p) {
               None => panic!("bug"),
-              Some(_gpu_cel) => {
-                // FIXME: the type of the constant could probably be inferred,
-                // but easier to defer it until unification.
-                let ty = CellType::top();
-                let mut pcel = PCell::new(x, ty.clone());
-                let pmach = PMach::NvGpu;
-                let locus = pctx.nvgpu.as_ref().unwrap().fastest_locus();
-                /*let icel = Rc::downgrade(gpu_cel);
-                pcel.push_new_replica(locus, pmach, Some(icel));*/
-                // FIXME: check that this const clock definition is correct.
-                /*let mut clk: Clock = TL_CTX.with(|ctx| {
-                  ctx.spine.borrow().ctr.into()
-                });*/
-                let mut clk: Clock = rst.into();
-                clk.up = 1;
-                pcel.push_new_replica(clk, locus, pmach, p);
-                env.insert_phy(x, ty, pcel);
-              }
-            }
+              Some(reg) => reg.locus()
+            };
+            // FIXME: check that this const clock definition is correct.
+            /*let mut clk: Clock = TL_CTX.with(|ctx| {
+              ctx.spine.borrow().ctr.into()
+            });*/
+            let mut clk: Clock = rst.into();
+            clk.up = 1;
+            pcel.push_new_replica(clk, locus, pmach, p);
+            env.insert_phy(x, ty, pcel);
           });
-          // FIXME FIXME: since migrating CellPtr -> PAddr,
-          // signature of unification will also need change.
-          /*
-          let y = env.unify(ctr, x, None);
-          TL_PCTX.with(|pctx| {
-            pctx.nvgpu.as_ref().unwrap().unify(x, y);
-          });
-          consts.push(StableCell::retain(env, y));
-          */
           consts.push((p, StableCell::retain(env, x)));
-          // FIXME FIXME
+          // FIXME FIXME: what else?
         }
         if consts.len() > 0 {
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: consts={:?}", consts);
@@ -1145,7 +1135,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       assert_eq!(&key, &key2);
       self.modekeys.borrow_mut().push(key);*/
       // FIXME: or swap.
-      let object = FutharkThunkObject{obj, consts};
+      let object = FutharkThunkObject{obj, consts, out0_tag: None};
       self.objects.borrow_mut().insert(mode, object);
     }
   }
@@ -1170,8 +1160,9 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     if let Some(name) = spec_.debug_name() {
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: name=\"{}\"", name);
     }
-    /*let mode = ThunkMode::Apply;*/
-    let mode = match env.lookup_ref(out) {
+    // FIXME FIXME
+    let mode = ThunkMode::Apply0;
+    /*let mode = match env.lookup_ref(out) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -1186,13 +1177,9 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
               match pcel.lookup(loc, PMach::NvGpu) {
                 None => ThunkMode::Apply0,
                 Some(rep) => {
-                  match gpu.lookup_reg(rep.addr) {
+                  match gpu.lookup_dev(rep.addr) {
                     None => ThunkMode::Apply0,
-                    Some(NvGpuInnerReg::Mem{..}) |
-                    Some(NvGpuInnerReg::VMem{..}) => {
-                      ThunkMode::Apply1
-                    }
-                    _ => panic!("bug")
+                    Some(_) => ThunkMode::Apply1,
                   }
                 }
               }
@@ -1201,7 +1188,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
           _ => panic!("bug")
         }
       }
-    };
+    };*/
     if self.objects.borrow().find(mode).is_none() {
       self._try_build(ctr, env, mode, FutharkThunkBuildConfig::default(), oclk.ctr());
     }
@@ -1312,11 +1299,11 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       out_arr.push(FutArrayDev::null());
     }
     let mut objects = self.objects.borrow_mut();
-    let obj = &mut objects.find_mut(mode).unwrap().1.obj;
+    let mut object = objects.find_mut(mode).unwrap().1;
+    //let obj = &mut object.obj;
+    let &mut FutharkThunkObject{ref mut obj, ref mut out0_tag, ..} = &mut object;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
-    //env.reset_tmp();
-    //ctr.reset_tmp();
     /*// FIXME FIXME: param.
     let np = self.abi.num_param();
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
@@ -1327,15 +1314,32 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_raw_arr={:?}", &out_raw_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: enter kernel...");
-    TL_PCTX.with(|pctx| {
+    let pre_front_dptr = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
+      //if let Some((tag) = out0_tag.as_ref() {}
+      if let Some(&(ref unify, tag)) = out0_tag.as_ref() {
+        //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   (with tag)");
+        //gpu.mem_pool.set_front_tag(Some(tag));
+        pctx.tagunify.borrow_mut().clone_from(unify);
+        //gpu.mem_pool.set_front_tag(Some(TagUnifier::parse_tag(tag).unwrap()));
+        gpu.mem_pool.set_front_tag(Some(tag));
+      } else {
+        pctx.tagunify.borrow_mut().reset();
+      }
+      gpu.mem_pool.set_back_alloc(true);
+      gpu.mem_pool.front_dptr()
     });
     let t0 = Stopwatch::tl_stamp();
     let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
-    TL_PCTX.with(|pctx| {
+    let _post_front_dptr = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
+      if let Some(_) = out0_tag.as_ref() {
+        gpu.mem_pool.set_front_tag(None);
+      }
+      gpu.mem_pool.set_back_alloc(false);
+      gpu.mem_pool.front_dptr()
     });
     let t1 = Stopwatch::tl_stamp();
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1 - t0);
@@ -1378,7 +1382,39 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         assert_eq!(&out_ty_[0].shape, out_arr[0].shape().unwrap());
       }
     }
+    // TODO TODO
     let (mem_dptr, mem_size) = out_arr[0].mem_parts().unwrap();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
+    if mem_dptr == pre_front_dptr {
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   no fragmentation");
+    } else if mem_dptr > pre_front_dptr {
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   fragmentation sz={}", mem_dptr - pre_front_dptr);
+    } else {
+      unimplemented!();
+    }
+    match out_arr[0].tag() {
+      None => {
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=null");
+      }
+      Some(ctag) => {
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=\"{}\"", sane_ascii(ctag.to_bytes()));
+        match out0_tag.as_ref() {
+          None => {
+            //*out0_tag = Some(ctag.to_bytes().to_owned());
+            TL_PCTX.with(|pctx| {
+              let unify = pctx.tagunify.borrow().clone();
+              let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
+              *out0_tag = Some((unify, tag));
+            });
+          }
+          Some(&(_, otag)) => {
+            //assert_eq!(&otag as &[_], ctag.to_bytes());
+            let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
+            assert_eq!(otag, tag);
+          }
+        }
+      }
+    }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       match gpu.mem_pool.lookup_dptr(mem_dptr) {
@@ -1449,8 +1485,6 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
           }
         }
       }
-    // TODO TODO
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
     /*let ret = gpu.compute.sync();
     if ret.is_err() {
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: cuda stream sync failed: {:?}", ret);
@@ -1560,8 +1594,6 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let obj = &mut objects.find_mut(mode).unwrap().1.obj;
     // FIXME FIXME: pre-entry setup.
     obj.reset();
-    //env.reset_tmp();
-    //ctr.reset_tmp();
     /*obj.unify_abi(self.abi).unwrap();*/
     let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_arr);
     if o_ret.is_err() || (obj.may_fail() && obj.sync().is_err()) {

@@ -1582,10 +1582,10 @@ impl FutharkThunkSpec for LogFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerMax3dThunkSpec;
 
-/*impl FutharkThunk_ for InnerMax3dThunkSpec {
+impl FutharkThunk_ for InnerMax3dThunkSpec {
   fn _arg_count(&self) -> u8 {
     1
   }
@@ -1593,12 +1593,12 @@ pub struct InnerMax3dThunkSpec;
   fn _body(&self) -> Vec<u8> {
     b"map (\t1 -> map (\t2 -> [reduce max -inf t2]) t1) {%0}\n".to_owned()
   }
-}*/
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerMean3dThunkSpec;
 
-/*impl FutharkThunk_ for InnerSum3dThunkSpec {
+impl FutharkThunk_ for InnerSum3dThunkSpec {
   fn _arg_count(&self) -> u8 {
     1
   }
@@ -1606,12 +1606,12 @@ pub struct InnerMean3dThunkSpec;
   fn _body(&self) -> Vec<u8> {
     b"map (\t1 -> map (\t2 -> [(reduce (+) 0 t2) / ({%t.0}.i64 (length t2))]) t1) {%0}\n".to_owned()
   }
-}*/
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerSum3dThunkSpec;
 
-/*impl FutharkThunk_ for InnerSum3dThunkSpec {
+impl FutharkThunk_ for InnerSum3dThunkSpec {
   fn _arg_count(&self) -> u8 {
     1
   }
@@ -1622,6 +1622,73 @@ pub struct InnerSum3dThunkSpec;
 }*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct FlatSumFutThunkSpec;
+
+impl FutharkThunkSpec for FlatSumFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.flat_sum")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: 0, dtype: arg[0].dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match arg[0].ndim {
+      0 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%1}} = {{%0}} in"));
+        code.into()
+      }
+      1 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%1}} = reduce (+) 0 {{%0}} in"));
+        code.into()
+      }
+      2 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let t0 = flatten {{%0}} in"));
+        code.append(format!(r"let t1 = reduce (+) 0 t0 in"));
+        code.append(format!(r"let {{%1}} = t1 in"));
+        code.into()
+      }
+      3 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let t0 = flatten_3d {{%0}} in"));
+        code.append(format!(r"let t1 = reduce (+) 0 t0 in"));
+        code.append(format!(r"let {{%1}} = t1 in"));
+        code.into()
+      }
+      4 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let t0 = flatten_4d {{%0}} in"));
+        code.append(format!(r"let t1 = reduce (+) 0 t0 in"));
+        code.append(format!(r"let {{%1}} = t1 in"));
+        code.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
+
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Sum1dFutThunkSpec;
 
 impl FutharkThunkSpec for Sum1dFutThunkSpec {
@@ -1794,7 +1861,7 @@ impl FutharkThunkSpec for Sum4dFutThunkSpec {
     code.body.push(format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
     code.into()
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerMeanFutThunkSpec;
@@ -1959,6 +2026,97 @@ impl FutharkThunkSpec for InnerSoftmaxFutThunkSpec {
         unimplemented!();
       }
     }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct InnerSoftmaxCategoricalNLLFutThunkSpec;
+
+impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_softmax_categorical_nll")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if !arg[1].dtype.is_uint() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[0].ndim() != arg[1].ndim() + 1 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[1].ndim(), dtype: arg[0].dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if !arg[1].dtype.is_uint() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[0].ndim() != arg[1].ndim() + 1 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: arg[1].shape.clone(), dtype: arg[0].dtype})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
+    match out.ndim {
+      0 => {
+        unimplemented!();
+      }
+      1 => {
+        unimplemented!();
+      }
+      2 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
+        code.append(format!(r"let a_suf = {{%0.s[2]}} in"));
+        code.append(format!(r"let a = a_pre * a_suf in"));
+        code.append(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
+        code.append(format!(r"let t_val = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
+        code.append(format!(r"let t_iota = iota a_pre in"));
+        code.append(format!(r"let t_key = flatten {{%1}} :> [a_pre]{} in", arg[1].dtype.format_futhark()));
+        code.append(format!(r"let t_key = map2 (\idx k -> let k = (i64.{} k) in (assert (k >= 0 && k < a_suf) k) + a_suf * idx) t_iota t_key in",
+            arg[1].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let t2 = map2 (\k v -> -({}.log v[k])) t_key t_val in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        code.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+    let x = arg[0].0;
+    let x_ty = x.type_();
+    let x_nd = x_ty.ndim() as usize;
+    let inner_len = x_ty.shape[x_nd - 1];
+    let dtype = x_ty.dtype;
+    let y = x.inner_softmax();
+    let rank = arg[1].0;
+    let target = rank.inner_one_hot(inner_len, dtype);
+    arg_adj[0] += out_adj * (y - target);
+    Some(Ok(()))
   }
 }
 
@@ -2275,6 +2433,43 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
         None
       }
     }
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+    let [l_blk_outer, l_blk_inner] = if self.l_blk_t { [self.l_block[1], self.l_block[0]] } else { self.l_block };
+    let [r_blk_inner, r_blk_outer] = if self.r_blk_t { [self.r_block[1], self.r_block[0]] } else { self.r_block };
+    assert_eq!(l_blk_inner, r_blk_inner);
+    match (self.l_blk_t, self.r_blk_t) {
+      (false, false) => {
+        // (O-R, O-C) = (a-R, a-C) x (b-R, b-C)     = (a-R, b-C)
+        // (a-R, a-C) = (O-R, O-C) x (O-C, a-C)     = (O-R, O-C)   x (b-R, b-C)^T
+        // (b-R, b-C) = (b-R, O-R) x (O-R, O-C)     = (a-R, a-C)^T x (O-R, O-C)
+        arg_adj[0] += out_adj.block_mm([l_blk_outer, r_blk_outer], false, arg[1].0, self.r_block, true);
+        arg_adj[1] += arg[0].0.block_mm(self.l_block, true, out_adj, [l_blk_outer, r_blk_outer], false);
+      }
+      (false, true) => {
+        // (O-R, O-C) = (a-R, a-C)   x (b-R, b-C)^T = (a-R, b-R)
+        // (a-R, a-C) = (O-R, O-C)   x (O-R, a-C)   = (O-R, O-C)   x (b-R, b-C)
+        // (b-R, b-C) = (O-R, O-C)^T x (O-R, b-C)   = (O-R, O-C)^T x (a-R, a-C)
+        arg_adj[0] += out_adj.block_mm([l_blk_outer, r_blk_outer], false, arg[1].0, self.r_block, false);
+        arg_adj[1] += out_adj.block_mm([l_blk_outer, r_blk_outer], true, arg[0].0, self.r_block, false);
+      }
+      (true, false) => {
+        // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)   = (a-C, b-C)
+        // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)   x (O-R, O-C)^T
+        // (b-R, b-C) = (b-R, O-R)   x (O-R, O-C)   = (a-R, a-C)   x (O-R, O-C)
+        arg_adj[0] += arg[1].0.block_mm(self.r_block, false, out_adj, [l_blk_outer, r_blk_outer], true);
+        arg_adj[1] += arg[0].0.block_mm(self.l_block, false, out_adj, [l_blk_outer, r_blk_outer], false);
+      }
+      (true, true) => {
+        // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)^T = (a-C, b-R)
+        // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)^T x (O-R, O-C)^T
+        // (b-R, b-C) = (O-R, O-C)^T x (O-C, b-C)   = (O-R, O-C)^T x (a-R, a-C)^T
+        arg_adj[0] += arg[1].0.block_mm(self.r_block, true, out_adj, [l_blk_outer, r_blk_outer], true);
+        arg_adj[1] += out_adj.block_mm([l_blk_outer, r_blk_outer], true, arg[0].0, self.r_block, true);
+      }
+    }
+    Ok(())
   }
 }
 
