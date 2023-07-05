@@ -2439,34 +2439,35 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     let [l_blk_outer, l_blk_inner] = if self.l_blk_t { [self.l_block[1], self.l_block[0]] } else { self.l_block };
     let [r_blk_inner, r_blk_outer] = if self.r_blk_t { [self.r_block[1], self.r_block[0]] } else { self.r_block };
     assert_eq!(l_blk_inner, r_blk_inner);
+    let out_block = [l_blk_outer, r_blk_outer];
     match (self.l_blk_t, self.r_blk_t) {
       (false, false) => {
         // (O-R, O-C) = (a-R, a-C) x (b-R, b-C)     = (a-R, b-C)
         // (a-R, a-C) = (O-R, O-C) x (O-C, a-C)     = (O-R, O-C)   x (b-R, b-C)^T
         // (b-R, b-C) = (b-R, O-R) x (O-R, O-C)     = (a-R, a-C)^T x (O-R, O-C)
-        arg_adj[0] += out_adj.block_mm([l_blk_outer, r_blk_outer], false, arg[1].0, self.r_block, true);
-        arg_adj[1] += arg[0].0.block_mm(self.l_block, true, out_adj, [l_blk_outer, r_blk_outer], false);
+        arg_adj[0] += out_adj.block_mm(out_block, false, arg[1].0, self.r_block, true);
+        arg_adj[1] += arg[0].0.block_mm(self.l_block, true, out_adj, out_block, false);
       }
       (false, true) => {
         // (O-R, O-C) = (a-R, a-C)   x (b-R, b-C)^T = (a-R, b-R)
         // (a-R, a-C) = (O-R, O-C)   x (O-R, a-C)   = (O-R, O-C)   x (b-R, b-C)
         // (b-R, b-C) = (O-R, O-C)^T x (O-R, b-C)   = (O-R, O-C)^T x (a-R, a-C)
-        arg_adj[0] += out_adj.block_mm([l_blk_outer, r_blk_outer], false, arg[1].0, self.r_block, false);
-        arg_adj[1] += out_adj.block_mm([l_blk_outer, r_blk_outer], true, arg[0].0, self.r_block, false);
+        arg_adj[0] += out_adj.block_mm(out_block, false, arg[1].0, self.r_block, false);
+        arg_adj[1] += out_adj.block_mm(out_block, true, arg[0].0, self.l_block, false);
       }
       (true, false) => {
         // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)   = (a-C, b-C)
         // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)   x (O-R, O-C)^T
         // (b-R, b-C) = (b-R, O-R)   x (O-R, O-C)   = (a-R, a-C)   x (O-R, O-C)
-        arg_adj[0] += arg[1].0.block_mm(self.r_block, false, out_adj, [l_blk_outer, r_blk_outer], true);
-        arg_adj[1] += arg[0].0.block_mm(self.l_block, false, out_adj, [l_blk_outer, r_blk_outer], false);
+        arg_adj[0] += arg[1].0.block_mm(self.r_block, false, out_adj, out_block, true);
+        arg_adj[1] += arg[0].0.block_mm(self.l_block, false, out_adj, out_block, false);
       }
       (true, true) => {
         // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)^T = (a-C, b-R)
         // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)^T x (O-R, O-C)^T
         // (b-R, b-C) = (O-R, O-C)^T x (O-C, b-C)   = (O-R, O-C)^T x (a-R, a-C)^T
-        arg_adj[0] += arg[1].0.block_mm(self.r_block, true, out_adj, [l_blk_outer, r_blk_outer], true);
-        arg_adj[1] += out_adj.block_mm([l_blk_outer, r_blk_outer], true, arg[0].0, self.r_block, true);
+        arg_adj[0] += arg[1].0.block_mm(self.r_block, true, out_adj, out_block, true);
+        arg_adj[1] += out_adj.block_mm(out_block, true, arg[0].0, self.l_block, true);
       }
     }
     Ok(())

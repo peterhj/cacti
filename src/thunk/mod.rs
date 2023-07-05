@@ -47,7 +47,7 @@ use std::cmp::{max};
 use std::ffi::{c_void};
 use std::fmt::{Debug, Formatter, Result as FmtResult, Write as FmtWrite};
 use std::hash::{Hash, Hasher};
-use std::mem::{size_of};
+use std::mem::{size_of, swap};
 use std::ptr::{null_mut};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts};
@@ -653,8 +653,7 @@ impl FutharkThunkCode {
 pub struct FutharkThunkObject<B: FutBackend> {
   pub obj:      FutObject<B>,
   pub consts:   Vec<(PAddr, StableCell)>,
-  //pub out0_tag: Option<Vec<u8>>,
-  pub out0_tag: Option<(TagUnifier, u16)>,
+  pub out0_tag: Option<(u16, TagUnifier)>,
 }
 
 pub trait FutharkThunkImpl_<B: FutBackend> {
@@ -1300,10 +1299,9 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     }
     let mut objects = self.objects.borrow_mut();
     let mut object = objects.find_mut(mode).unwrap().1;
-    //let obj = &mut object.obj;
     let &mut FutharkThunkObject{ref mut obj, ref mut out0_tag, ..} = &mut object;
+    /*obj.reset();*/
     // FIXME FIXME: pre-entry setup.
-    obj.reset();
     /*// FIXME FIXME: param.
     let np = self.abi.num_param();
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
@@ -1314,45 +1312,47 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_raw_arr={:?}", &out_raw_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: enter kernel...");
-    let pre_front_dptr = TL_PCTX.with(|pctx| {
+    let (pre_front_dptr, pre_backoffset) = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
-      gpu.compute.sync().unwrap();
-      //if let Some((tag) = out0_tag.as_ref() {}
-      if let Some(&(ref unify, tag)) = out0_tag.as_ref() {
-        //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   (with tag)");
-        //gpu.mem_pool.set_front_tag(Some(tag));
-        pctx.tagunify.borrow_mut().clone_from(unify);
-        //gpu.mem_pool.set_front_tag(Some(TagUnifier::parse_tag(tag).unwrap()));
+      //gpu.compute.sync().unwrap();
+      if let Some(&mut (tag, ref mut unify)) = out0_tag.as_mut() {
+        swap(&mut *pctx.tagunify.borrow_mut(), unify);
         gpu.mem_pool.set_front_tag(Some(tag));
       } else {
         pctx.tagunify.borrow_mut().reset();
       }
       gpu.mem_pool.set_back_alloc(true);
-      gpu.mem_pool.front_dptr()
+      gpu.mem_pool.free_list.borrow_mut().clear();
+      (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
     });
     let t0 = Stopwatch::tl_stamp();
     let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
-    let _post_front_dptr = TL_PCTX.with(|pctx| {
-      let gpu = pctx.nvgpu.as_ref().unwrap();
-      gpu.compute.sync().unwrap();
-      if let Some(_) = out0_tag.as_ref() {
-        gpu.mem_pool.set_front_tag(None);
-      }
-      gpu.mem_pool.set_back_alloc(false);
-      gpu.mem_pool.front_dptr()
-    });
     let t1 = Stopwatch::tl_stamp();
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1 - t0);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
-      panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: hard runtime error");
+      panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime error");
     }
     let may_fail = obj.may_fail();
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: may fail? {:?}", may_fail);
     if may_fail && obj.sync().is_err() {
-      // FIXME FIXME: error handling.
-      panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: soft runtime error");
+      // FIXME FIXME: failure handling.
+      panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime failure");
     }
+    obj.reset();
+    let (post_front_dptr, post_backoffset) = TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      //gpu.compute.sync().unwrap();
+      if let Some(&mut (_, ref mut unify)) = out0_tag.as_mut() {
+        swap(&mut *pctx.tagunify.borrow_mut(), unify);
+        gpu.mem_pool.set_front_tag(None);
+      }
+      gpu.mem_pool.set_back_alloc(false);
+      if !gpu.mem_pool.free_list.borrow().is_empty() {
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: free={:?}", &*gpu.mem_pool.free_list.borrow());
+      }
+      (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
+    });
     drop(obj);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: ret={:?}", o_ret);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out={:?}", out);
@@ -1398,18 +1398,15 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       }
       Some(ctag) => {
         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=\"{}\"", sane_ascii(ctag.to_bytes()));
+        let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
         match out0_tag.as_ref() {
           None => {
-            //*out0_tag = Some(ctag.to_bytes().to_owned());
             TL_PCTX.with(|pctx| {
               let unify = pctx.tagunify.borrow().clone();
-              let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
-              *out0_tag = Some((unify, tag));
+              *out0_tag = Some((tag, unify));
             });
           }
-          Some(&(_, otag)) => {
-            //assert_eq!(&otag as &[_], ctag.to_bytes());
-            let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
+          Some(&(otag, _)) => {
             assert_eq!(otag, tag);
           }
         }
@@ -1479,6 +1476,30 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
                 }
               }
             }
+            let p_out = p;
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: pre front dptr=0x{:016x}",
+                pre_front_dptr);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: postfront dptr=0x{:016x}",
+                post_front_dptr);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: pre backoffset=0x{:016x}",
+                pre_backoffset);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: postbackoffset=0x{:016x}",
+                post_backoffset);
+            if pre_front_dptr == post_front_dptr {
+              gpu.mem_pool.front_relocate(p_out, post_front_dptr, &gpu.compute);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: relocate src=0x{:016x} dst=0x{:016x}",
+                  mem_dptr, post_front_dptr);
+            }
+            let mut free_list = gpu.mem_pool.free_list.borrow_mut();
+            free_list.sort();
+            loop {
+              let p = match free_list.pop() {
+                None => break,
+                Some(p) => p
+              };
+              assert!(gpu.mem_pool.try_free(p).is_some());
+            }
+            gpu.mem_pool.set_back_offset(pre_backoffset);
           }
           if !f {
             panic!("bug");
