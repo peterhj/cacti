@@ -701,7 +701,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
 
   unsafe fn _setup_object(obj: &mut FutObject<CudaBackend>) {
     println!("DEBUG: FutharkThunkImpl::_setup_object: cfg...");
-    obj.cfg = (obj.ffi.ctx_cfg_new.as_ref().unwrap())();
+    obj.new_config();
     assert!(!obj.cfg.is_null());
     // TODO TODO
     // FIXME FIXME
@@ -755,7 +755,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     // TODO TODO
     println!("DEBUG: FutharkThunkImpl::_setup_object: cfg done");
     println!("DEBUG: FutharkThunkImpl::_setup_object: ctx...");
-    obj.ctx = (obj.ffi.ctx_new.as_ref().unwrap())(obj.cfg);
+    obj.new_context();
     assert!(!obj.ctx.is_null());
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
