@@ -72,7 +72,8 @@ impl ThunkPtr {
   }
 
   pub fn opaque() -> ThunkPtr {
-    ThunkPtr(i32::min_value())
+    // FIXME: make sure that ctr never allocates this value.
+    ThunkPtr(i32::max_value())
   }
 
   pub fn from_unchecked(p: i32) -> ThunkPtr {
@@ -1355,7 +1356,6 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime failure");
     }
     obj.release();
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1 - t0);
     let (post_front_dptr, post_backoffset) = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
@@ -1370,6 +1370,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
     });
     let t1 = Stopwatch::tl_stamp();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply:   elapsed: {:.09} s", t1 - t0);
     drop(obj);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: ret={:?}", o_ret);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out={:?}", out);
