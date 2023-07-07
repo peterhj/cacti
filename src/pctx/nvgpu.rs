@@ -16,6 +16,8 @@ use std::ffi::{CStr, c_void};
 use std::rc::{Rc, Weak};
 use std::ptr::{write};
 
+pub const VMEM_ALIGN: usize = 256;
+
 //#[derive(Clone)]
 pub struct GpuSnapshot {
   pub record:   Cell<bool>,
@@ -95,11 +97,10 @@ pub type GpuInnerCell = NvGpuInnerCell;
 pub struct NvGpuInnerCell {
   //pub ptr:      Cell<CellPtr>,
   pub ptr:      PAddr,
-  //pub clk:      Cell<Clock>,
-  //pub ref_:     GpuInnerRef,
+  pub flag:     Cell<u8>,
+  pub tag:      Cell<u16>,
   pub dev:      i32,
   pub dptr:     Cell<u64>,
-  //pub off:      usize,
   pub sz:       usize,
   //pub write:    Rc<CudartEvent>,
   //pub lastuse:  Rc<CudartEvent>,
@@ -774,10 +775,10 @@ impl GpuMemPool {
     let reserve_base = cuda_mem_alloc(reserve_sz).unwrap();
     CudartStream::null().sync().unwrap();
     println!("DEBUG: GpuMemPool::new: reserve base=0x{:016x}", reserve_base);
-    let reserve_warp_offset = reserve_base & (128 - 1);
+    let reserve_warp_offset = reserve_base & (VMEM_ALIGN as u64 - 1);
     if reserve_warp_offset != 0 {
       panic!("ERROR: GpuPCtx::new: gpu bug: misaligned alloc, offset by {} bytes (expected alignment {} bytes)",
-          reserve_warp_offset, 128);
+          reserve_warp_offset, VMEM_ALIGN);
     }
     let front_pad = (1 << 16);
     let boundary_pad = (1 << 16);
@@ -925,7 +926,7 @@ impl GpuMemPool {
   }
 
   pub fn _try_back_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
-    let req_sz = ((query_sz + 128 - 1) / 128) * 128;
+    let req_sz = ((query_sz + VMEM_ALIGN - 1) / VMEM_ALIGN) * VMEM_ALIGN;
     assert!(query_sz <= req_sz);
     let offset = self.back_cursor.get();
     let next_offset = offset + req_sz;
@@ -936,7 +937,7 @@ impl GpuMemPool {
   }
 
   pub fn _try_front_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
-    let req_sz = ((query_sz + 128 - 1) / 128) * 128;
+    let req_sz = ((query_sz + VMEM_ALIGN - 1) / VMEM_ALIGN) * VMEM_ALIGN;
     assert!(query_sz <= req_sz);
     let offset = self.front_cursor.get();
     let next_offset = offset + req_sz;
@@ -968,12 +969,15 @@ impl GpuMemPool {
     let dptr = self.front_base + offset as u64;
     let cel = Rc::new(GpuInnerCell{
       ptr: addr,
-      //clk: Cell::new(Clock::default()),
+      flag: Cell::new(0),
+      tag: Cell::new(0),
       dev: self.dev,
       dptr: Cell::new(dptr),
-      //off: offset,
       sz: req_sz,
     });
+    // FIXME FIXME
+    //cel.set_back_bit();
+    //cel.set_tag(_);
     println!("DEBUG: NvGpuMemPool::_back_alloc: p={:?} dptr=0x{:016x} sz={} off={}", addr, dptr, req_sz, offset);
     assert!(self.alloc_map.borrow_mut().insert(Region{off: offset, sz: req_sz}, addr).is_none());
     assert!(self.cel_map.borrow_mut().insert(addr, cel).is_none());
@@ -988,15 +992,18 @@ impl GpuMemPool {
     //let lastuse = GpuSnapshot::fresh(self.dev());
     let cel = Rc::new(GpuInnerCell{
       ptr: addr,
-      //clk: Cell::new(Clock::default()),
+      flag: Cell::new(0),
+      tag: Cell::new(0),
       dev: self.dev,
       dptr: Cell::new(dptr),
-      //off: offset,
       sz: req_sz,
       //write,
       //lastuse,
       // FIXME
     });
+    // FIXME FIXME
+    //cel.set_front_bit();
+    //cel.set_tag(_);
     println!("DEBUG: NvGpuMemPool::_front_alloc: p={:?} dptr=0x{:016x} sz={} off={}", addr, dptr, req_sz, offset);
     assert!(self.alloc_map.borrow_mut().insert(Region{off: offset, sz: req_sz}, addr).is_none());
     assert!(self.cel_map.borrow_mut().insert(addr, cel).is_none());
@@ -1159,6 +1166,9 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *co
 
 pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
   TL_PCTX.try_with(|pctx| {
+    println!("DEBUG: tl_pctx_gpu_free_hook: dptr={:016x}",
+        dptr,
+    );
     let gpu = pctx.nvgpu.as_ref().unwrap();
     let p = match gpu.mem_pool.lookup_dptr(dptr) {
       Some((_, Some(p))) => p,
@@ -1166,7 +1176,12 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
     };
     gpu.mem_pool.free_list.borrow_mut().push(p);
     0
-  }).unwrap_or_else(|_| 0)
+  }).unwrap_or_else(|_| {
+    println!("DEBUG: tl_pctx_gpu_free_hook: dptr={:016x} (pctx deinit)",
+        dptr,
+    );
+    0
+  })
 }
 
 pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag: *const c_char) {
@@ -1215,12 +1230,12 @@ pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> i
   TL_PCTX.with(|pctx| {
     // FIXME FIXME
     /*let x = pctx.nvgpu.as_ref().unwrap().mem_pool.back_alloc(sz);*/
-    if sz > 128 {
-      println!("ERROR: tl_pctx_gpu_failarg_alloc_hook: requested size={} greater than max size={}", sz, 128);
+    if sz > VMEM_ALIGN {
+      println!("ERROR: tl_pctx_gpu_failarg_alloc_hook: requested size={} greater than max size={}", sz, VMEM_ALIGN);
       panic!();
     }
     let mem_pool = &pctx.nvgpu.as_ref().unwrap().mem_pool;
-    let x = mem_pool.back_base + mem_pool.back_sz as u64 - 128;
+    let x = mem_pool.back_base + mem_pool.back_sz as u64 - VMEM_ALIGN as u64;
     unsafe {
       write(dptr, x);
     }

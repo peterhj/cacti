@@ -852,11 +852,49 @@ impl FutharkThunkSpec for AddFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
+pub struct LSubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
-impl FutharkThunkSpec for SubScalarF32FutThunkSpec {
+impl FutharkThunkSpec for LSubScalarF32FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.f32.sub_scalar")
+    Some("futhark.f32.left_sub_scalar")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let fmt = FutharkNumFormatter::default();
+    FutharkThunkCode::map_nd(arg[0], format!(r"\u -> {} - u", fmt.format(&self.val)))
+  }
+
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+    arg_adj[0] += -out_adj;
+    Some(Ok(()))
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RSubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
+
+impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.f32.right_sub_scalar")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -1035,11 +1073,50 @@ impl FutharkThunkSpec for MulFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct DivScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
+pub struct LDivScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
-impl FutharkThunkSpec for DivScalarF32FutThunkSpec {
+impl FutharkThunkSpec for LDivScalarF32FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.f32.div_scalar")
+    Some("futhark.f32.left_div_scalar")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    // FIXME: param.
+    let fmt = FutharkNumFormatter::default();
+    FutharkThunkCode::map_nd(arg[0], format!(r"\u -> {} / u", fmt.format(&self.val)))
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+    arg_adj[0] += -((out_adj * self.val.0) / (arg[0].0 * arg[0].0));
+    Some(Ok(()))
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RDivScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
+
+impl FutharkThunkSpec for RDivScalarF32FutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.f32.right_div_scalar")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -1471,6 +1548,84 @@ impl FutharkThunkSpec for ExpFutThunkSpec {
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
     arg_adj[0] += out_adj * arg[0].0.exp();
+    Some(Ok(()))
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct LogisticFutThunkSpec;
+
+impl FutharkThunkSpec for LogisticFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.logistic")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    FutharkThunkCode::map_nd(arg[0], format!(r"\u -> recip (1 + (({}.exp) -u))", arg[0].dtype.format_futhark()))
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+    // FIXME
+    unimplemented!();
+    //Some(Ok(()))
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct StandardSiluFutThunkSpec;
+
+impl FutharkThunkSpec for StandardSiluFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.standard_silu")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    FutharkThunkCode::map_nd(arg[0], format!(r"\u -> u / (1 + ({}.exp (-u)))", arg[0].dtype.format_futhark()))
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+    // FIXME: scalar dtype.
+    let x = arg[0].0;
+    let y = x.standard_silu();
+    arg_adj[0] += out_adj * y * (x * (1.0_f32 - y) + 1.0_f32);
     Some(Ok(()))
   }
 }

@@ -185,8 +185,10 @@ impl Llama {
                    .block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[0].up, [mlp_inner_dim, inner_dim], true);
       let gate_proj = post_nrm
                      .new_shape([ubat_sz * seq_len, num_head * head_dim])
-                      .block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[0].gate, [mlp_inner_dim, inner_dim], true);
-      //let gate_proj = activation(gate_proj);
+                     .block_mm([ubat_sz * seq_len, inner_dim], false, &self.layers[0].gate, [mlp_inner_dim, inner_dim], true);
+      // FIXME: intermediate activation dtype.
+      //let gate_proj = gate_proj.cast(f32::dtype()).standard_silu().cast(f16::dtype());
+      let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
       let down_proj = gate_up
                      .block_mm([ubat_sz * seq_len, mlp_inner_dim], false, &self.layers[0].down, [inner_dim, mlp_inner_dim], true)

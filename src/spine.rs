@@ -776,11 +776,11 @@ impl Spine {
           self.ctr, self.ctlp, self.hltp, self.curp, retp);
       return SpineRet::Halt;
     }
-    let t0 = Stopwatch::tl_stamp();
     let mut ret = SpineRet::_Top;
     let entry = &self.log[self.ctlp as usize];
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
         self.ctr, self.ctlp, self.hltp, self.curp, retp, entry.name());
+    let t0 = Stopwatch::tl_stamp();
     match entry {
       // TODO
       &SpineEntry::_Top => {}
@@ -1030,9 +1030,9 @@ impl Spine {
           Some(e) => {
             assert!(e.state().flag.intro());
             let xclk = e.state().clk;
-            if xclk.ctr().is_nil() {
+            /*if xclk.ctr().is_nil() {
               println!("DEBUG: Spine::_step: PushSeal: x={:?} xclk={:?}", x, xclk);
-            }
+            }*/
             assert!(!xclk.ctr().is_nil());
             /*println!("DEBUG: Spine::_step: PushSeal: thunkenv.arg.push: x={:?} xclk={:?}", x, xclk);
             thunkenv.arg.push((x, xclk));*/

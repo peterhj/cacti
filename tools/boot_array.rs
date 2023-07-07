@@ -102,7 +102,7 @@ fn main() {
   for &(ref cel, ref key) in inv_matches.mat.iter() {
     println!("boot: matches: key={:?} cel={:?}", key, cel);
   }
-  for iter_nr in 0 .. 300 {
+  for iter_nr in 0 .. 3 {
     println!("boot: start iter...");
     reset();
     if iter_nr == 0 {

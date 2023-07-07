@@ -170,6 +170,52 @@ impl<R: Borrow<CellPtr>> Add<R> for StableCell {
   }
 }
 
+impl<'l> Sub<CellPtr> for &'l f32 {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| {
+      let op = LSubScalarF32FutThunkSpec{val: (*self).try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Sub<CellPtr> for f32 {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| (&self).sub(rhs))
+  }
+}
+
+impl<'l> Sub<f32> for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: f32) -> CellPtr {
+    panick_wrap(|| {
+      let op = RSubScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Sub<f32> for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: f32) -> CellPtr {
+    panick_wrap(|| (&self).sub(rhs))
+  }
+}
+
 impl<'l, R: Borrow<CellPtr>> Sub<R> for &'l CellPtr {
   type Output = CellPtr;
 
@@ -280,14 +326,12 @@ impl<'l> Div<f32> for &'l CellPtr {
 
   #[track_caller]
   fn div(self, rhs: f32) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = DivScalarF32ThunkOp{scalar: rhs};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = RDivScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
   }
 }
 
@@ -295,7 +339,7 @@ impl Div<f32> for CellPtr {
   type Output = CellPtr;
 
   fn div(self, rhs: f32) -> CellPtr {
-    (&self).div(rhs)
+    panick_wrap(|| (&self).div(rhs))
   }
 }
 
@@ -614,6 +658,36 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       ctx_push_cell_arg(*self.borrow());
       ctx_pop_thunk(op)
     })
+  }
+
+  #[track_caller]
+  fn logistic(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = LogisticFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn sigmoid(&self) -> CellPtr {
+    panick_wrap(|| self.logistic())
+  }
+
+  #[track_caller]
+  fn standard_silu(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = StandardSiluFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn standard_swish(&self) -> CellPtr {
+    panick_wrap(|| self.standard_silu())
   }
 
   #[track_caller]

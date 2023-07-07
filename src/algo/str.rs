@@ -1,7 +1,7 @@
 pub fn sane_ascii(s: &[u8]) -> String {
   let mut buf = Vec::new();
   for &u in s.iter() {
-    if u == b' ' || u == b'.' || u == b':' || u == b'/' || u == b'-' || u == b'_' {
+    if u == b' ' || u == b'.' || u == b':' || u == b'/' || u == b'-' || u == b'_' || u == b'>' {
       buf.push(u);
     } else if u >= b'0' && u <= b'9' {
       buf.push(u);
