@@ -767,14 +767,14 @@ pub fn ctx_gc() {
 
 pub struct CtxCtr {
   pub ptr_ctr:  Cell<i32>,
-  pub tmp_ctr:  Cell<i32>,
+  //pub tmp_ctr:  Cell<i32>,
 }
 
 impl CtxCtr {
   pub fn new() -> CtxCtr {
     CtxCtr{
       ptr_ctr:  Cell::new(0),
-      tmp_ctr:  Cell::new(0),
+      //tmp_ctr:  Cell::new(0),
     }
   }
 }
@@ -798,12 +798,12 @@ impl CtxCtr {
   pub fn _fresh(&self) -> i32 {
     let next = self.ptr_ctr.get() + 1;
     assert!(next > 0);
-    assert!(next <= i32::max_value());
+    assert!(next < i32::max_value());
     self.ptr_ctr.set(next);
     next
   }
 
-  pub fn reset_tmp(&self) {
+  /*pub fn reset_tmp(&self) {
     self.tmp_ctr.set(0);
   }
 
@@ -817,7 +817,7 @@ impl CtxCtr {
 
   pub fn peek_tmp(&self) -> CellPtr {
     CellPtr::from_unchecked(self.tmp_ctr.get())
-  }
+  }*/
 }
 
 pub struct ThunkEnvEntry {
@@ -980,6 +980,8 @@ pub enum Cell_ {
   Top(RefCell<CellState>, CellPtr),
   Phy(RefCell<CellState>, RefCell<CellClosure>, PCell),
   Cow(RefCell<CellState>, RefCell<CellClosure>, CowCell),
+  // FIXME
+  //VOp(CellVOp, CellPtr),
   Alias(CellPtr),
   Bot,
 }

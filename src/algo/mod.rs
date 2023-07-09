@@ -275,7 +275,7 @@ impl ExtentVecList {
   }
 }*/
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Region {
   pub off:  usize,
   pub sz:   usize,
@@ -298,7 +298,7 @@ impl Ord for Region {
 }
 
 impl Region {
-  pub fn merge(&self, rhs: &Region) -> Region {
+  pub fn merge(&self, rhs: Region) -> Region {
     assert_eq!(self.off + self.sz, rhs.off);
     Region{
       off:  self.off,

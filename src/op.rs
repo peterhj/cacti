@@ -1,4 +1,5 @@
-use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, MSet, MMap, MValueRef};
+//use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, MSet, MMap, MValueRef};
+use crate::cell::*;
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
@@ -10,7 +11,8 @@ use futhark_syntax::*;
 
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
-use std::ops::{Deref, AddAssign, Add, Sub, Mul, Div, Neg};
+use std::iter::{repeat};
+use std::ops::{Deref, AddAssign, BitXor, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
 impl AddAssign<f32> for CellPtr {
@@ -39,6 +41,7 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
           let spine = ctx.spine.borrow();
           let mut this_clk = spine._version(this).unwrap();
           let rhs_clk = spine._version(rhs).unwrap();
+          // FIXME: should also check the thunk mode.
           if rhs_clk.up == 1 &&
              !thunkenv.update.contains_key(&(rhs, rhs_clk.init()))
           {
@@ -80,6 +83,182 @@ impl<'l, R: Borrow<CellPtr>> AddAssign<R> for &'l mut StableCell {
     panick_wrap(|| self.as_ptr_mut().add_assign(rhs))
   }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct T;
+
+#[derive(Clone, Copy, Debug)]
+pub struct T_(pub i8, pub i8);
+
+impl<'l> BitXor<T> for &'l CellPtr {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, _: T) -> CellView {
+    panick_wrap(|| {
+      CellView(*self, vec![CellVOp::Swap(-2, -1)])
+    })
+  }
+}
+
+impl<'l> BitXor<T_> for &'l CellPtr {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, t: T_) -> CellView {
+    panick_wrap(|| {
+      CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+    })
+  }
+}
+
+impl BitXor<T> for CellPtr {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, _: T) -> CellView {
+    panick_wrap(|| (&self).bitxor(T))
+  }
+}
+
+impl<'l> BitXor<T> for &'l StableCell {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, _: T) -> CellView {
+    panick_wrap(|| self.as_ptr_ref().bitxor(T))
+  }
+}
+
+impl BitXor<T> for StableCell {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, _: T) -> CellView {
+    panick_wrap(|| self.as_ptr_ref().bitxor(T))
+  }
+}
+
+impl BitXor<T_> for CellPtr {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(self, t: T_) -> CellView {
+    panick_wrap(|| (&self).bitxor(t))
+  }
+}
+
+impl BitXor<T> for CellView {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(mut self, _: T) -> CellView {
+    panick_wrap(|| {
+      self.1.push(CellVOp::Swap(-2, -1));
+      self
+    })
+  }
+}
+
+impl BitXor<T_> for CellView {
+  type Output = CellView;
+
+  #[track_caller]
+  fn bitxor(mut self, t: T_) -> CellView {
+    panick_wrap(|| {
+      self.1.push(CellVOp::Swap(t.0, t.1));
+      self
+    })
+  }
+}
+
+pub trait IntoCellViewOps: Into<CellView> {
+  fn inner_transpose(self) -> CellView {
+    panick_wrap(|| {
+      let mut this = self.into();
+      this.1.push(CellVOp::Swap(-2, -1));
+      this
+    })
+  }
+
+  fn transpose(self, ld: i8, rd: i8) -> CellView {
+    panick_wrap(|| {
+      let mut this = self.into();
+      this.1.push(CellVOp::Swap(ld, rd));
+      this
+    })
+  }
+}
+
+impl IntoCellViewOps for CellPtr {}
+impl<'l> IntoCellViewOps for &'l CellPtr {}
+impl IntoCellViewOps for StableCell {}
+impl<'l> IntoCellViewOps for &'l StableCell {}
+impl IntoCellViewOps for CellView {}
+
+pub trait BorrowCellViewOps: BorrowCellView {
+  fn materialize(self) -> CellPtr where Self: Sized {
+    panick_wrap(|| {
+      let view = self._borrow();
+      let x = *(view.0);
+      let vops = view.1.unwrap_or(&[]);
+      if vops.is_empty() {
+        return x;
+      }
+      let mut x = x;
+      let x_ty = x.type_();
+      let x_nd = x_ty.ndim();
+      let nop = CellVOp::Nop;
+      let mut state = CellViewState::new(x_nd);
+      for vop in vops.into_iter().chain(repeat(&nop)) {
+        loop {
+          match state._step(vop) {
+            CellViewStep::Break => {
+              break;
+            }
+            CellViewStep::Swap => {
+              if state.ndim >= 2 {
+                let mut try_inner = true;
+                for d in 0 .. state.ndim - 2 {
+                  if state.perm[d as usize] != d {
+                    try_inner = false;
+                    break;
+                  }
+                }
+                if try_inner &&
+                   state.perm[state.ndim as usize - 2] == state.ndim - 1 &&
+                   state.perm[state.ndim as usize - 1] == state.ndim - 2
+                {
+                  let op = InnerTransposeFutThunkSpec;
+                  assert!(ctx_clean_arg());
+                  ctx_push_cell_arg(x);
+                  x = ctx_pop_thunk(op);
+                  state._reset_swap();
+                  continue;
+                }
+              }
+              println!("ERROR: materialize: general transposition is currently unimplemented");
+              panic!("bug");
+            }
+            CellViewStep::Halt => {
+              return x;
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+      unreachable!();
+    })
+  }
+}
+
+impl BorrowCellViewOps for CellPtr {}
+impl<'l> BorrowCellViewOps for &'l CellPtr {}
+impl BorrowCellViewOps for StableCell {}
+impl<'l> BorrowCellViewOps for &'l StableCell {}
+impl BorrowCellViewOps for CellView {}
+impl<'l> BorrowCellViewOps for &'l CellView {}
+impl<'l> BorrowCellViewOps for CellViewRef<'l> {}
 
 impl<'l> Add<f32> for &'l CellPtr {
   type Output = CellPtr;
@@ -455,6 +634,19 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
     })
   }
 
+  #[track_caller]
+  fn outer_mul(&self, rhs: R) -> CellPtr {
+    panick_wrap(|| {
+      let op = OuterMulFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      // FIXME FIXME
+      //ctx_pop_thunk(op)
+      unimplemented!();
+    })
+  }
+
   /*#[track_caller]
   fn dot(self, rhs: Q) -> CellPtr {
     let p = self.into();
@@ -775,6 +967,26 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   }
 
   #[track_caller]
+  fn inner_symplectic_map(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerSymplecticMapFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  /*#[track_caller]
+  fn inner_transpose(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerTransposeFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }*/
+
+  #[track_caller]
   fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
       let op = FlatSumFutThunkSpec;
@@ -884,11 +1096,30 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
 impl<P: Borrow<CellPtr>> MathUnaryOps for P {}
 
 pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+  // FIXME
   unimplemented!();
+  /*panick_wrap(|| {
+    let ty = CellType{shape: shape.into(), dtype: dtype.into()};
+    assert!(ctx_clean_arg());
+    ctx_pop_thunk_(SetScalarFutThunkSpec{val: zero()}, ty)
+  })*/
 }
 
 pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+  // FIXME
   unimplemented!();
+  /*panick_wrap(|| {
+    let ty = CellType{shape: shape.into(), dtype: dtype.into()};
+    assert!(ctx_clean_arg());
+    ctx_pop_thunk_(SetScalarFutThunkSpec{val: one()}, ty)
+  })*/
+}
+
+pub fn iota(len: i64) -> CellPtr {
+  panick_wrap(|| {
+    assert!(ctx_clean_arg());
+    ctx_pop_thunk(IotaFutThunkSpec{len})
+  })
 }
 
 pub trait CastOps: Borrow<CellPtr> {
@@ -1045,6 +1276,22 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
         panic!("ERROR: inner_inv_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
       }
       let op = InnerInvSelectFutThunkSpec{inner_len};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn outer_select<R: Borrow<CellPtr>>(&self, rank: R) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: outer_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = OuterSelectFutThunkSpec;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
       ctx_push_cell_arg(rank);

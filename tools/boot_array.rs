@@ -7,8 +7,8 @@ use cacti::util::pickle::*;
 
 fn main() {
   let ubat_sz = 1;
-  let seq_len = 512;
-  //let seq_len = 2048;
+  let seq_cap = 512;
+  //let seq_cap = 2048;
   let tok_dim = 32000;
   let head_dim = 100;
   let num_head = 32;
@@ -85,7 +85,7 @@ fn main() {
     mlp_inner_dim: 8640,
     num_layer: 26,*/
     ubat_sz,
-    seq_len,
+    seq_cap,
     tok_dim,
     head_dim,
     num_head,
@@ -211,8 +211,8 @@ fn main() {
     }
     resume_put_mem_fun(&in_tok, |_, mem| {
       println!("boot: set in_tok...");
-      let mut tok_buf = Vec::with_capacity(seq_len as _);
-      for _ in 0 .. seq_len {
+      let mut tok_buf = Vec::with_capacity(seq_cap as _);
+      for _ in 0 .. seq_cap {
         // FIXME: this should cause failure.
         //tok_buf.push(50000_u16);
         tok_buf.push(0_u16);
@@ -221,8 +221,8 @@ fn main() {
     });
     resume_put_mem_fun(&input.in_lm_tok, |_, mem| {
       println!("boot: set in_lm_tok...");
-      let mut tok_buf = Vec::with_capacity(seq_len as _);
-      for _ in 0 .. seq_len {
+      let mut tok_buf = Vec::with_capacity(seq_cap as _);
+      for _ in 0 .. seq_cap {
         tok_buf.push(0_u16);
       }
       mem.copy_from_slice(&tok_buf);

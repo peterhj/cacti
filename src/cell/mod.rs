@@ -269,6 +269,172 @@ impl MCellPtr {
   }
 }
 
+#[derive(Clone, Debug)]
+pub struct CellView(pub CellPtr, pub Vec<CellVOp>);
+
+impl From<CellPtr> for CellView {
+  fn from(x: CellPtr) -> CellView {
+    CellView(x, Vec::new())
+  }
+}
+
+impl<'a> From<&'a CellPtr> for CellView {
+  fn from(x: &'a CellPtr) -> CellView {
+    CellView(*x, Vec::new())
+  }
+}
+
+impl From<StableCell> for CellView {
+  fn from(x: StableCell) -> CellView {
+    CellView(*x.as_ptr_ref(), Vec::new())
+  }
+}
+
+impl<'a> From<&'a StableCell> for CellView {
+  fn from(x: &'a StableCell) -> CellView {
+    CellView(*x.as_ptr_ref(), Vec::new())
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CellViewRef<'a>(pub &'a CellPtr, pub Option<&'a [CellVOp]>);
+
+pub trait BorrowCellView {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a>;
+}
+
+impl BorrowCellView for CellPtr {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(self, None)
+  }
+}
+
+impl<'r> BorrowCellView for &'r CellPtr {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(*self, None)
+  }
+}
+
+impl BorrowCellView for StableCell {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(self.as_ptr_ref(), None)
+  }
+}
+
+impl<'r> BorrowCellView for &'r StableCell {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(self.as_ptr_ref(), None)
+  }
+}
+
+impl BorrowCellView for CellView {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(&self.0, Some(&self.1))
+  }
+}
+
+impl<'r> BorrowCellView for &'r CellView {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(&self.0, Some(&self.1))
+  }
+}
+
+impl<'r> BorrowCellView for CellViewRef<'r> {
+  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
+    CellViewRef(self.0, self.1)
+  }
+}
+
+#[derive(Clone, Debug)]
+pub enum CellVOp {
+  Nop,
+  Swap(i8, i8),
+  Slice(Box<(i64, i64)>),
+  Slice2(Box<[(i64, i64); 2]>),
+  Slice3(Box<[(i64, i64); 3]>),
+  Slice4(Box<[(i64, i64); 4]>),
+  // TODO
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum CellViewStep {
+  Break,
+  Swap,
+  // TODO
+  Halt,
+}
+
+pub struct CellViewState {
+  pub ndim: i8,
+  pub swap: bool,
+  pub perm: [i8; 8],
+}
+
+impl CellViewState {
+  pub fn new(ndim: i8) -> CellViewState {
+    /*assert!(ndim <= i8::max_value() as u8);*/
+    assert!(ndim >= 0);
+    CellViewState{
+      ndim: ndim,
+      swap: false,
+      perm: [0, 1, 2, 3, 4, 5, 6, 7],
+    }
+  }
+
+  pub fn _reset_swap(&mut self) {
+    self.swap = false;
+    self.perm = [0, 1, 2, 3, 4, 5, 6, 7];
+  }
+
+  pub fn _swap(&mut self) -> bool {
+    if self.swap {
+      let mut noswap = true;
+      for d in 0 .. self.ndim {
+        if self.perm[d as usize] != d {
+          noswap = false;
+          break;
+        }
+      }
+      if noswap {
+        self.swap = false;
+      }
+    }
+    self.swap
+  }
+
+  pub fn _step(&mut self, vop: &CellVOp) -> CellViewStep {
+    match vop {
+      &CellVOp::Nop => {
+        if self._swap() {
+          return CellViewStep::Swap;
+        }
+        // TODO
+        return CellViewStep::Halt;
+      }
+      &CellVOp::Swap(ld, rd) => {
+        assert!(ld < self.ndim);
+        assert!(ld >= -self.ndim);
+        assert!(rd < self.ndim);
+        assert!(rd >= -self.ndim);
+        let lidx = if ld < 0 { self.ndim + ld } else { ld } as usize;
+        let ridx = if rd < 0 { self.ndim + rd } else { rd } as usize;
+        self.perm.swap(lidx, ridx);
+        self.swap = true;
+      }
+      _ => {
+        if self._swap() {
+          return CellViewStep::Swap;
+        }
+        // TODO
+        println!("DEBUG: CellViewState::_step: unimplemented: vop={:?}", vop);
+        panic!("bug");
+      }
+    }
+    CellViewStep::Break
+  }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ScalarVal_ {
   F64(TotalOrd<f64>),
@@ -633,12 +799,12 @@ pub fn dtype_of<T: DtypeConstExt>(_: T) -> Dtype {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Dim {
-  pub ndim:     u8,
+  pub ndim:     i8,
   pub dtype:    Dtype,
 }
 
 impl Dim {
-  pub fn ndim(&self) -> u8 {
+  pub fn ndim(&self) -> i8 {
     self.ndim
   }
 }
@@ -672,14 +838,19 @@ impl CellType {
     Dim{ndim: self.ndim(), dtype: self.dtype}
   }
 
-  pub fn ndim(&self) -> u8 {
+  pub fn ndim(&self) -> i8 {
     assert!(self.dtype != Dtype::_Top);
-    assert!(self.shape.len() <= u8::max_value() as usize);
-    self.shape.len() as u8
+    assert!(self.shape.len() <= i8::max_value() as usize);
+    self.shape.len() as i8
   }
 
   pub fn is_scalar(&self) -> bool {
     self.ndim() == 0
+  }
+
+  pub fn inner_len(&self) -> i64 {
+    assert!(self.shape.len() > 0);
+    self.shape[self.shape.len() - 1]
   }
 
   pub fn packed_span_bytes(&self) -> u64 {
@@ -914,7 +1085,7 @@ pub struct CellState {
 pub struct PCellReplica {
   pub clk:  Cell<Clock>,
   //pub icel: Option<Weak<dyn InnerCell_>>,
-  pub addr: PAddr,
+  pub addr: Cell<PAddr>,
 }
 
 pub struct PCell {
@@ -963,14 +1134,32 @@ impl PCell {
     }
   }*/
 
-  pub fn push_new_replica(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
+  pub fn push_new_replica(&mut self, x: CellPtr, xclk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
     match self.replicas.find((locus, pmach)) {
       None => {}
       Some(_) => panic!("bug")
     }
-    let rep = PCellReplica{clk: Cell::new(clk), addr};
+    TL_PCTX.with(|pctx| {
+      assert_eq!(pctx.set_root(addr, x), None);
+    });
+    let rep = PCellReplica{clk: Cell::new(xclk), addr: Cell::new(addr)};
     let key = self.replicas.insert((locus, pmach), rep);
     self.pm_index.insert((pmach, locus), key);
+  }
+
+  pub fn pop(&self, x: CellPtr, /*xclk: Clock,*/ q_addr: PAddr) {
+    for (key, rep) in self.replicas.iter() {
+      if rep.addr.get() == q_addr {
+        TL_PCTX.with(|pctx| {
+          assert_eq!(pctx.unset_root(rep.addr.get()), Some(x));
+          // FIXME FIXME: also free the addr?
+        });
+        rep.addr.set(PAddr::nil());
+        rep.clk.set(Clock::default());
+        return;
+      }
+    }
+    panic!("bug");
   }
 
   pub fn lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
@@ -1001,13 +1190,13 @@ impl PCell {
     for (key, rep) in self.replicas.iter() {
       let &(loc, pm) = key.as_ref();
       if rep.clk.get() == q_clk {
-        return Some((loc, pm, rep.addr));
+        return Some((loc, pm, rep.addr.get()));
       }
     }
     None
   }
 
-  pub fn get(&mut self, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
+  pub fn get(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
     let f = match self.lookup(q_locus, q_pmach) {
       None => None,
       Some(rep) => {
@@ -1025,7 +1214,7 @@ impl PCell {
       let addr = TL_PCTX.with(|pctx| {
         pctx.alloc(ty, q_locus, q_pmach)
       });
-      self.push_new_replica(Clock::default(), q_locus, q_pmach, addr);
+      self.push_new_replica(x, Clock::default(), q_locus, q_pmach, addr);
     }
     match self.lookup(q_locus, q_pmach) {
       None => panic!("bug"),
@@ -1039,7 +1228,7 @@ impl PCell {
             None => {
               println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
-                  prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr,
+                  prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr.get(),
               );
               println!("ERROR: PCell::get: no replica to copy from");
               panic!();
@@ -1047,12 +1236,12 @@ impl PCell {
             Some((o_loc, o_pm, o_addr)) => {
               println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
                   self.optr, &self.ogty,
-                  prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr,
+                  prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr.get(),
                   o_loc, o_pm, o_addr,
               );
               // FIXME FIXME: only set clock on successful copy.
               TL_PCTX.with(|pctx| {
-                pctx.hard_copy(q_locus, q_pmach, rep.addr, o_loc, o_pm, o_addr);
+                pctx.hard_copy(q_locus, q_pmach, rep.addr.get(), o_loc, o_pm, o_addr);
               });
               rep.clk.set(q_clk);
             }
@@ -1067,12 +1256,12 @@ impl PCell {
             Some(_) => {}
           }
         });*/
-        rep.addr
+        rep.addr.get()
       }
     }
   }
 
-  pub fn get_loc(&mut self, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+  pub fn get_loc(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
       Some((pmach, rep)) => {
@@ -1090,7 +1279,7 @@ impl PCell {
       let (pmach, addr) = TL_PCTX.with(|pctx| {
         pctx.alloc_loc(ty, q_locus)
       });
-      self.push_new_replica(Clock::default(), q_locus, pmach, addr);
+      self.push_new_replica(x, Clock::default(), q_locus, pmach, addr);
       f_pmach = Some(pmach);
     }
     let f_pmach = f_pmach.unwrap();
@@ -1108,7 +1297,7 @@ impl PCell {
           unimplemented!();
         }
         assert_eq!(rep.clk.get(), q_clk);
-        (pmach, rep.addr)
+        (pmach, rep.addr.get())
       }
     }*/
     match self.lookup(q_locus, f_pmach) {
@@ -1120,7 +1309,7 @@ impl PCell {
           rep.clk.set(q_clk);
         }
         TL_PCTX.with(|pctx| {
-          match pctx.lookup_pm(f_pmach, rep.addr) {
+          match pctx.lookup_pm(f_pmach, rep.addr.get()) {
             None => {
               // FIXME FIXME
               panic!("bug");
@@ -1128,7 +1317,7 @@ impl PCell {
             Some(_) => {}
           }
         });
-        (f_pmach, rep.addr)
+        (f_pmach, rep.addr.get())
       }
     }
   }
@@ -1162,7 +1351,7 @@ impl PCell {
     unimplemented!();
   }*/
 
-  pub fn fresh(&mut self, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
+  pub fn fresh(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
     let f = match self.lookup(q_locus, q_pmach) {
       None => None,
       Some(rep) => {
@@ -1180,7 +1369,7 @@ impl PCell {
       let addr = TL_PCTX.with(|pctx| {
         pctx.alloc(ty, q_locus, q_pmach)
       });
-      self.push_new_replica(Clock::default(), q_locus, q_pmach, addr);
+      self.push_new_replica(x, Clock::default(), q_locus, q_pmach, addr);
     }
     match self.lookup(q_locus, q_pmach) {
       None => panic!("bug"),
@@ -1189,7 +1378,7 @@ impl PCell {
         if prev_clk < q_clk {
           rep.clk.set(q_clk);
         }
-        rep.addr
+        rep.addr.get()
       }
     }
   }
@@ -1206,16 +1395,30 @@ impl PCell {
 }
 
 pub trait InnerCell {
-  // FIXME FIXME
+  // TODO
   fn as_mem_reg(&self) -> Option<MemReg> { None }
   fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  fn size(&self) -> usize { unimplemented!(); }
+  fn root(&self) -> Option<CellPtr> { unimplemented!(); }
+  fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
+  fn pin(&self) -> bool { unimplemented!(); }
+  fn set_pin(&self, _flag: bool) { unimplemented!(); }
+  fn tag(&self) -> Option<u16> { unimplemented!(); }
+  fn set_tag(&self, _tag: Option<u16>) { unimplemented!(); }
 }
 
 pub trait InnerCell_ {
-  // FIXME FIXME
   fn as_any(&self) -> &dyn Any;
+  // TODO
   fn as_mem_reg(&self) -> Option<MemReg>;
   fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  fn size(&self) -> usize;
+  fn root(&self) -> Option<CellPtr>;
+  fn set_root(&self, _root: Option<CellPtr>);
+  fn pin(&self) -> bool;
+  fn set_pin(&self, _flag: bool);
+  fn tag(&self) -> Option<u16>;
+  fn set_tag(&self, _tag: Option<u16>);
 }
 
 impl<C: InnerCell + Any> InnerCell_ for C {
@@ -1225,6 +1428,34 @@ impl<C: InnerCell + Any> InnerCell_ for C {
 
   fn as_mem_reg(&self) -> Option<MemReg> {
     InnerCell::as_mem_reg(self)
+  }
+
+  fn size(&self) -> usize {
+    InnerCell::size(self)
+  }
+
+  fn root(&self) -> Option<CellPtr> {
+    InnerCell::root(self)
+  }
+
+  fn set_root(&self, root: Option<CellPtr>) {
+    InnerCell::set_root(self, root)
+  }
+
+  fn pin(&self) -> bool {
+    InnerCell::pin(self)
+  }
+
+  fn set_pin(&self, flag: bool) {
+    InnerCell::set_pin(self, flag)
+  }
+
+  fn tag(&self) -> Option<u16> {
+    InnerCell::tag(self)
+  }
+
+  fn set_tag(&self, tag: Option<u16>) {
+    InnerCell::set_tag(self, tag)
   }
 }
 

@@ -110,6 +110,10 @@ impl Debug for PAddr {
 }
 
 impl PAddr {
+  pub fn nil() -> PAddr {
+    PAddr{bits: 0}
+  }
+
   pub fn from_unchecked(bits: i64) -> PAddr {
     PAddr{bits}
   }
@@ -330,9 +334,20 @@ impl PCtx {
     }
   }
 
-  pub fn lookup(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
-    // FIXME FIXME
-    unimplemented!();
+  pub fn lookup(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    // FIXME
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      let pm = PMach::NvGpu;
+      match gpu.lookup(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    // TODO
+    None
   }
 
   pub fn lookup_pm(&self, pmach: PMach, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
@@ -343,12 +358,21 @@ impl PCtx {
       }
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
-        self.nvgpu.as_ref().unwrap().lookup_(addr)
+        if let Some(gpu) = self.nvgpu.as_ref() {
+          let pm = PMach::NvGpu;
+          match gpu.lookup(addr) {
+            None => {}
+            Some((loc, icel)) => {
+              return Some((loc, icel));
+            }
+          }
+        }
       }
       _ => {
         unimplemented!();
       }
     }
+    None
   }
 
   pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr) {
@@ -359,6 +383,54 @@ impl PCtx {
       }
       _ => {
         panic!("bug: PCtx::hard_copy: unimplemented: dst pm={:?} src pm={:?}", dst_pm, src_pm)
+      }
+    }
+  }
+
+  pub fn set_root(&self, addr: PAddr, new_root: CellPtr) -> Option<CellPtr> {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let oroot = InnerCell_::root(&*icel);
+        InnerCell_::set_root(&*icel, Some(new_root));
+        oroot
+      }
+    }
+  }
+
+  pub fn unset_root(&self, addr: PAddr) -> Option<CellPtr> {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let oroot = InnerCell_::root(&*icel);
+        InnerCell_::set_root(&*icel, None);
+        oroot
+      }
+    }
+  }
+
+  pub fn set_pin(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let opin = InnerCell_::pin(&*icel);
+        InnerCell_::set_pin(&*icel, true);
+        opin
+      }
+    }
+  }
+
+  pub fn unset_pin(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let opin = InnerCell_::pin(&*icel);
+        InnerCell_::set_pin(&*icel, false);
+        opin
       }
     }
   }

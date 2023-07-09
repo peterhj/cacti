@@ -1,4 +1,4 @@
-use crate::cell::*;
+use crate::prelude::*;
 
 pub type LanguageModelIn = LanguageModelInput;
 
@@ -15,4 +15,19 @@ pub struct LanguageModelOutput {
   pub out_lm_logit: StableCell,
   pub out_lm_prob: StableCell,
   pub out_lm_loss: StableCell,
+}
+
+pub type LanguageModelDeployIn = LanguageModelDeployInput;
+
+#[derive(Clone)]
+pub struct LanguageModelDeployInput {
+  pub in_tok: StableCell,
+}
+
+pub type LanguageModelDeployOut = LanguageModelDeployOutput;
+
+#[derive(Clone)]
+pub struct LanguageModelDeployOutput {
+  pub out_lm_logit: StableCell,
+  pub out_lm_prob: StableCell,
 }
