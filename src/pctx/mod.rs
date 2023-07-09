@@ -100,7 +100,7 @@ pub enum PMemErr {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct PAddr {
-  pub bits: i64,
+  pub bits: u64,
 }
 
 impl Debug for PAddr {
@@ -114,11 +114,11 @@ impl PAddr {
     PAddr{bits: 0}
   }
 
-  pub fn from_unchecked(bits: i64) -> PAddr {
+  pub fn from_unchecked(bits: u64) -> PAddr {
     PAddr{bits}
   }
 
-  pub fn to_unchecked(&self) -> i64 {
+  pub fn to_unchecked(&self) -> u64 {
     self.bits
   }
 }
@@ -136,7 +136,7 @@ thread_local! {
 
 #[derive(Default)]
 pub struct PCtxCtr {
-  pub addr: Cell<i64>,
+  pub addr: Cell<u64>,
 }
 
 impl PCtxCtr {

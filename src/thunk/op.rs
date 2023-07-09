@@ -194,165 +194,6 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
   }
 }
 
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SetScalar1dFutThunkSpec<T> { pub val: T }
-
-impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar1dFutThunkSpec<T> {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.set_scalar_1d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 0;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(Dim{ndim: 1, dtype: T::dtype()})
-  }
-
-  fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Err(ThunkTypeErr::Nondeterministic)
-  }
-
-  fn scalar_val(&self) -> Option<&dyn DtypeExt> {
-    Some(&self.val)
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let fmt = FutharkNumFormatter::default();
-    let mut code = FutharkThunkCode::default();
-    code.body.push(format!("let {{%0}} = replicate {{%0.s[0]}} {} in", fmt.format(&self.val)));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SetScalar2dFutThunkSpec<T> { pub val: T }
-
-impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar2dFutThunkSpec<T> {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.set_scalar_2d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 0;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(Dim{ndim: 2, dtype: T::dtype()})
-  }
-
-  fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Err(ThunkTypeErr::Nondeterministic)
-  }
-
-  fn scalar_val(&self) -> Option<&dyn DtypeExt> {
-    Some(&self.val)
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let fmt = FutharkNumFormatter::default();
-    let mut code = FutharkThunkCode::default();
-    code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) {} in", fmt.format(&self.val)));
-    code.body.push(format!("let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SetScalar3dFutThunkSpec<T> { pub val: T }
-
-impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar3dFutThunkSpec<T> {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.set_scalar_3d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 0;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(Dim{ndim: 3, dtype: T::dtype()})
-  }
-
-  fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Err(ThunkTypeErr::Nondeterministic)
-  }
-
-  fn scalar_val(&self) -> Option<&dyn DtypeExt> {
-    Some(&self.val)
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let fmt = FutharkNumFormatter::default();
-    let mut code = FutharkThunkCode::default();
-    code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) {} in", fmt.format(&self.val)));
-    code.body.push(format!("let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SetScalar4dFutThunkSpec<T> { pub val: T }
-
-impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalar4dFutThunkSpec<T> {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.set_scalar_4d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 0;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(Dim{ndim: 4, dtype: T::dtype()})
-  }
-
-  fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Err(ThunkTypeErr::Nondeterministic)
-  }
-
-  fn scalar_val(&self) -> Option<&dyn DtypeExt> {
-    Some(&self.val)
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let fmt = FutharkNumFormatter::default();
-    let mut code = FutharkThunkCode::default();
-    code.body.push(format!("let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) {} in", fmt.format(&self.val)));
-    code.body.push(format!("let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
-    code.into()
-  }
-}*/
-
 // FIXME: only need new dtype.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CastFutThunkSpec { pub org_dtype: Dtype, pub new_dtype: Dtype }
@@ -668,17 +509,31 @@ impl FutharkThunkSpec for InnerSelectFutThunkSpec {
         code.cfg.emit_arg_shapes = true;
         code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
         code.append(format!(r"let a_suf = {{%0.s[2]}} in"));
-        code.append(format!(r"let a = a_pre * a_suf in"));
-        code.append(format!(r"let t_val = flatten_3d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.append(format!(r"let t_val = unflatten a_pre a_suf t_val in"));
+        //code.append(format!(r"let a = a_pre * a_suf in"));
+        //code.append(format!(r"let t_val = flatten_3d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t_val = flatten_3d {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        //code.append(format!(r"let t_val = unflatten a_pre a_suf t_val in"));
+        code.append(format!(r"let t_val = unflatten t_val in"));
         /*code.append(format!(r"let t_key = flatten {{%1}} :> [a_pre]{} in", arg[1].dtype.format_futhark()));*/
-        code.append(format!(r"let t1 = flatten {{%1}} :> [a_pre]{} in", arg[1].dtype.format_futhark()));
-        code.append(format!(r"let t_iota = iota a_pre in"));
+        code.append(format!(r"let t1 = flatten {{%1}} :> [a_pre]{} in",
+            arg[1].dtype.format_futhark(),
+        ));
+        // FIXME FIXME
+        /*code.append(format!(r"let t_iota = iota a_pre in"));
         code.append(format!(r"let t_key = map2 (\idx k -> let k = (i64.{} k) in (assert (k >= 0 && k < a_suf) k) + a_suf * idx) t_iota t1 in",
+            arg[1].dtype.format_futhark(),
+        ));*/
+        code.append(format!(r"let t_key = map2 (\k -> let k = (i64.{} k) in (assert (k >= 0 && k < a_suf) k)) t1 in",
             arg[1].dtype.format_futhark(),
         ));
         code.append(format!(r"let t2 = map2 (\k v -> v[k]) t_key t_val in"));
-        code.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        //code.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        code.append(format!(r"let {{%2}} = unflatten t2 in"));
+        /*code.append(format!(r"let {{%2}} = unflatten t2 :> [{{%0.s[0]}}][{{%0.s[1]}}]{} in",
+            arg[0].dtype.format_futhark(),
+        ));*/
         code.into()
       }
       3 => {
@@ -778,9 +633,10 @@ impl FutharkThunkSpec for InnerInvSelectFutThunkSpec {
             self.inner_len,
             arg[0].dtype.format_futhark(),
         ));
-        code.append(format!(r"let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {} t2 in",
+        /*code.append(format!(r"let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {} t2 in",
             self.inner_len,
-        ));
+        ));*/
+        code.append(format!(r"let {{%2}} = unflatten_3d t2 in"));
         code.into()
       }
       4 => {
@@ -1859,45 +1715,6 @@ impl FutharkThunkSpec for LogFutThunkSpec {
   }
 }
 
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct InnerMax3dThunkSpec;
-
-impl FutharkThunk_ for InnerMax3dThunkSpec {
-  fn _arg_count(&self) -> u8 {
-    1
-  }
-
-  fn _body(&self) -> Vec<u8> {
-    b"map (\t1 -> map (\t2 -> [reduce max -inf t2]) t1) {%0}\n".to_owned()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct InnerMean3dThunkSpec;
-
-impl FutharkThunk_ for InnerSum3dThunkSpec {
-  fn _arg_count(&self) -> u8 {
-    1
-  }
-
-  fn _body(&self) -> Vec<u8> {
-    b"map (\t1 -> map (\t2 -> [(reduce (+) 0 t2) / ({%t.0}.i64 (length t2))]) t1) {%0}\n".to_owned()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct InnerSum3dThunkSpec;
-
-impl FutharkThunk_ for InnerSum3dThunkSpec {
-  fn _arg_count(&self) -> u8 {
-    1
-  }
-
-  fn _body(&self) -> Vec<u8> {
-    b"map (\t1 -> map (\t2 -> [reduce (+) 0 t2]) t1) {%0}\n".to_owned()
-  }
-}*/
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct FlatSumFutThunkSpec;
 
@@ -1965,181 +1782,6 @@ impl FutharkThunkSpec for FlatSumFutThunkSpec {
   }
 }
 
-/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct Sum1dFutThunkSpec;
-
-impl FutharkThunkSpec for Sum1dFutThunkSpec {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.sum1d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != 1 {
-      return Err(ThunkDimErr::default());
-    }
-    Ok(Dim{ndim: 0, dtype: arg[0].dtype})
-  }
-
-  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != 1 {
-      return Err(ThunkTypeErr::default());
-    }
-    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let mut code = FutharkThunkCode::default();
-    code.body.push(format!("let {{%1}} = reduce (+) 0 {{%0}} in"));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct Sum2dFutThunkSpec;
-
-impl FutharkThunkSpec for Sum2dFutThunkSpec {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.sum2d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != 2 {
-      return Err(ThunkDimErr::default());
-    }
-    Ok(Dim{ndim: 0, dtype: arg[0].dtype})
-  }
-
-  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != 2 {
-      return Err(ThunkTypeErr::default());
-    }
-    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let mut code = FutharkThunkCode::default();
-    code.cfg.emit_arg_shapes = true;
-    // FIXME: instead, could reshape and reduce once.
-    /*body:     vec![format!("let {{%1}} = reduce (\t1 -> reduce (+) 0 t1) 0 {{%0}} in")],*/
-    code.body.push(format!("let t0 = flatten {{%0}} in"));
-    code.body.push(format!("let t1 = reduce (+) 0 t0 in"));
-    code.body.push(format!("let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct Sum3dFutThunkSpec;
-
-impl FutharkThunkSpec for Sum3dFutThunkSpec {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.sum3d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != 3 {
-      return Err(ThunkDimErr::default());
-    }
-    Ok(Dim{ndim: 0, dtype: arg[0].dtype})
-  }
-
-  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != 3 {
-      return Err(ThunkTypeErr::default());
-    }
-    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let mut code = FutharkThunkCode::default();
-    code.cfg.emit_arg_shapes = true;
-    // FIXME: instead, could reshape and reduce once.
-    /*body:     vec![format!("let {{%1}} = reduce (\t2 -> reduce (\t1 -> reduce (+) 0 t1) 0 t2) 0 {{%0}} in")],*/
-    code.body.push(format!("let t0 = flatten_3d {{%0}} in"));
-    code.body.push(format!("let t1 = reduce (+) 0 t0 in"));
-    code.body.push(format!("let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
-    code.into()
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct Sum4dFutThunkSpec;
-
-impl FutharkThunkSpec for Sum4dFutThunkSpec {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.sum4d")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }
-
-  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != 4 {
-      return Err(ThunkDimErr::default());
-    }
-    Ok(Dim{ndim: 0, dtype: arg[0].dtype})
-  }
-
-  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != 4 {
-      return Err(ThunkTypeErr::default());
-    }
-    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
-  }
-
-  fn gen_futhark(&self, _arg: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let mut code = FutharkThunkCode::default();
-    code.cfg.emit_arg_shapes = true;
-    // FIXME: instead, could reshape and reduce once.
-    /*body:     vec![format!("let {{%1}} = reduce (\t3 -> reduce (\t2 -> reduce (\t1 -> reduce (+) 0 t1) 0 t2) 0 t3) 0 {{%0}} in")],*/
-    code.body.push(format!("let t0 = flatten_4d {{%0}} in"));
-    code.body.push(format!("let t1 = reduce (+) 0 t0 in"));
-    code.body.push(format!("let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
-    code.into()
-  }
-}*/
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerMeanFutThunkSpec;
 
@@ -2201,11 +1843,13 @@ impl FutharkThunkSpec for InnerMeanFutThunkSpec {
         code.append(format!(r"let t0 = flatten_4d {{%0}} :> [a]{} in",
             arg[0].dtype.format_futhark(),
         ));
-        code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        //code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0 = unflatten t0 in"));
         code.append(format!(r"let t1 = map (\t -> (reduce (+) 0 t) / ({}.i64 a_suf)) t0 in",
             arg[0].dtype.format_futhark(),
         ));
-        code.append(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
+        //code.append(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
+        code.append(format!(r"let {{%1}} = unflatten_3d t1 in"));
         code.into()
       }
       _ => {
@@ -2254,49 +1898,73 @@ impl FutharkThunkSpec for InnerSoftmaxFutThunkSpec {
       2 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!(r"let a_pre = {{%0.s[0]}} in"));
-        code.body.push(format!(r"let a_suf = {{%0.s[1]}} in"));
-        code.body.push(format!(r"let a = a_pre * a_suf in"));
-        code.body.push(format!(r"let t0 = flatten {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
-        code.body.push(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
-        code.body.push(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
-        code.body.push(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        code.append(format!(r"let a_pre = {{%0.s[0]}} in"));
+        code.append(format!(r"let a_suf = {{%0.s[1]}} in"));
+        //code.append(format!(r"let a = a_pre * a_suf in"));
+        code.append(format!(r"let t0 = flatten {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        //code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0 = unflatten t0 in"));
+        code.append(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
+        code.append(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
+        //code.append(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t2 = flatten t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten t2 in"));
+        code.append(format!(r"let {{%1}} = unflatten (t2 :> [{{%0.s[0]}} * {{%0.s[1]}}]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
         code.into()
       }
       3 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
-        code.body.push(format!(r"let a_suf = {{%0.s[2]}} in"));
-        code.body.push(format!(r"let a = a_pre * a_suf in"));
-        code.body.push(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
-        code.body.push(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
-        code.body.push(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
-        code.body.push(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
+        code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
+        code.append(format!(r"let a_suf = {{%0.s[2]}} in"));
+        //code.append(format!(r"let a = a_pre * a_suf in"));
+        code.append(format!(r"let t0 = flatten_3d {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        //code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0 = unflatten t0 in"));
+        code.append(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
+        code.append(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
+        //code.append(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t2 = flatten t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten_3d t2 in"));
+        code.append(format!(r"let {{%1}} = unflatten_3d (t2 :> [{{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
         code.into()
       }
       4 => {
         let mut code = FutharkThunkCode::default();
         code.cfg.emit_arg_shapes = true;
-        code.body.push(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
-        code.body.push(format!(r"let a_suf = {{%0.s[3]}} in"));
-        code.body.push(format!(r"let a = a_pre * a_suf in"));
-        code.body.push(format!(r"let t0 = flatten_4d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
-        code.body.push(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
-        code.body.push(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
-        code.body.push(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.body.push(format!(r"let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
+        code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
+        code.append(format!(r"let a_suf = {{%0.s[3]}} in"));
+        //code.append(format!(r"let a = a_pre * a_suf in"));
+        code.append(format!(r"let t0 = flatten_4d {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        //code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0 = unflatten t0 in"));
+        code.append(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
+        code.append(format!(r"let t2 = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
+        //code.append(format!(r"let t2 = flatten t2 :> [a]{} in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let t2 = flatten t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
+        //code.append(format!(r"let {{%1}} = unflatten_4d t2 in"));
+        code.append(format!(r"let {{%1}} = unflatten_4d (t2 :> [{{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
         code.into()
       }
       _ => {
@@ -2359,22 +2027,33 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
         code.cfg.emit_arg_shapes = true;
         code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
         code.append(format!(r"let a_suf = {{%0.s[2]}} in"));
-        code.append(format!(r"let a = a_pre * a_suf in"));
-        code.append(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg[0].dtype.format_futhark()));
-        code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        //code.append(format!(r"let a = a_pre * a_suf in"));
+        code.append(format!(r"let t0 = flatten_3d {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        //code.append(format!(r"let t0 = unflatten a_pre a_suf t0 in"));
+        code.append(format!(r"let t0 = unflatten t0 in"));
         code.append(format!(r"let t0_max = map (\t -> reduce ({}.max) (-{}.inf) t) t0 in", arg[0].dtype.format_futhark(), arg[0].dtype.format_futhark()));
         code.append(format!(r"let t1 = map2 (\t t_max -> map (\u -> ({}.exp) (u - t_max)) t) t0 t0_max in", arg[0].dtype.format_futhark()));
         code.append(format!(r"let t1_sum = map (\t -> reduce (+) 0 t) t1 in"));
         code.append(format!(r"let t_val = map2 (\t t_sum -> map (/ t_sum) t) t1 t1_sum in"));
-        code.append(format!(r"let t_iota = iota a_pre in"));
         code.append(format!(r"let t_key = flatten {{%1}} :> [a_pre]{} in", arg[1].dtype.format_futhark()));
+        // FIXME FIXME
+        /*code.append(format!(r"let t_iota = iota a_pre in"));
         code.append(format!(r"let t_key = map2 (\idx k -> let k = (i64.{} k) in (assert (k >= 0 && k < a_suf) k) + a_suf * idx) t_iota t_key in",
+            arg[1].dtype.format_futhark(),
+        ));*/
+        code.append(format!(r"let t_key = map (\k -> let k = (i64.{} k) in (assert (k >= 0 && k < a_suf) k)) t_key in",
             arg[1].dtype.format_futhark(),
         ));
         code.append(format!(r"let t2 = map2 (\k v -> -({}.log v[k])) t_key t_val in",
             arg[0].dtype.format_futhark(),
         ));
-        code.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        //code.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        //code.append(format!(r"let {{%2}} = unflatten t2 in"));
+        code.append(format!(r"let {{%2}} = unflatten (t2 :> [{{%0.s[0]}} * {{%0.s[1]}}]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
         code.into()
       }
       _ => {

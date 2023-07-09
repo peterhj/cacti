@@ -1089,7 +1089,7 @@ impl Spine {
           }
         }*/
         // FIXME FIXME
-        let xclk = match env.lookup_mut_ref(x) {
+        let xclk = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
             match e.state().mode {
@@ -1142,7 +1142,7 @@ impl Spine {
         }
       }
       &SpineEntry::Apply(x, th) => {
-        let xclk = match env.lookup_mut_ref(x) {
+        let xclk = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
             match e.state().mode {
@@ -1208,7 +1208,7 @@ impl Spine {
         }
       }
       &SpineEntry::Accumulate(x, th) => {
-        let xclk = match env.lookup_mut_ref(x) {
+        let xclk = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
             match e.state().mode {

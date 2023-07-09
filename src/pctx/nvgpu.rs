@@ -689,6 +689,9 @@ impl NvGpuPCtx {
 
 #[repr(C)]
 pub struct NvGpuMemCell {
+  //pub addr: PAddr,
+  pub root: Cell<CellPtr>,
+  pub flag: Cell<u8>,
   pub ptr:  *mut c_void,
   pub sz:   usize,
 }
@@ -723,13 +726,48 @@ impl NvGpuMemCell {
       return Err(PMemErr::Bot);
     }
     println!("DEBUG: NvGpuMemCell::try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz);
-    Ok(NvGpuMemCell{ptr, sz})
+    Ok(NvGpuMemCell{
+      root: Cell::new(CellPtr::nil()),
+      flag: Cell::new(0),
+      ptr,
+      sz,
+    })
   }
 }
 
 impl InnerCell for NvGpuMemCell {
   fn as_mem_reg(&self) -> Option<MemReg> {
     Some(MemReg{ptr: self.ptr, sz: self.sz})
+  }
+
+  fn size(&self) -> usize {
+    self.sz
+  }
+
+  fn root(&self) -> Option<CellPtr> {
+    let x = self.root.get();
+    if x.is_nil() {
+      None
+    } else {
+      Some(x)
+    }
+  }
+
+  fn set_root(&self, x: Option<CellPtr>) {
+    let x = x.unwrap_or(CellPtr::nil());
+    self.root.set(x);
+  }
+
+  fn pin(&self) -> bool {
+    (self.flag.get() & 4) != 0
+  }
+
+  fn set_pin(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 4);
+    } else {
+      self.flag.set(self.flag.get() & !4);
+    }
   }
 }
 
@@ -1211,15 +1249,35 @@ impl GpuMemPool {
     }
   }
 
-  pub fn try_free(&self, addr: PAddr, free_prefix: usize) -> Option<Rc<NvGpuInnerCell>> {
+  pub fn try_free(&self, addr: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+    let mut front_prefix = self.front_offset();
     let old_alloc = match self.alloc_map.borrow_mut().remove(&addr) {
       None => return None,
       Some(a) => a
     };
     let old_reg = old_alloc.reg;
-    if old_reg.off < free_prefix && free_prefix < old_reg.off + old_reg.sz {
+    if front_prefix <= old_reg.off {
+    } else if old_reg.off < front_prefix && front_prefix < old_reg.off + old_reg.sz {
       panic!("bug");
-    } else if old_reg.off + old_reg.sz <= free_prefix {
+    } else if old_reg.off + old_reg.sz == front_prefix {
+      // FIXME FIXME
+      front_prefix = old_reg.off;
+      self.front_cursor.set(front_prefix);
+      let mut free_index = self.free_index.borrow_mut();
+      let pivot = Region{off: front_prefix, sz: 0};
+      match free_index.range( .. pivot).rev().next() {
+        None => {}
+        Some(&l_reg) => {
+          if l_reg.off + l_reg.sz > front_prefix {
+            panic!("bug");
+          } else if l_reg.off + l_reg.sz == front_prefix {
+            front_prefix = l_reg.off;
+            self.front_cursor.set(front_prefix);
+            free_index.remove(&l_reg);
+          }
+        }
+      }
+    } else if old_reg.off + old_reg.sz < front_prefix {
       let mut free_index = self.free_index.borrow_mut();
       let mut merge_reg = old_reg;
       let pivot = Region{off: old_reg.off + old_reg.sz, sz: 0};
@@ -1246,7 +1304,10 @@ impl GpuMemPool {
           }
         }
       }
+      assert!(merge_reg.off + merge_reg.sz < front_prefix);
       free_index.insert(merge_reg);
+    } else {
+      unreachable!();
     }
     match self.size_index.borrow_mut().get_mut(&old_reg.sz) {
       None => panic!("bug"),
@@ -1255,10 +1316,7 @@ impl GpuMemPool {
       }
     }
     assert_eq!(self.alloc_index.borrow_mut().remove(&old_reg), Some(addr));
-    let icel = match self.cel_map.borrow_mut().remove(&addr) {
-      None => panic!("bug"),
-      Some(icel) => icel
-    };
+    let icel = self.cel_map.borrow_mut().remove(&addr).unwrap();
     let old_dptr = self.front_base + old_reg.off as u64;
     assert_eq!(old_dptr, icel.dptr.get());
     Some(icel)

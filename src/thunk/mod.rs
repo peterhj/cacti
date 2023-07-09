@@ -545,26 +545,26 @@ impl FutharkThunkCode {
     let val = val.borrow();
     match out0.ndim() {
       0 => {
-        self.body.push(format!(r"let {{%0}} = ({}) in", val));
+        self.append(format!(r"let {{%0}} = ({}) in", val));
       }
       1 => {
         self.cfg.emit_out0_shape = true;
-        self.body.push(format!(r"let {{%0}} = replicate {{%0.s[0]}} ({}) in", val));
+        self.append(format!(r"let {{%0}} = replicate {{%0.s[0]}} ({}) in", val));
       }
       2 => {
         self.cfg.emit_out0_shape = true;
-        self.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val));
-        self.body.push(format!(r"let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
+        self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val));
+        self.append(format!(r"let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
       }
       3 => {
         self.cfg.emit_out0_shape = true;
-        self.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val));
-        self.body.push(format!(r"let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
+        self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val));
+        self.append(format!(r"let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
       }
       4 => {
         self.cfg.emit_out0_shape = true;
-        self.body.push(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val));
-        self.body.push(format!(r"let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
+        self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val));
+        self.append(format!(r"let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
       }
       _ => {
         println!("WARNING: FutharkThunkCode::nd_replicate: not implemented: {:?}", out0);
@@ -588,28 +588,31 @@ impl FutharkThunkCode {
     let lam = lam.borrow();
     match arg0.ndim() {
       0 => {
-        self.body.push(format!(r"let {{%1}} = ({}) {{%0}} in", lam));
+        self.append(format!(r"let {{%1}} = ({}) {{%0}} in", lam));
       }
       1 => {
-        self.body.push(format!(r"let {{%1}} = map ({}) {{%0}} in", lam));
+        self.append(format!(r"let {{%1}} = map ({}) {{%0}} in", lam));
       }
       2 => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let t0 = flatten {{%0}} in"));
-        self.body.push(format!(r"let t1 = map ({}) t0 in", lam));
-        self.body.push(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"));
+        //self.cfg.emit_arg_shapes = true;
+        self.append(format!(r"let t0 = flatten {{%0}} in"));
+        self.append(format!(r"let t1 = map ({}) t0 in", lam));
+        //self.append(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t1 in"));
+        self.append(format!(r"let {{%1}} = unflatten t1 in"));
       }
       3 => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let t0 = flatten_3d {{%0}} in"));
-        self.body.push(format!(r"let t1 = map ({}) t0 in", lam));
-        self.body.push(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
+        //self.cfg.emit_arg_shapes = true;
+        self.append(format!(r"let t0 = flatten_3d {{%0}} in"));
+        self.append(format!(r"let t1 = map ({}) t0 in", lam));
+        //self.append(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t1 in"));
+        self.append(format!(r"let {{%1}} = unflatten_3d t1 in"));
       }
       4 => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let t0 = flatten_4d {{%0}} in"));
-        self.body.push(format!(r"let t1 = map ({}) t0 in", lam));
-        self.body.push(format!(r"let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
+        //self.cfg.emit_arg_shapes = true;
+        self.append(format!(r"let t0 = flatten_4d {{%0}} in"));
+        self.append(format!(r"let t1 = map ({}) t0 in", lam));
+        //self.append(format!(r"let {{%1}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t1 in"));
+        self.append(format!(r"let {{%1}} = unflatten_4d t1 in"));
       }
       _ => {
         println!("WARNING: FutharkThunkCode::nd_map: not implemented: {:?}", arg0);
@@ -633,38 +636,49 @@ impl FutharkThunkCode {
     let lam = lam.borrow();
     match (arg0.ndim(), arg1.ndim()) {
       (0, 0) => {
-        self.body.push(format!(r"let {{%2}} = ({}) {{%0}} {{%1}} in", lam));
+        self.append(format!(r"let {{%2}} = ({}) {{%0}} {{%1}} in", lam));
       }
       (1, 1) => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let a = {{%0.s[0]}} in"));
-        self.body.push(format!(r"let t0 = {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
-        self.body.push(format!(r"let t1 = {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
-        self.body.push(format!(r"let {{%2}} = map2 ({}) t0 t1 in", lam));
+        //self.cfg.emit_arg_shapes = true;
+        //self.append(format!(r"let a = {{%0.s[0]}} in"));
+        //self.append(format!(r"let t0 = {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        //self.append(format!(r"let t1 = {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        self.append(format!(r"let t0 = {{%0}} in"));
+        self.append(format!(r"let t1 = {{%1}} in"));
+        self.append(format!(r"let {{%2}} = map2 ({}) t0 t1 in", lam));
       }
       (2, 2) => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} in"));
-        self.body.push(format!(r"let t0 = flatten {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
-        self.body.push(format!(r"let t1 = flatten {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
-        self.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
-        self.body.push(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        //self.cfg.emit_arg_shapes = true;
+        //self.append(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} in"));
+        //self.append(format!(r"let t0 = flatten {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        //self.append(format!(r"let t1 = flatten {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        self.append(format!(r"let t0 = flatten {{%0}} in"));
+        self.append(format!(r"let t1 = flatten {{%1}} in"));
+        self.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        //self.append(format!(r"let {{%2}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t2 in"));
+        self.append(format!(r"let {{%2}} = unflatten t2 in"));
       }
       (3, 3) => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
-        self.body.push(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
-        self.body.push(format!(r"let t1 = flatten_3d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
-        self.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
-        self.body.push(format!(r"let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
+        //self.cfg.emit_arg_shapes = true;
+        //self.append(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
+        //self.append(format!(r"let t0 = flatten_3d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        //self.append(format!(r"let t1 = flatten_3d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        self.append(format!(r"let t0 = flatten_3d {{%0}} in"));
+        self.append(format!(r"let t1 = flatten_3d {{%1}} in"));
+        self.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        //self.append(format!(r"let {{%2}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t2 in"));
+        self.append(format!(r"let {{%2}} = unflatten_3d t2 in"));
       }
       (4, 4) => {
-        self.cfg.emit_arg_shapes = true;
-        self.body.push(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}} in"));
-        self.body.push(format!(r"let t0 = flatten_4d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
-        self.body.push(format!(r"let t1 = flatten_4d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
-        self.body.push(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
-        self.body.push(format!(r"let {{%2}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
+        //self.cfg.emit_arg_shapes = true;
+        //self.append(format!(r"let a = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}} in"));
+        //self.append(format!(r"let t0 = flatten_4d {{%0}} :> [a]{} in", arg0.dtype.format_futhark()));
+        //self.append(format!(r"let t1 = flatten_4d {{%1}} :> [a]{} in", arg1.dtype.format_futhark()));
+        self.append(format!(r"let t0 = flatten_4d {{%0}} in"));
+        self.append(format!(r"let t1 = flatten_4d {{%1}} in"));
+        self.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        //self.append(format!(r"let {{%2}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t2 in"));
+        self.append(format!(r"let {{%2}} = unflatten_4d t2 in"));
       }
       _ => {
         println!("WARNING: FutharkThunkCode::nd_map2: not implemented: {:?} {:?}", arg0, arg1);
@@ -1373,9 +1387,16 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     }
     let may_fail = obj.may_fail();
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: may fail? {:?}", may_fail);
-    if may_fail && obj.sync().is_err() {
-      // FIXME FIXME: failure handling.
-      panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime failure");
+    if may_fail {
+      let ret = obj.sync();
+      if ret.is_err() {
+        // FIXME FIXME: failure handling.
+        println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: runtime failure: {:?}", ret);
+        if let Some(e) = obj.error().map(|c| sane_ascii(c.to_bytes())) {
+          println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: runtime failure: {}", e);
+        }
+        panic!();
+      }
     }
     obj.release();
     let (post_front_dptr, post_backoffset) = TL_PCTX.with(|pctx| {
@@ -1531,8 +1552,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
                 Some(p) => p
               };
               assert!(p != p_out);
-              let free_prefix = gpu.mem_pool.front_offset();
-              let icel = gpu.mem_pool.try_free(p, free_prefix).unwrap();
+              let icel = gpu.mem_pool.try_free(p).unwrap();
               assert!(InnerCell::root(&*icel).is_none());
               assert!(icel.back());
             }

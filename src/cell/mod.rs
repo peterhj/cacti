@@ -345,14 +345,20 @@ impl<'r> BorrowCellView for CellViewRef<'r> {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct IRange {
+  pub start: i64,
+  pub end: i64,
+}
+
 #[derive(Clone, Debug)]
 pub enum CellVOp {
   Nop,
   Swap(i8, i8),
-  Slice(Box<(i64, i64)>),
-  Slice2(Box<[(i64, i64); 2]>),
-  Slice3(Box<[(i64, i64); 3]>),
-  Slice4(Box<[(i64, i64); 4]>),
+  Slice(Box<IRange>),
+  Slice2(Box<[IRange; 2]>),
+  Slice3(Box<[IRange; 3]>),
+  Slice4(Box<[IRange; 4]>),
   // TODO
 }
 
