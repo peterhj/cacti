@@ -98,7 +98,7 @@ pub struct NvGpuInnerCell {
   pub addr: PAddr,
   pub root: Cell<CellPtr>,
   pub flag: Cell<u8>,
-  pub tag:  Cell<u16>,
+  pub tag:  Cell<u32>,
   pub dev:  i32,
   pub dptr: Cell<u64>,
   pub sz:   usize,
@@ -169,7 +169,7 @@ impl InnerCell for NvGpuInnerCell {
     }
   }
 
-  fn tag(&self) -> Option<u16> {
+  fn tag(&self) -> Option<u32> {
     if (self.flag.get() & 8) != 0 {
       Some(self.tag.get())
     } else {
@@ -177,7 +177,7 @@ impl InnerCell for NvGpuInnerCell {
     }
   }
 
-  fn set_tag(&self, tag: Option<u16>) {
+  fn set_tag(&self, tag: Option<u32>) {
     if let Some(val) = tag {
       self.flag.set(self.flag.get() | 8);
       self.tag.set(val);
@@ -855,7 +855,7 @@ pub struct NvGpuMemPool {
   pub back_cursor:  Cell<usize>,
   pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
-  pub front_tag:    RefCell<Option<u16>>,
+  pub front_tag:    RefCell<Option<u32>>,
   pub free_list:    RefCell<Vec<PAddr>>,
   pub free_index:   RefCell<BTreeSet<Region>>,
   pub size_index:   RefCell<HashMap<usize, BTreeSet<PAddr>>>,
@@ -966,7 +966,7 @@ impl GpuMemPool {
   }
 
   //pub fn set_front_tag(&self, tag: Option<&[u8]>) {}
-  pub fn set_front_tag(&self, tag: Option<u16>) {
+  pub fn set_front_tag(&self, tag: Option<u32>) {
     match tag {
       None => {
         *self.front_tag.borrow_mut() = None;
@@ -1034,7 +1034,7 @@ impl GpuMemPool {
   }
 
   //pub fn try_pre_alloc_with_tag(&self, query_sz: usize, query_tag: &[u8]) -> NvGpuMemPoolReq {}
-  pub fn try_pre_alloc_with_tag(&self, query_sz: usize, query_tag: u16, unify: &mut TagUnifier) -> NvGpuMemPoolReq {
+  pub fn try_pre_alloc_with_tag(&self, query_sz: usize, query_tag: u32, unify: &mut TagUnifier) -> NvGpuMemPoolReq {
     if let Some(&tag) = self.front_tag.borrow().as_ref() {
       if unify.find(query_tag) == unify.find(tag) {
         return self._try_front_pre_alloc(query_sz);
@@ -1414,7 +1414,7 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
     }
     0
   }).unwrap_or_else(|_| {
-    println!("DEBUG: tl_pctx_gpu_free_hook: dptr={:016x} (pctx deinit)",
+    println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x} (pctx deinit)",
         dptr,
     );
     0

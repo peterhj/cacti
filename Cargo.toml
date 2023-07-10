@@ -64,19 +64,3 @@ path = "tools/boot.rs"
 [[bin]]
 name = "boot_array"
 path = "tools/boot_array.rs"
-
-[[bin]]
-name = "boot_fp"
-path = "tools/boot_fp.rs"
-
-[[bin]]
-name = "boot_gpu"
-path = "tools/boot_gpu.rs"
-
-[[bin]]
-name = "boot_size"
-path = "tools/boot_size.rs"
-
-[[bin]]
-name = "boot_view"
-path = "tools/boot_view.rs"

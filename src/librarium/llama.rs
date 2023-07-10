@@ -150,13 +150,15 @@ impl Llama {
       let seq_cap = self.cfg.seq_cap;
       let num_head = self.cfg.num_head;
       let head_dim = self.cfg.head_dim;
-      let m = x.new_shape([ubat_sz, seq_cap, num_head * head_dim])
-               .cast(f32::dtype()).square()
-               .inner_mean();
-      let x = x / (m + eps).sqrt();
-      let w = weight.new_shape([1, 1, num_head * head_dim]);
-      (w * x).cast(dtype)
-             .new_shape([ubat_sz, seq_cap, num_head, head_dim])
+      let x = x.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      let m = x.cast(f32::dtype())
+               .square().inner_mean()
+               .new_shape([ubat_sz * seq_cap, 1]);
+      let t = x / (m + eps).sqrt();
+      let w = weight.new_shape([1, num_head * head_dim]);
+      let y = (w * t).cast(dtype)
+                     .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      y
     };
     /*
     // FIXME FIXME
@@ -198,8 +200,8 @@ impl Llama {
     // TODO TODO
     for i in 0 .. 1 {
       // FIXME FIXME: layer norm.
-      let pre_nrm = stream;
-      //let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
+      //let pre_nrm = stream;
+      let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
                   .new_shape([ubat_sz * seq_cap, num_head * head_dim])
                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].q, [inner_dim, inner_dim], true)
@@ -244,9 +246,8 @@ impl Llama {
                          .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
       // FIXME FIXME: post layer norm, mlp.
-      let post_nrm = stream;
-      //let post_nrm = post_layer_norm(stream);
-      //let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
+      //let post_nrm = stream;
+      let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
       let up_proj = post_nrm
                    .new_shape([ubat_sz * seq_cap, num_head * head_dim])
                    .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[0].up, [mlp_inner_dim, inner_dim], true);
@@ -263,7 +264,7 @@ impl Llama {
       stream = stream + down_proj;
     }
     // TODO TODO
-    //let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
+    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
                       .new_shape([ubat_sz * seq_cap, num_head * head_dim])
                       .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)

@@ -15,9 +15,9 @@ use std::cell::{Cell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{size_of, swap};
-use std::ops::{Deref};
+use std::ops::{Deref, Range};
 use std::rc::{Rc, Weak};
-use std::slice::{from_raw_parts};
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -269,6 +269,21 @@ impl MCellPtr {
   }
 }
 
+enum _Void {}
+
+#[repr(transparent)]
+pub struct CellViewHandle([_Void]);
+
+impl CellViewHandle {
+  pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
+    unsafe { &*(from_raw_parts((x.raw_ as usize ^ 0x8000_0000_0000_0000) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
+  }
+
+  pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
+    unsafe { &mut *(from_raw_parts_mut((x.raw_ as usize ^ 0x8000_0000_0000_0000) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
+  }
+}
+
 #[derive(Clone, Debug)]
 pub struct CellView(pub CellPtr, pub Vec<CellVOp>);
 
@@ -345,11 +360,7 @@ impl<'r> BorrowCellView for CellViewRef<'r> {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct IRange {
-  pub start: i64,
-  pub end: i64,
-}
+pub type IRange = Range<i64>;
 
 #[derive(Clone, Debug)]
 pub enum CellVOp {
@@ -1409,8 +1420,8 @@ pub trait InnerCell {
   fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
   fn pin(&self) -> bool { unimplemented!(); }
   fn set_pin(&self, _flag: bool) { unimplemented!(); }
-  fn tag(&self) -> Option<u16> { unimplemented!(); }
-  fn set_tag(&self, _tag: Option<u16>) { unimplemented!(); }
+  fn tag(&self) -> Option<u32> { unimplemented!(); }
+  fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
 }
 
 pub trait InnerCell_ {
@@ -1423,8 +1434,8 @@ pub trait InnerCell_ {
   fn set_root(&self, _root: Option<CellPtr>);
   fn pin(&self) -> bool;
   fn set_pin(&self, _flag: bool);
-  fn tag(&self) -> Option<u16>;
-  fn set_tag(&self, _tag: Option<u16>);
+  fn tag(&self) -> Option<u32>;
+  fn set_tag(&self, _tag: Option<u32>);
 }
 
 impl<C: InnerCell + Any> InnerCell_ for C {
@@ -1456,11 +1467,11 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     InnerCell::set_pin(self, flag)
   }
 
-  fn tag(&self) -> Option<u16> {
+  fn tag(&self) -> Option<u32> {
     InnerCell::tag(self)
   }
 
-  fn set_tag(&self, tag: Option<u16>) {
+  fn set_tag(&self, tag: Option<u32>) {
     InnerCell::set_tag(self, tag)
   }
 }

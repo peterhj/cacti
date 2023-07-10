@@ -12,7 +12,7 @@ use futhark_syntax::*;
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
 use std::iter::{repeat};
-use std::ops::{Deref, AddAssign, BitXor, Add, Sub, Mul, Div, Neg};
+use std::ops::{AddAssign, BitXor, Index, IndexMut, RangeBounds, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
 impl AddAssign<f32> for CellPtr {
@@ -172,6 +172,43 @@ impl BitXor<T_> for CellView {
   }
 }
 
+impl Index<IRange> for CellPtr {
+  type Output = CellViewHandle;
+
+  #[track_caller]
+  fn index(&self, _: IRange) -> &CellViewHandle {
+    panick_wrap(|| {
+      // FIXME
+      CellViewHandle::_from(*self)
+      //unimplemented!();
+    })
+  }
+}
+
+impl IndexMut<IRange> for CellPtr {
+  #[track_caller]
+  fn index_mut(&mut self, _: IRange) -> &mut CellViewHandle {
+    panick_wrap(|| {
+      // FIXME
+      CellViewHandle::_from_mut(*self)
+      //unimplemented!();
+    })
+  }
+}
+
+impl Index<[IRange; 2]> for CellPtr {
+  type Output = CellViewHandle;
+
+  #[track_caller]
+  fn index(&self, _: [IRange; 2]) -> &CellViewHandle {
+    panick_wrap(|| {
+      // FIXME
+      CellViewHandle::_from(*self)
+      //unimplemented!();
+    })
+  }
+}
+
 pub trait IntoCellViewOps: Into<CellView> {
   fn inner_transpose(self) -> CellView {
     panick_wrap(|| {
@@ -305,22 +342,19 @@ impl<'l, R: Borrow<CellPtr>> Add<R> for &'l CellPtr {
   type Output = CellPtr;
 
   fn add(self, rhs: R) -> CellPtr {
-    /*
-    let p = self.into();
-    let q = rhs.into();
-    let op = AddThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
     panick_wrap(|| {
-      let op = AddFutThunkSpec;
+      let x0 = *self.borrow();
+      let x1 = *rhs.borrow();
+      let x0_ty = x0.type_();
+      let x1_ty = x1.type_();
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(*rhs.borrow());
-      ctx_pop_thunk(op)
+      ctx_push_cell_arg(x0);
+      ctx_push_cell_arg(x1);
+      if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
+        ctx_pop_thunk(BroadcastAddFutThunkSpec)
+      } else {
+        ctx_pop_thunk(AddFutThunkSpec)
+      }
     })
   }
 }
@@ -400,11 +434,18 @@ impl<'l, R: Borrow<CellPtr>> Sub<R> for &'l CellPtr {
 
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
-      let op = SubFutThunkSpec;
+      let x0 = *self.borrow();
+      let x1 = *rhs.borrow();
+      let x0_ty = x0.type_();
+      let x1_ty = x1.type_();
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(*rhs.borrow());
-      ctx_pop_thunk(op)
+      ctx_push_cell_arg(x0);
+      ctx_push_cell_arg(x1);
+      if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
+        ctx_pop_thunk(BroadcastSubFutThunkSpec)
+      } else {
+        ctx_pop_thunk(SubFutThunkSpec)
+      }
     })
   }
 }
@@ -464,11 +505,18 @@ impl<'l, R: Borrow<CellPtr>> Mul<R> for &'l CellPtr {
   #[track_caller]
   fn mul(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
-      let op = MulFutThunkSpec;
+      let x0 = *self.borrow();
+      let x1 = *rhs.borrow();
+      let x0_ty = x0.type_();
+      let x1_ty = x1.type_();
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(*rhs.borrow());
-      ctx_pop_thunk(op)
+      ctx_push_cell_arg(x0);
+      ctx_push_cell_arg(x1);
+      if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
+        ctx_pop_thunk(BroadcastMulFutThunkSpec)
+      } else {
+        ctx_pop_thunk(MulFutThunkSpec)
+      }
     })
   }
 }
@@ -528,11 +576,18 @@ impl<'l, R: Borrow<CellPtr>> Div<R> for &'l CellPtr {
   #[track_caller]
   fn div(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
-      let op = DivFutThunkSpec;
+      let x0 = *self.borrow();
+      let x1 = *rhs.borrow();
+      let x0_ty = x0.type_();
+      let x1_ty = x1.type_();
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(*rhs.borrow());
-      ctx_pop_thunk(op)
+      ctx_push_cell_arg(x0);
+      ctx_push_cell_arg(x1);
+      if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
+        ctx_pop_thunk(BroadcastDivFutThunkSpec)
+      } else {
+        ctx_pop_thunk(DivFutThunkSpec)
+      }
     })
   }
 }

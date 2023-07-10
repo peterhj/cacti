@@ -161,11 +161,11 @@ impl PCtxCtr {
 
 #[derive(Clone, Default)]
 pub struct TagUnifier {
-  root: HashMap<u16, u16>,
+  root: HashMap<u32, u32>,
 }
 
 impl TagUnifier {
-  pub fn parse_tag(tag_s: &[u8]) -> Result<u16, ()> {
+  pub fn parse_tag(tag_s: &[u8]) -> Result<u32, ()> {
     for i in (0 .. tag_s.len()).rev() {
       let c = tag_s[i];
       if !(c >= b'0' && c <= b'9') {
@@ -180,7 +180,7 @@ impl TagUnifier {
     self.root.clear();
   }
 
-  pub fn find(&mut self, tag: u16) -> u16 {
+  pub fn find(&mut self, tag: u32) -> u32 {
     if !self.root.contains_key(&tag) {
       self.root.insert(tag, tag);
       return tag;
@@ -198,7 +198,7 @@ impl TagUnifier {
     }
   }
 
-  pub fn unify(&mut self, ltag: u16, rtag: u16) {
+  pub fn unify(&mut self, ltag: u32, rtag: u32) {
     let ltag = self.find(ltag);
     if ltag == rtag {
       return;

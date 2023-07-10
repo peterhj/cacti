@@ -27,6 +27,7 @@ use futhark_ffi::{
   Backend as FutBackend,
   MulticoreBackend,
   Abi as FutAbi,
+  AbiScalarType as FutAbiScalarType,
   AbiScalar as FutAbiScalar,
   AbiSpace as FutAbiSpace,
   FutharkFloatFormatter,
@@ -348,7 +349,7 @@ pub trait FutharkThunkSpec {
   fn set_out_dim(&self, _arg: &[Dim], _out: Dim) -> Result<(), ThunkDimErr> { Err(ThunkDimErr::Immutable) }
   fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
   //fn mode(&self) -> CellMode { CellMode::Aff }
-  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr>;
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr>;
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, _out_adj: CellPtr, _arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
 }
 
@@ -403,7 +404,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     let (arg_dim, out_dim) = (&spec_dim).split_at(abi.arityin as usize);
     assert_eq!(arg_dim.len(), abi.arityin as usize);
     assert_eq!(out_dim.len(), abi.arityout as usize);
-    let code = match self.gen_futhark(arg_dim, out_dim) {
+    let code = match self.gen_futhark(&mut abi, arg_dim, out_dim) {
       Err(e) => panic!("ERROR: failed to generate futhark thunk code: {:?}", e),
       Ok(code) => code
     };
@@ -519,6 +520,7 @@ impl FutharkNumFormatter {
 #[derive(Clone, Default)]
 pub struct FutharkThunkCode {
   pub cfg:  FutharkThunkBuildConfig,
+  pub head: Vec<String>,
   pub body: Vec<String>,
 }
 
@@ -688,6 +690,194 @@ impl FutharkThunkCode {
     Ok(())
   }
 
+  pub fn nd_broadcast_map2_v0<S: Borrow<str>>(arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let mut code = FutharkThunkCode::default();
+    code.append_nd_broadcast_map2_v0(arg0, arg1, lam)?;
+    code.into()
+  }
+
+  pub fn append_nd_broadcast_map2_v0<S: Borrow<str>>(&mut self, arg0: Dim, arg1: Dim, lam: S) -> Result<(), FutharkGenErr> {
+    let lam = lam.borrow();
+    let dtype = arg0.dtype.max(arg1.dtype).unwrap();
+    match (arg0.ndim(), arg1.ndim()) {
+      (0, 0) => {
+        self.append(format!(r"let {{%2}} = ({}) ({}.{} {{%0}}) ({}.{} {{%1}}) in",
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+        ));
+      }
+      (1, 1) => {
+        self.cfg.emit_arg_shapes = true;
+        self.pre_append(format!(r"let f_inner = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> ({}) ({}.{} u) ({}.{} v)) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> ({}) ({}.{} t0[0]) ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}) ({}.{} u) ({}.{} t1[0])) t0) in",
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+        ));
+        self.append(format!(r"let {{%2}} = f_inner {{%0}} {{%1}} in"));
+      }
+      (2, 2) => {
+        self.cfg.emit_arg_shapes = true;
+        self.pre_append(format!(r"let f_inner = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> ({}) ({}.{} u) ({}.{} v)) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> ({}) ({}.{} t0[0]) ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}) ({}.{} u) ({}.{} t1[0])) t0) in",
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"let f_outer = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_inner u v) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v) t1) else (\t0 t1 -> map (\u -> f_inner u t1[0]) t0) in"));
+        self.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} in"));
+      }
+      (3, 3) => {
+        self.cfg.emit_arg_shapes = true;
+        self.pre_append(format!(r"let f_inner = if {{%0.s[2]}} == {{%1.s[2]}} then (\t0 t1 -> map2 (\u v -> ({}) ({}.{} u) ({}.{} v)) t0 t1) else if {{%0.s[2]}} == 1 then (\t0 t1 -> map (\v -> ({}) ({}.{} t0[0]) ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}) ({}.{} u) ({}.{} t1[0])) t0) in",
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"let f_dim_1 = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> f_inner u v) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v) t1) else (\t0 t1 -> map (\u -> f_inner u t1[0]) t0) in"));
+        self.pre_append(format!(r"let f_outer = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_dim_1 u v) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_dim_1 t0[0] v) t1) else (\t0 t1 -> map (\u -> f_dim_1 u t1[0]) t0) in"));
+        self.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} in"));
+      }
+      (4, 4) => {
+        self.cfg.emit_arg_shapes = true;
+        self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
+        self.pre_append(format!(r"def f_inner t_0 t_1 {{%0.s**}} {{%1.s**}} {{%2.s**}} = if {{%0.s[3]}} == {{%1.s[3]}} then (\t0 t1 -> map2 (\u v -> ({}) ({}.{} u) ({}.{} v)) (t0 :> [{{%2.s[3]}}]{}) (t1 :> [{{%2.s[3]}}]{})) t_0 t_1 else if {{%0.s[3]}} == 1 then (\t0 t1 -> map (\v -> ({}) ({}.{} t0[0]) ({}.{} v)) (t1 :> [{{%2.s[3]}}]{})) t_0 t_1 else (\t0 t1 -> map (\u -> ({}) ({}.{} u) ({}.{} t1[0])) (t0 :> [{{%2.s[3]}}]{})) t_0 t_1",
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            arg0.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            lam,
+            dtype.format_futhark(), arg0.dtype.format_futhark(),
+            dtype.format_futhark(), arg1.dtype.format_futhark(),
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f_dim_2 t_0 t_1 {{%0.s**}} {{%1.s**}} {{%2.s**}} = if {{%0.s[2]}} == {{%1.s[2]}} then (\t0 t1 -> map2 (\u v -> f_inner u v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[2]}}][{{%0.s[3]}}]{}) (t1 :> [{{%2.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else if {{%0.s[2]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t1 :> [{{%2.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else (\t0 t1 -> map (\u -> f_inner u t1[0] {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[2]}}][{{%0.s[3]}}]{})) t_0 t_1",
+            arg0.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f_dim_1 t_0 t_1 {{%0.s**}} {{%1.s**}} {{%2.s**}} = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> f_dim_2 u v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[1]}}][{{%0.s[2]}}][{{%0.s[3]}}]{}) (t1 :> [{{%2.s[1]}}][{{%1.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> f_dim_2 t0[0] v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t1 :> [{{%2.s[1]}}][{{%1.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else (\t0 t1 -> map (\u -> f_dim_2 u t1[0] {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[1]}}][{{%0.s[2]}}][{{%0.s[3]}}]{})) t_0 t_1",
+            arg0.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f_outer t_0 t_1 {{%0.s**}} {{%1.s**}} {{%2.s**}} = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_dim_1 u v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[0]}}][{{%0.s[1]}}][{{%0.s[2]}}][{{%0.s[3]}}]{}) (t1 :> [{{%2.s[0]}}][{{%1.s[1]}}][{{%1.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_dim_1 t0[0] v {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t1 :> [{{%2.s[0]}}][{{%1.s[1]}}][{{%1.s[2]}}][{{%1.s[3]}}]{})) t_0 t_1 else (\t0 t1 -> map (\u -> f_dim_1 u t1[0] {{%0.s*}} {{%1.s*}} {{%2.s*}}) (t0 :> [{{%2.s[0]}}][{{%0.s[1]}}][{{%0.s[2]}}][{{%0.s[3]}}]{})) t_0 t_1",
+            arg0.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg1.dtype.format_futhark(),
+            arg0.dtype.format_futhark(),
+        ));
+        self.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} {{%0.s*}} {{%1.s*}} {{%2.s*}} in"));
+      }
+      _ => {
+        println!("WARNING: FutharkThunkCode::append_nd_broadcast_map2: not implemented: {:?} {:?}", arg0, arg1);
+        return Err(FutharkGenErr::NotImpl);
+      }
+    }
+    Ok(())
+  }
+
+  pub fn nd_broadcast_map2<S: Borrow<str>>(arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    let mut code = FutharkThunkCode::default();
+    code.append_nd_broadcast_map2(arg0, arg1, lam)?;
+    code.into()
+  }
+
+  pub fn append_nd_broadcast_map2<S: Borrow<str>>(&mut self, arg0: Dim, arg1: Dim, lam: S) -> Result<(), FutharkGenErr> {
+    let lam = lam.borrow();
+    let dtype = arg0.dtype.max(arg1.dtype).unwrap();
+    match (arg0.ndim(), arg1.ndim()) {
+      (2, 2) => {
+        self.cfg.emit_arg_shapes = true;
+        self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
+        self.pre_append(format!(r"def f0_inner t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[1]}} == {{%2.s[1]}} then t_0 :> [{{%2.s[1]}}]{} else (\t -> replicate {{%2.s[1]}} t[0]) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f0_outer t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[0]}} == {{%2.s[0]}} then (\t -> map (\u -> f0_inner u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}]{} else (\t -> replicate {{%2.s[0]}} (f0_inner t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_inner t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[1]}} == {{%2.s[1]}} then t_0 :> [{{%2.s[1]}}]{} else (\t -> replicate {{%2.s[1]}} t[0]) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_outer t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[0]}} == {{%2.s[0]}} then (\t -> map (\u -> f1_inner u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}]{} else (\t -> replicate {{%2.s[0]}} (f1_inner t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.append(format!(r"let t0 = flatten (f0_outer {{%0}} {{%0.s*}} {{%2.s*}}) in"));
+        self.append(format!(r"let t1 = flatten (f1_outer {{%1}} {{%1.s*}} {{%2.s*}}) in"));
+        self.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        self.append(format!(r"let {{%2}} = unflatten t2 in"));
+      }
+      (4, 4) => {
+        self.cfg.emit_arg_shapes = true;
+        self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
+        self.pre_append(format!(r"def f0_dim_3 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[3]}} == {{%2.s[3]}} then t_0 :> [{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[3]}} t[0]) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f0_dim_2 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[2]}} == {{%2.s[2]}} then (\t -> map (\u -> f0_dim_3 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[2]}} (f0_dim_3 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f0_dim_1 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[1]}} == {{%2.s[1]}} then (\t -> map (\u -> f0_dim_2 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[1]}} (f0_dim_2 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f0_outer t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[0]}} == {{%2.s[0]}} then (\t -> map (\u -> f0_dim_1 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[0]}} (f0_dim_1 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg0.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_dim_3 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[3]}} == {{%2.s[3]}} then t_0 :> [{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[3]}} t[0]) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_dim_2 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[2]}} == {{%2.s[2]}} then (\t -> map (\u -> f1_dim_3 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[2]}} (f1_dim_3 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_dim_1 t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[1]}} == {{%2.s[1]}} then (\t -> map (\u -> f1_dim_2 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[1]}} (f1_dim_2 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.pre_append(format!(r"def f1_outer t_0 {{%0.s**}} {{%2.s**}} = if {{%0.s[0]}} == {{%2.s[0]}} then (\t -> map (\u -> f1_dim_1 u {{%0.s*}} {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{} else (\t -> replicate {{%2.s[0]}} (f1_dim_1 t[0] {{%0.s*}} {{%2.s*}})) t_0",
+            arg1.dtype.format_futhark(),
+        ));
+        self.append(format!(r"let t0 = flatten_4d (f0_outer {{%0}} {{%0.s*}} {{%2.s*}}) in"));
+        self.append(format!(r"let t1 = flatten_4d (f1_outer {{%1}} {{%1.s*}} {{%2.s*}}) in"));
+        self.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        self.append(format!(r"let {{%2}} = unflatten_4d t2 in"));
+      }
+      _ => {
+        println!("WARNING: FutharkThunkCode::append_nd_broadcast_map2: not implemented: {:?} {:?}", arg0, arg1);
+        return Err(FutharkGenErr::NotImpl);
+      }
+    }
+    Ok(())
+  }
+
+  pub fn pre_append<S: Into<String>>(&mut self, line: S) {
+    self.head.push(line.into());
+  }
+
   pub fn append<S: Into<String>>(&mut self, line: S) {
     self.body.push(line.into());
   }
@@ -696,7 +886,7 @@ impl FutharkThunkCode {
 pub struct FutharkThunkObject<B: FutBackend> {
   pub obj:      FutObject<B>,
   pub consts:   Vec<(PAddr, StableCell)>,
-  pub out0_tag: Option<(u16, TagUnifier)>,
+  pub out0_tag: Option<(u32, TagUnifier)>,
 }
 
 pub trait FutharkThunkImpl_<B: FutBackend> {
@@ -936,6 +1126,7 @@ pub struct FutharkThunkBuildConfig {
   // FIXME
   pub emit_arg_shapes: bool,
   pub emit_out0_shape: bool,
+  pub emit_out0_shape_param: bool,
 }
 
 impl Default for FutharkThunkBuildConfig {
@@ -944,6 +1135,7 @@ impl Default for FutharkThunkBuildConfig {
       // FIXME
       emit_arg_shapes: false,
       emit_out0_shape: false,
+      emit_out0_shape_param: false,
     }
   }
 }
@@ -953,6 +1145,7 @@ impl FutharkThunkBuildConfig {
     FutharkThunkBuildConfig{
       emit_arg_shapes:  self.emit_arg_shapes || rhs.emit_arg_shapes,
       emit_out0_shape:  self.emit_out0_shape || rhs.emit_out0_shape,
+      emit_out0_shape_param:  self.emit_out0_shape_param || rhs.emit_out0_shape_param,
     }
   }
 }
@@ -960,7 +1153,78 @@ impl FutharkThunkBuildConfig {
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, mut cfg: FutharkThunkBuildConfig, rst: Counter) {
     cfg = self.code.cfg.merge(cfg);
+    let mut pats = Vec::new();
+    let mut reps = Vec::new();
+    for k in 0 .. self.abi.arityin {
+      pats.push(format!(r"{{%{}}}", k));
+      reps.push(format!(r"x_{}", k));
+      if cfg.emit_arg_shapes {
+        let dim = self.spec_dim[k as usize];
+        for d in 0 .. dim.ndim {
+          pats.push(format!(r"{{%{}.s[{}]}}", k, d));
+          reps.push(format!(r"x_{}_s_{}", k, d));
+        }
+        pats.push(format!(r"{{%{}.s*}}", k));
+        let mut r = String::new();
+        for d in 0 .. dim.ndim {
+          if d > 0 {
+            write!(&mut r, r" ").unwrap();
+          }
+          write!(&mut r, r"x_{}_s_{}", k, d).unwrap();
+        }
+        reps.push(r);
+        pats.push(format!(r"{{%{}.s**}}", k));
+        let mut r = String::new();
+        for d in 0 .. dim.ndim {
+          if d > 0 {
+            write!(&mut r, r" ").unwrap();
+          }
+          write!(&mut r, r"(x_{}_s_{}: i64)", k, d).unwrap();
+        }
+        reps.push(r);
+      }
+    }
+    for k in 0 .. self.abi.arityout {
+      pats.push(format!(r"{{%{}}}", self.abi.arityin + k));
+      reps.push(format!(r"y_{}", k));
+      if k == 0 && cfg.emit_out0_shape {
+        let dim = self.spec_dim[self.abi.arityin as usize];
+        for d in 0 .. dim.ndim {
+          pats.push(format!(r"{{%{}.s[{}]}}", self.abi.arityin + k, d));
+          reps.push(format!(r"y_{}_s_{}", k, d));
+        }
+        pats.push(format!(r"{{%{}.s*}}", self.abi.arityin + k));
+        let mut r = String::new();
+        for d in 0 .. dim.ndim {
+          if d > 0 {
+            write!(&mut r, r" ").unwrap();
+          }
+          write!(&mut r, r"y_{}_s_{}", k, d).unwrap();
+        }
+        reps.push(r);
+        pats.push(format!(r"{{%{}.s**}}", self.abi.arityin + k));
+        let mut r = String::new();
+        for d in 0 .. dim.ndim {
+          if d > 0 {
+            write!(&mut r, r" ").unwrap();
+          }
+          write!(&mut r, r"(y_{}_s_{}: i64)", k, d).unwrap();
+        }
+        reps.push(r);
+      }
+    }
+    assert_eq!(pats.len(), reps.len());
+    let matcher = AhoCorasick::new(&pats).unwrap();
     let mut s = String::new();
+    let mut out_buf = Vec::new();
+    for line in self.code.head.iter() {
+      out_buf.clear();
+      matcher.try_stream_replace_all(line.as_bytes(), &mut out_buf, &reps).unwrap();
+      let out_line = from_utf8(&out_buf).unwrap();
+      s.push_str(out_line);
+      write!(&mut s, "\n").unwrap();
+    }
+    drop(out_buf);
     write!(&mut s, "entry kernel").unwrap();
     if cfg.emit_arg_shapes {
       for k in 0 .. self.abi.arityin {
@@ -970,7 +1234,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         }
       }
     }
-    if cfg.emit_out0_shape {
+    if cfg.emit_out0_shape && !cfg.emit_out0_shape_param {
       assert_eq!(self.abi.arityout, 1);
       let dim = self.spec_dim[self.abi.arityin as usize];
       for d in 0 .. dim.ndim {
@@ -989,6 +1253,16 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       match mode {
         ThunkMode::Apply0 => {
           let dim = self.spec_dim[self.abi.arityin as usize];
+          if cfg.emit_out0_shape_param {
+            let np = self.abi.num_param();
+            for d in 0 .. dim.ndim {
+              // FIXME FIXME: don't push param here...
+              self.abi.push_param(np as u16 + d as u16, FutAbiScalarType::I64);
+              write!(&mut s, " (y_{}_s_{}: i64)", 0, d).unwrap();
+            }
+            // FIXME
+            //self.abi.set_emit_out0_shape_param(true);
+          }
           if cfg.emit_out0_shape {
             write!(&mut s, " : {}", _to_futhark_entry_out0_type(dim)).unwrap();
           } else {
@@ -1045,32 +1319,6 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         _ => unimplemented!()
       }
     }
-    let mut pats = Vec::new();
-    let mut reps = Vec::new();
-    for k in 0 .. self.abi.arityin {
-      pats.push(format!("{{%{}}}", k));
-      reps.push(format!("x_{}", k));
-      if cfg.emit_arg_shapes {
-        let dim = self.spec_dim[k as usize];
-        for d in 0 .. dim.ndim {
-          pats.push(format!("{{%{}.s[{}]}}", k, d));
-          reps.push(format!("x_{}_s_{}", k, d));
-        }
-      }
-    }
-    for k in 0 .. self.abi.arityout {
-      pats.push(format!("{{%{}}}", self.abi.arityin + k));
-      reps.push(format!("y_{}", k));
-      if k == 0 && cfg.emit_out0_shape {
-        let dim = self.spec_dim[self.abi.arityin as usize];
-        for d in 0 .. dim.ndim {
-          pats.push(format!("{{%{}.s[{}]}}", self.abi.arityin + k, d));
-          reps.push(format!("y_{}_s_{}", k, d));
-        }
-      }
-    }
-    assert_eq!(pats.len(), reps.len());
-    let matcher = AhoCorasick::new(&pats).unwrap();
     let mut out_buf = Vec::new();
     for line in self.code.body.iter() {
       out_buf.clear();
@@ -1257,6 +1505,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       }
       _ => panic!("bug")
     };
+    assert_eq!(extra, 0);
     let mut arg_ty_ = Vec::with_capacity((self.abi.arityin + extra) as usize);
     let mut arg_arr = Vec::with_capacity((self.abi.arityin + extra) as usize);
     for k in 0 .. self.abi.arityin as usize {
@@ -1356,11 +1605,25 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let t0 = Stopwatch::tl_stamp();
     obj.reset();
     // FIXME FIXME: pre-entry setup.
-    /*// FIXME FIXME: param.
+    // FIXME FIXME: param.
     let np = self.abi.num_param();
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
-    param.resize(np, FutAbiScalar::Empty);
-    spec_.set_param(&mut param);*/
+    //param.resize(np, FutAbiScalar::Empty);
+    //spec_.set_param(&mut param);
+    if np == 0 && self.param.len() == 0 {
+    } else if np == 2 && self.param.len() == 0 {
+      // FIXME FIXME: hack.
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
+    } else if np == 4 && self.param.len() == 0 {
+      // FIXME FIXME: hack.
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[2]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[3]));
+    } else {
+      unimplemented!();
+    }
     /*obj.unify_abi(self.abi).unwrap();*/
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
@@ -1380,7 +1643,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       gpu.mem_pool.free_list.borrow_mut().clear();
       (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
     });
-    let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
+    //let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
+    let o_ret = obj.enter_kernel(&self.abi, &param, &arg_arr, &mut out_arr);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime error");
@@ -1668,7 +1932,8 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     // FIXME FIXME: pre-entry setup.
     obj.reset();
     /*obj.unify_abi(self.abi).unwrap();*/
-    let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_arr);
+    let o_ret = obj.enter_kernel(&self.abi, &self.param, &arg_arr, &mut out_arr);
+    //let o_ret = obj.enter_kernel(self.abi.arityin + 1, 1, &self.param, &arg_arr, &mut out_arr);
     if o_ret.is_err() || (obj.may_fail() && obj.sync().is_err()) {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::accumulate: runtime error");
