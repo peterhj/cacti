@@ -3,7 +3,7 @@ use crate::cell::*;
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
-use crate::pctx::{Locus};
+use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::{SpineRet};
 use crate::thunk::op::*;
 
@@ -1553,6 +1553,31 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn mem_init_yield_with(&self, _: ()) {
     panick_wrap(|| self.mem_init_yield_())
+  }
+
+  #[track_caller]
+  fn get_mem(&self) -> MemReg {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let x = *self.borrow();
+      let xclk = ctx_lookup_clk(x);
+      match ctx.env.borrow_mut().pread_ref(x, xclk) {
+        None => panic!("bug"),
+        Some(e) => {
+          match e.cel_ {
+            &mut Cell_::Phy(.., ref mut cel_) => {
+              // FIXME FIXME
+              let pm = PMach::NvGpu;
+              let addr = cel_.get(x, xclk, &e.ty, Locus::Mem, pm);
+              TL_PCTX.with(|pctx| {
+                let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                icel.as_mem_reg().unwrap()
+              })
+            }
+            _ => panic!("bug")
+          }
+        }
+      }
+    }))
   }
 
   /*#[track_caller]

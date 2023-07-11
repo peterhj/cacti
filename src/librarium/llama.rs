@@ -5,6 +5,33 @@ use crate::util::pickle::*;
 
 use std::borrow::{Borrow};
 
+// This implementation of the llama architecture is derived
+// (with our own simplifications/modifications/optimizations)
+// from the model code by Eleuther/HuggingFace:
+
+/* Copyright 2022 EleutherAI and the HuggingFace Inc. team. All rights reserved.
+
+This code is based on EleutherAI's GPT-NeoX library and the GPT-NeoX
+and OPT implementations in this library. It has been modified from its
+original forms to accommodate minor architectural differences compared
+to GPT-NeoX and OPT used by the Meta AI team that trained the model.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License. */
+
+// The hyperparameters for OpenLLaMa are derived from the
+// original model code by Xinyang Geng and Hao Liu, and is
+// distributed according to the Apache 2.0 license.
+
 #[derive(Clone, Copy, Debug)]
 pub struct LlamaConfig {
   pub num_layer: i64,
@@ -40,6 +67,20 @@ impl LlamaConfig {
       head_dim:   128,
       num_head:   32,
       mlp_inner_dim:  11008,
+      seq_cap:    2048,
+      ubat_sz:    1,
+      rms_norm_eps:   1.0e-6,
+      dtype:      f16::dtype(),
+    }
+  }
+
+  pub fn open_llama_13b() -> LlamaConfig {
+    LlamaConfig{
+      num_layer:  40,
+      tok_dim:    32000,
+      head_dim:   128,
+      num_head:   40,
+      mlp_inner_dim:  13824,
       seq_cap:    2048,
       ubat_sz:    1,
       rms_norm_eps:   1.0e-6,
@@ -84,8 +125,8 @@ impl From<LlamaConfig> for Llama {
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
     assert!(tok_dim <= u16::max_value() as i64 + 1);
-    //let cos = StableCell::array([1, seq_cap, 1, head_dim], f16::dtype());
-    //let sin = StableCell::array([1, seq_cap, 1, head_dim], f16::dtype());
+    //let cos = StableCell::array([seq_cap, head_dim], f16::dtype());
+    //let sin = StableCell::array([seq_cap, head_dim], f16::dtype());
     let cos = None;
     let sin = None;
     let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
@@ -96,8 +137,8 @@ impl From<LlamaConfig> for Llama {
       let v = StableCell::array([inner_dim, inner_dim], f16::dtype());
       let o = StableCell::array([inner_dim, inner_dim], f16::dtype());
       let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
       let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
+      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
       let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
       let pre_norm = StableCell::array([inner_dim], f16::dtype());
       let post_norm = StableCell::array([inner_dim], f16::dtype());
@@ -119,8 +160,8 @@ impl Llama {
       matcher.insert((i, "attn", "v_proj"), self.layers[i].v.clone());
       matcher.insert((i, "attn", "o_proj"), self.layers[i].o.clone());
       matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
-      matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
       matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
+      matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
       matcher.insert((i, "inv_freq"), self.layers[i].inv_freq.clone());
       matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
       matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
@@ -191,21 +232,14 @@ impl Llama {
       (-rx).inner_concat(lx)
     };*/
     let symplectic_embed = |q: CellPtr, k: CellPtr, | {
-      //let ubat_sz = self.cfg.ubat_sz;
       let seq_cap = self.cfg.seq_cap;
-      //let num_head = self.cfg.num_head;
       let head_dim = self.cfg.head_dim;
-      //let dtype = self.cfg.dtype;
       let cos = self.cos.as_ref().unwrap()
                .new_shape([1, seq_cap, 1, head_dim]);
       let sin = self.sin.as_ref().unwrap()
                .new_shape([1, seq_cap, 1, head_dim]);
-      //let q = q.new_shape([ubat_sz * seq_cap * num_head, head_dim]);
-      //let k = k.new_shape([ubat_sz * seq_cap * num_head, head_dim]);
       let q = (q * cos) + (q.inner_symplectic_map() * sin);
       let k = (k * cos) + (k.inner_symplectic_map() * sin);
-      //let q = q.new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      //let k = k.new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       (q, k)
     };
     let ubat_sz = self.cfg.ubat_sz;
@@ -215,6 +249,7 @@ impl Llama {
     let inner_dim = num_head * head_dim;
     let mlp_inner_dim = self.cfg.mlp_inner_dim;
     let tok_dim = self.cfg.tok_dim;
+    let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
     let mut stream = *in_tok.borrow();
     /*stream = stream.inner_one_hot(tok_dim, f16::dtype());
@@ -225,9 +260,7 @@ impl Llama {
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
     // TODO TODO
-    for i in 0 .. 1 {
-      // FIXME FIXME: layer norm.
-      //let pre_nrm = stream;
+    for i in 0 .. num_layer as usize {
       let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
                   .new_shape([ubat_sz * seq_cap, num_head * head_dim])
@@ -241,8 +274,6 @@ impl Llama {
                   .new_shape([ubat_sz * seq_cap, num_head * head_dim])
                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].v, [inner_dim, inner_dim], true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      // FIXME FIXME: rotary embedding.
-      /*let (vcos, vsin) = rotational_embed(&v_proj, );*/
       let (q_proj, k_proj) = symplectic_embed(q_proj, k_proj);
       let q_proj = q_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let k_proj = k_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
@@ -260,31 +291,34 @@ impl Llama {
       let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, head_dim], false);
       */
       let pad_head_dim = ((head_dim + 8 - 1) / 8) * 8;
-      let v_proj = v_proj
-                  .block_pad([seq_cap, pad_head_dim], f16::zero())
-                  .new_shape([ubat_sz * seq_cap, num_head * pad_head_dim]);
-      let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, pad_head_dim], false)
-                  .new_shape([ubat_sz, seq_cap, num_head, pad_head_dim])
-                  .block_unpad([seq_cap, head_dim])
-                  .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let o_proj = v_attn.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[0].o, [inner_dim, inner_dim], true)
-                         .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      let v_attn = if head_dim == pad_head_dim {
+        unimplemented!();
+      } else {
+        let v_proj = v_proj
+                    .block_pad([seq_cap, pad_head_dim], f16::zero())
+                    .new_shape([ubat_sz * seq_cap, num_head * pad_head_dim]);
+        let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, pad_head_dim], false)
+                    .new_shape([ubat_sz, seq_cap, num_head, pad_head_dim])
+                    .block_unpad([seq_cap, head_dim])
+                    .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+        v_attn
+      };
+      let o_proj = v_attn.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].o, [inner_dim, inner_dim], true)
+                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
-      // FIXME FIXME: post layer norm, mlp.
-      //let post_nrm = stream;
       let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
       let up_proj = post_nrm
                    .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[0].up, [mlp_inner_dim, inner_dim], true);
+                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].up, [mlp_inner_dim, inner_dim], true);
       let gate_proj = post_nrm
                      .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                     .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[0].gate, [mlp_inner_dim, inner_dim], true);
+                     .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].gate, [mlp_inner_dim, inner_dim], true);
       // FIXME: intermediate activation dtype.
       //let gate_proj = gate_proj.cast(f32::dtype()).standard_silu().cast(f16::dtype());
       let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
       let down_proj = gate_up
-                     .block_mm([ubat_sz * seq_cap, mlp_inner_dim], false, &self.layers[0].down, [inner_dim, mlp_inner_dim], true)
+                     .block_mm([ubat_sz * seq_cap, mlp_inner_dim], false, &self.layers[i].down, [inner_dim, mlp_inner_dim], true)
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }

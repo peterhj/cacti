@@ -31,13 +31,15 @@ pub struct PickleDir {
 }
 
 impl PickleDir {
-  pub fn from<P: Into<PathBuf>>(p: P) -> PickleDir {
-    PickleDir{
+  pub fn from<P: Into<PathBuf>>(p: P) -> Result<PickleDir, PickleDirErr> {
+    let mut this = PickleDir{
       dir_path: p.into(),
       model_paths: Vec::new(),
       tensor_key: HashSet::new(),
       tensor_map: HashMap::new(),
-    }
+    };
+    this._reload()?;
+    Ok(this)
   }
 
   pub fn _reload(&mut self) -> Result<(), PickleDirErr> {

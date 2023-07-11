@@ -36,6 +36,7 @@ dependencies = [
  "repugnant_pickle",
  "rustc_serialize",
  "safetensor_serialize",
+ "sentencepiece_ffi",
  "smol_str",
 ]
 
@@ -73,6 +74,13 @@ version = "1.0.79"
 [[package]]
 name = "cfg_if"
 version = "1.0.0"
+
+[[package]]
+name = "cmake"
+version = "0.1.50"
+dependencies = [
+ "cc",
+]
 
 [[package]]
 name = "crc32fast"
@@ -173,6 +181,15 @@ name = "safetensor_serialize"
 version = "0.3.2"
 dependencies = [
  "rustc_serialize",
+]
+
+[[package]]
+name = "sentencepiece_ffi"
+version = "0.11.1"
+dependencies = [
+ "cc",
+ "cmake",
+ "libc",
 ]
 
 [[package]]

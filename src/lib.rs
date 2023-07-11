@@ -13,6 +13,8 @@ extern crate libc;
 extern crate once_cell;
 extern crate repugnant_pickle;
 extern crate safetensor_serialize;
+#[cfg(feature = "librarium")]
+extern crate sentencepiece_ffi;
 extern crate smol_str;
 
 pub use crate::prelude::*;

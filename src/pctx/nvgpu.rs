@@ -278,6 +278,15 @@ pub struct NvGpuPCtx {
   // TODO
 }
 
+impl Drop for NvGpuPCtx {
+  fn drop(&mut self) {
+    println!("DEBUG: NvGpuPCtx::drop: mem pool front={} back={}",
+        self.mem_pool.front_cursor.get(),
+        self.mem_pool.back_cursor.get(),
+    );
+  }
+}
+
 impl PCtxImpl for NvGpuPCtx {
   fn pmach(&self) -> PMach {
     PMach::NvGpu
@@ -433,6 +442,24 @@ impl NvGpuPCtx {
             dst_dptr, dst_sz, src_ptr as usize, src_sz, sz);
         self.compute.sync().unwrap();
         cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
+        self.compute.sync().unwrap();
+      }
+      (Locus::Mem, Locus::VMem) => {
+        let (dst_ptr, dst_sz) = match self.lookup_reg(dst) {
+          Some(NvGpuInnerReg::Mem{ptr, size}) => (ptr, size),
+          _ => panic!("bug")
+        };
+        let (src_dptr, src_sz) = match self.lookup_reg(src) {
+          Some(NvGpuInnerReg::VMem{dptr, size}) => (dptr, size),
+          _ => panic!("bug")
+        };
+        /*assert_eq!(dst_sz, src_sz);*/
+        assert!(dst_sz >= sz);
+        assert!(src_sz >= sz);
+        println!("DEBUG: NvGpuPCtx::hard_copy: dst ptr=0x{:016x} sz={} src dptr=0x{:016x} sz={} copy sz={}",
+            dst_ptr as usize, dst_sz, src_dptr, src_sz, sz);
+        self.compute.sync().unwrap();
+        cuda_memcpy_d2h_async(dst_ptr, src_dptr, sz, &self.compute).unwrap();
         self.compute.sync().unwrap();
       }
       _ => unimplemented!()

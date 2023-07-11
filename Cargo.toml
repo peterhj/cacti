@@ -48,6 +48,7 @@ repugnant_pickle = { path = "../repugnant_pickle" }
 rustc_serialize = { path = "../rustc_serialize" }
 #ryu = { path = "../ryu" }
 safetensor_serialize = { path = "../safetensor_serialize" }
+sentencepiece_ffi = { path = "../sentencepiece_ffi" }
 smol_str = { path = "../smol_str", default-features = false }
 
 #[dev-dependencies]
