@@ -375,11 +375,11 @@ impl PCtx {
     None
   }
 
-  pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr) {
+  pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr, sz: usize) {
     match (dst_pm, src_pm) {
       #[cfg(feature = "nvgpu")]
       (PMach::NvGpu, PMach::NvGpu) => {
-        self.nvgpu.as_ref().unwrap().hard_copy(dst_loc, dst, src_loc, src)
+        self.nvgpu.as_ref().unwrap().hard_copy(dst_loc, dst, src_loc, src, sz)
       }
       _ => {
         panic!("bug: PCtx::hard_copy: unimplemented: dst pm={:?} src pm={:?}", dst_pm, src_pm)

@@ -65,8 +65,8 @@ pub struct LlamaLayer {
 #[derive(Clone)]
 pub struct Llama {
   pub cfg: LlamaConfig,
-  //pub cos: StableCell,
-  //pub sin: StableCell,
+  pub cos: Option<StableCell>,
+  pub sin: Option<StableCell>,
   pub embed: StableCell,
   pub layers: Vec<LlamaLayer>,
   pub head_norm: StableCell,
@@ -86,6 +86,8 @@ impl From<LlamaConfig> for Llama {
     assert!(tok_dim <= u16::max_value() as i64 + 1);
     //let cos = StableCell::array([1, seq_cap, 1, head_dim], f16::dtype());
     //let sin = StableCell::array([1, seq_cap, 1, head_dim], f16::dtype());
+    let cos = None;
+    let sin = None;
     let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
     let mut layers = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
@@ -103,7 +105,7 @@ impl From<LlamaConfig> for Llama {
     }
     let head_norm = StableCell::array([inner_dim], f16::dtype());
     let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype());
-    Llama{cfg, embed, layers, head_norm, lm_head}
+    Llama{cfg, cos, sin, embed, layers, head_norm, lm_head}
   }
 }
 
@@ -137,8 +139,30 @@ impl Llama {
     LanguageModelIn{in_tok, in_lm_tok}
   }
 
-  pub fn init(&self) {
+  pub fn init(&mut self) {
     // TODO
+    let init_embed = || {
+      //let ubat_sz = self.cfg.ubat_sz;
+      let seq_cap = self.cfg.seq_cap;
+      //let num_head = self.cfg.num_head;
+      let head_dim = self.cfg.head_dim;
+      let dtype = self.cfg.dtype;
+      let pos = iota(seq_cap).cast(f32::dtype());
+      let freq = pos.outer_mul(&self.layers[0].inv_freq);
+      let freq2 = freq.inner_concat(freq);
+      let cos = freq2.cos().cast(dtype);
+      let sin = freq2.sin().cast(dtype);
+      (cos, sin)
+    };
+    let (cos, sin) = init_embed();
+    self.cos = Some(cos.keep());
+    self.sin = Some(sin.keep());
+  }
+
+  pub fn cache(&self) {
+    // TODO
+    self.cos.as_ref().unwrap().cache();
+    self.sin.as_ref().unwrap().cache();
   }
 
   pub fn apply<X: Borrow<CellPtr>, Y: Borrow<CellPtr>>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
@@ -160,27 +184,30 @@ impl Llama {
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       y
     };
-    /*
     // FIXME FIXME
-    let init_embed = || {
-      let pos = iota(seq_cap).cast(dtype);
-      let freq = pos.outer_mul(inv_freq);
-      let freq2 = freq.inner_concat(freq);
-      let cos = freq2.cos().new_shape([1, seq_cap, 1, head_dim]);
-      let sin = freq2.sin().new_shape([1, seq_cap, 1, head_dim]);
-      (cos, sin)
-    };
-    let inner_symplectic_map = |x: CellPtr| {
+    /*let inner_symplectic_map = |x: CellPtr| {
       let xty = x.type_();
       let (lx, rx) = x.inner_split(xty.inner_len() / 2);
       (-rx).inner_concat(lx)
+    };*/
+    let symplectic_embed = |q: CellPtr, k: CellPtr, | {
+      //let ubat_sz = self.cfg.ubat_sz;
+      let seq_cap = self.cfg.seq_cap;
+      //let num_head = self.cfg.num_head;
+      let head_dim = self.cfg.head_dim;
+      //let dtype = self.cfg.dtype;
+      let cos = self.cos.as_ref().unwrap()
+               .new_shape([1, seq_cap, 1, head_dim]);
+      let sin = self.sin.as_ref().unwrap()
+               .new_shape([1, seq_cap, 1, head_dim]);
+      //let q = q.new_shape([ubat_sz * seq_cap * num_head, head_dim]);
+      //let k = k.new_shape([ubat_sz * seq_cap * num_head, head_dim]);
+      let q = (q * cos) + (q.inner_symplectic_map() * sin);
+      let k = (k * cos) + (k.inner_symplectic_map() * sin);
+      //let q = q.new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      //let k = k.new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      (q, k)
     };
-    let rotational_pos_embed = |q: CellPtr, k: CellPtr, | {
-      let q_ = (q * self.cos) + (q.inner_symplectic_map() * self.sin);
-      let k_ = (k * self.cos) + (k.inner_symplectic_map() * self.sin);
-      (q_, k_)
-    };
-    */
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
@@ -215,10 +242,8 @@ impl Llama {
                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].v, [inner_dim, inner_dim], true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       // FIXME FIXME: rotary embedding.
-      /*
-      let (vcos, vsin) = rotational_embed(&v_proj, );
-      let (q_proj, k_proj) = rotational_pos_embed((q_proj, k_proj, vcos, vsin, );
-      */
+      /*let (vcos, vsin) = rotational_embed(&v_proj, );*/
+      let (q_proj, k_proj) = symplectic_embed(q_proj, k_proj);
       let q_proj = q_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let k_proj = k_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let attn = q_proj

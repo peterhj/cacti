@@ -94,7 +94,7 @@ fn main() {
     rms_norm_eps,
     dtype,
   };
-  let model = Llama::from(cfg);
+  let mut model = Llama::from(cfg);
   let inv_matches = model.match_pickle_dir(&pickdir);
   let input = model.make_input();
   let in_tok = input.in_tok;
@@ -111,12 +111,14 @@ fn main() {
         cel.mem_set_yield_();
       }
       //w.mem_set_yield_();
+      model.init();
     } else {
       //embed.cache();
       for (cel, _) in inv_matches.iter() {
         cel.cache();
       }
       //w.cache();
+      model.cache();
     }
     in_tok.mem_set_yield_();
     input.in_lm_tok.mem_set_yield_();

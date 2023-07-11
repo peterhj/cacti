@@ -415,7 +415,7 @@ impl NvGpuPCtx {
     unimplemented!();
   }
 
-  pub fn hard_copy(&self, dst_loc: Locus, dst: PAddr, src_loc: Locus, src: PAddr) {
+  pub fn hard_copy(&self, dst_loc: Locus, dst: PAddr, src_loc: Locus, src: PAddr, sz: usize) {
     match (dst_loc, src_loc) {
       (Locus::VMem, Locus::Mem) => {
         let (dst_dptr, dst_sz) = match self.lookup_reg(dst) {
@@ -426,11 +426,13 @@ impl NvGpuPCtx {
           Some(NvGpuInnerReg::Mem{ptr, size}) => (ptr, size),
           _ => panic!("bug")
         };
-        assert_eq!(dst_sz, src_sz);
-        println!("DEBUG: NvGpuPCtx::hard_copy: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
-            dst_dptr, src_ptr as usize, src_sz);
+        /*assert_eq!(dst_sz, src_sz);*/
+        assert!(dst_sz >= sz);
+        assert!(src_sz >= sz);
+        println!("DEBUG: NvGpuPCtx::hard_copy: dst dptr=0x{:016x} sz={} src ptr=0x{:016x} sz={} copy sz={}",
+            dst_dptr, dst_sz, src_ptr as usize, src_sz, sz);
         self.compute.sync().unwrap();
-        cuda_memcpy_h2d_async(dst_dptr, src_ptr, src_sz, &self.compute).unwrap();
+        cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
         self.compute.sync().unwrap();
       }
       _ => unimplemented!()

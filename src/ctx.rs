@@ -981,7 +981,7 @@ pub enum Cell_ {
   Phy(RefCell<CellState>, RefCell<CellClosure>, PCell),
   Cow(RefCell<CellState>, RefCell<CellClosure>, CowCell),
   // FIXME
-  //VOp(CellVOp, CellPtr),
+  //VAlias(CellVOp, CellPtr),
   Alias(CellPtr),
   Bot,
 }

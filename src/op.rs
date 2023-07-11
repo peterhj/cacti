@@ -12,7 +12,7 @@ use futhark_syntax::*;
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
 use std::iter::{repeat};
-use std::ops::{AddAssign, BitXor, Index, IndexMut, RangeBounds, Add, Sub, Mul, Div, Neg};
+use std::ops::{AddAssign, BitXor, Index, IndexMut, RangeFull, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
 impl AddAssign<f32> for CellPtr {
@@ -172,6 +172,22 @@ impl BitXor<T_> for CellView {
   }
 }
 
+impl Index<RangeFull> for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn index(&self, _: RangeFull) -> &CellPtr {
+    panick_wrap(|| self)
+  }
+}
+
+impl IndexMut<RangeFull> for CellPtr {
+  #[track_caller]
+  fn index_mut(&mut self, _: RangeFull) -> &mut CellPtr {
+    panick_wrap(|| self)
+  }
+}
+
 impl Index<IRange> for CellPtr {
   type Output = CellViewHandle;
 
@@ -203,8 +219,8 @@ impl Index<[IRange; 2]> for CellPtr {
   fn index(&self, _: [IRange; 2]) -> &CellViewHandle {
     panick_wrap(|| {
       // FIXME
-      CellViewHandle::_from(*self)
-      //unimplemented!();
+      //CellViewHandle::_from(*self)
+      unimplemented!();
     })
   }
 }
@@ -675,7 +691,68 @@ impl Neg for StableCell {
 pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
   fn pow(&self, rhs: R) -> CellPtr {
-    unimplemented!();
+    panick_wrap(|| {
+      unimplemented!();
+    })
+  }
+
+  #[track_caller]
+  fn inner_concat(&self, rhs: R) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerConcatFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*rhs.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn inner_select(&self, rank: R) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: inner_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = InnerSelectFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn inner_inv_select(&self, rank: R, inner_len: i64) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: inner_inv_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = InnerInvSelectFutThunkSpec{inner_len};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
+  fn outer_select(&self, rank: R) -> CellPtr {
+    panick_wrap(|| {
+      let rank = *rank.borrow();
+      let rank_dtype = ctx_lookup_dtype(rank);
+      if !rank_dtype.is_uint() {
+        panic!("ERROR: outer_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
+      }
+      let op = OuterSelectFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(rank);
+      ctx_pop_thunk(op)
+    })
   }
 
   #[track_caller]
@@ -696,9 +773,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
       ctx_push_cell_arg(*rhs.borrow());
-      // FIXME FIXME
-      //ctx_pop_thunk(op)
-      unimplemented!();
+      ctx_pop_thunk(op)
     })
   }
 
@@ -1195,13 +1270,13 @@ pub trait CastOps: Borrow<CellPtr> {
         return x;
       }
       match (org_dtype, new_dtype) {
-        (Dtype::Fp32, Dtype::Fp16) |
+        /*(Dtype::Fp32, Dtype::Fp16) |
         (Dtype::Fp16, Dtype::Fp32) => {
           let op = CastFutThunkSpec{org_dtype, new_dtype};
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
-        }
+        }*/
         (Dtype::Fp32, Dtype::Bfloat16) => {
           let op = CastF32Bf16FutThunkSpec;
           assert!(ctx_clean_arg());
@@ -1220,7 +1295,14 @@ pub trait CastOps: Borrow<CellPtr> {
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        _ => unimplemented!()
+        _ => {
+          // FIXME: other bf16 special cases.
+          let op = CastFutThunkSpec{org_dtype, new_dtype};
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(op)
+        }
+        //_ => unimplemented!()
       }
     })
   }
@@ -1228,7 +1310,7 @@ pub trait CastOps: Borrow<CellPtr> {
 
 impl<L: Borrow<CellPtr>> CastOps for L {}
 
-pub trait GradOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
+/*pub trait GradOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
   fn grad(&self, x: R) -> CellPtr { self.gradr(x) }
 
@@ -1247,7 +1329,7 @@ pub trait GradOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   }
 }
 
-impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> GradOps<R> for L {}
+impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> GradOps<R> for L {}*/
 
 pub trait ArrayOps: Borrow<CellPtr> + Sized {
   #[track_caller]
@@ -1289,6 +1371,18 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
   fn reshape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
 
   #[track_caller]
+  fn _unpack(&self) -> Option<(CellViewType, CellPtr)> {
+    // FIXME
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn _unview(&self) -> (CellViewType, CellPtr, /*Vec<CellVOp>*/) {
+    // FIXME
+    unimplemented!();
+  }
+
+  #[track_caller]
   fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
       if !(inner_len > 0) {
@@ -1302,54 +1396,6 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
       let op = InnerOneHotFutThunkSpec{inner_len, /*org_dtype,*/ new_dtype};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(x);
-      ctx_pop_thunk(op)
-    })
-  }
-
-  #[track_caller]
-  fn inner_select<R: Borrow<CellPtr>>(&self, rank: R) -> CellPtr {
-    panick_wrap(|| {
-      let rank = *rank.borrow();
-      let rank_dtype = ctx_lookup_dtype(rank);
-      if !rank_dtype.is_uint() {
-        panic!("ERROR: inner_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
-      }
-      let op = InnerSelectFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(rank);
-      ctx_pop_thunk(op)
-    })
-  }
-
-  #[track_caller]
-  fn inner_inv_select<R: Borrow<CellPtr>>(&self, rank: R, inner_len: i64) -> CellPtr {
-    panick_wrap(|| {
-      let rank = *rank.borrow();
-      let rank_dtype = ctx_lookup_dtype(rank);
-      if !rank_dtype.is_uint() {
-        panic!("ERROR: inner_inv_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
-      }
-      let op = InnerInvSelectFutThunkSpec{inner_len};
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(rank);
-      ctx_pop_thunk(op)
-    })
-  }
-
-  #[track_caller]
-  fn outer_select<R: Borrow<CellPtr>>(&self, rank: R) -> CellPtr {
-    panick_wrap(|| {
-      let rank = *rank.borrow();
-      let rank_dtype = ctx_lookup_dtype(rank);
-      if !rank_dtype.is_uint() {
-        panic!("ERROR: outer_select: invalid argument: expected dtype uint, actual {:?}", rank_dtype);
-      }
-      let op = OuterSelectFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_push_cell_arg(rank);
       ctx_pop_thunk(op)
     })
   }

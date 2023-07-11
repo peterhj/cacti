@@ -269,6 +269,12 @@ impl MCellPtr {
   }
 }
 
+pub trait BorrowCellPtr {
+  fn _borrow(&self) -> CellPtr;
+}
+
+const VOID_MASK: usize = 0x8000_0000_0000_0000;
+
 enum _Void {}
 
 #[repr(transparent)]
@@ -276,11 +282,17 @@ pub struct CellViewHandle([_Void]);
 
 impl CellViewHandle {
   pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
-    unsafe { &*(from_raw_parts((x.raw_ as usize ^ 0x8000_0000_0000_0000) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
+    unsafe { &*(from_raw_parts((x.raw_ as usize ^ VOID_MASK) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
   }
 
   pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
-    unsafe { &mut *(from_raw_parts_mut((x.raw_ as usize ^ 0x8000_0000_0000_0000) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
+    unsafe { &mut *(from_raw_parts_mut((x.raw_ as usize ^ VOID_MASK) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
+  }
+}
+
+impl BorrowCellPtr for CellViewHandle {
+  fn _borrow(&self) -> CellPtr {
+    CellPtr::from_unchecked((self.0.as_ptr() as usize ^ VOID_MASK) as i32)
   }
 }
 
@@ -982,6 +994,47 @@ impl CellLayout {
   }
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct CellViewType {
+  pub perm:     Vec<i8>,
+  pub base:     Vec<i64>,
+  pub shape:    Vec<i64>,
+  pub oshape:   Vec<i64>,
+  pub dtype:    Dtype,
+}
+
+impl CellViewType {
+  pub fn is_packed(&self) -> bool {
+    let nd = self.shape.len();
+    // FIXME FIXME: index permutation.
+    let mut fakestride = Vec::with_capacity(nd);
+    let mut origstride = Vec::with_capacity(nd);
+    if nd >= 1 {
+      fakestride.push(1);
+      origstride.push(1);
+      /*
+      // FIXME
+      let idx = self.perm[nd - 1];
+      let s = self.shape[idx as usize];
+      fakestride.push((idx, s));
+      origstride.push((nd - 1, 1));
+      */
+    }
+    for d in 1 .. nd {
+      let s = self.shape[nd - d];
+      assert!(s > 0);
+      let og_s = self.oshape[nd - d];
+      assert!(og_s > 0);
+      fakestride.push(s * fakestride[d - 1]);
+      origstride.push(og_s * origstride[d - 1]);
+      if fakestride[d] != origstride[d] {
+        return false;
+      }
+    }
+    true
+  }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CellMode {
@@ -1258,7 +1311,7 @@ impl PCell {
               );
               // FIXME FIXME: only set clock on successful copy.
               TL_PCTX.with(|pctx| {
-                pctx.hard_copy(q_locus, q_pmach, rep.addr.get(), o_loc, o_pm, o_addr);
+                pctx.hard_copy(q_locus, q_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
               });
               rep.clk.set(q_clk);
             }

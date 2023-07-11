@@ -736,7 +736,67 @@ impl FutharkThunkSpec for OuterSelectFutThunkSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OuterMulFutThunkSpec;
 
-// TODO
+impl FutharkThunkSpec for OuterMulFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.outer_mul")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].ndim() != 1 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if 1 != arg[1].ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[0].dtype != arg[1].dtype {
+      return Err(ThunkDimErr::_Bot);
+    }
+    let ndim = 2;
+    let dtype = arg[0].dtype;
+    Ok(Dim{ndim, dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].ndim() != 1 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if 1 != arg[1].ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[0].dtype != arg[1].dtype {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let mut shape = arg[0].shape.clone();
+    shape.push(arg[1].shape[0]);
+    assert_eq!(shape.len(), 2);
+    let dtype = arg[0].dtype;
+    Ok(CellType{shape, dtype})
+  }
+
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match (arg[0].ndim(), arg[1].ndim()) {
+      (1, 1) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = map (\u -> map (\v -> u * v) {{%1}}) {{%0}} in"));
+        code.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct AddScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
@@ -2455,6 +2515,89 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct InnerConcatFutThunkSpec;
+
+impl FutharkThunkSpec for InnerConcatFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_concat")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].ndim() != arg[1].ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[0].dtype != arg[1].dtype {
+      return Err(ThunkDimErr::_Bot);
+    }
+    let ndim = max(1, arg[0].ndim());
+    let dtype = arg[0].dtype;
+    Ok(Dim{ndim, dtype})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].ndim() != arg[1].ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[0].dtype != arg[1].dtype {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let nd = arg[0].ndim() as usize;
+    let mut shape = arg[0].shape.clone();
+    if nd == 0 {
+      shape.push(2);
+    } else {
+      shape[nd - 1] += arg[1].shape[nd - 1];
+    }
+    let dtype = arg[0].dtype;
+    Ok(CellType{shape, dtype})
+  }
+
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    match (arg[0].ndim(), arg[1].ndim()) {
+      (0, 0) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = [{{%0}}, {{%1}}] in"));
+        code.into()
+      }
+      (1, 1) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = {{%0}} ++ {{%1}} in"));
+        code.into()
+      }
+      (2, 2) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = map2 (\tl tr -> tl ++ tr) {{%0}} {{%1}} in"));
+        code.into()
+      }
+      (3, 3) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = map2 (\tl1 tr1 -> map2 (\tl2 tr2 -> tl2 ++ tr2) tl1 tr1) {{%0}} {{%1}} in"));
+        code.into()
+      }
+      (4, 4) => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = map2 (\tl1 tr1 -> map2 (\tl2 tr2 -> map2 (\tl3 tr3 -> tl3 ++ tr3) tl2 tr2) tl1 tr1) {{%0}} {{%1}} in"));
+        code.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct InnerSymplecticMapFutThunkSpec;
 
 impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
@@ -2481,16 +2624,19 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
-    match out.ndim {
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
+    match out[0].ndim {
       0 => {
         unimplemented!();
       }
       1 => {
         let mut code = FutharkThunkCode::default();
-        code.append(format!(r"let a_inner = {{%0.s[0]}} // 2 in"));
-        code.append(format!(r"let (tl, tr) = split a_inner {{%0}} in"));
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[0]}} // 2 in"));
+        code.append(format!(r"let (tl, tr) = split ({{%0}} :> [a_suf + a_suf]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
         code.append(format!(r"let {{%1}} = ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[0]}}]{} in",
             arg[0].dtype.format_futhark(),
         ));
@@ -2498,24 +2644,30 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
       }
       2 => {
         let mut code = FutharkThunkCode::default();
-        code.append(format!(r"let a_inner = {{%0.s[1]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t -> let (tl, tr) = split a_inner t in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[1]}}]{}) {{%0}} in",
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[1]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t -> let (tl, tr) = split (t :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[1]}}]{}) {{%0}} in",
+            arg[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         ));
         code.into()
       }
       3 => {
         let mut code = FutharkThunkCode::default();
-        code.append(format!(r"let a_inner = {{%0.s[2]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> let (tl, tr) = split a_inner t2 in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[2]}}]{}) t1) {{%0}} in",
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[2]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> let (tl, tr) = split (t2 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[2]}}]{}) t1) {{%0}} in",
+            arg[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         ));
         code.into()
       }
       4 => {
         let mut code = FutharkThunkCode::default();
-        code.append(format!(r"let a_inner = {{%0.s[3]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> map (\t3 -> let (tl, tr) = split a_inner t3 in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[3]}}]{}) t2) t1) {{%0}} in",
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[3]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> map (\t3 -> let (tl, tr) = split (t3 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[3]}}]{}) t2) t1) {{%0}} in",
+            arg[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         ));
         code.into()
