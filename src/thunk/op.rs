@@ -194,9 +194,8 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
   }
 }
 
-// FIXME: only need new dtype.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CastFutThunkSpec { pub org_dtype: Dtype, pub new_dtype: Dtype }
+pub struct CastFutThunkSpec { pub new_dtype: Dtype }
 
 impl FutharkThunkSpec for CastFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -222,10 +221,11 @@ impl FutharkThunkSpec for CastFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: self.new_dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    assert_eq!(out[0].dtype, self.new_dtype);
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> {}.{} u",
                                              self.new_dtype.format_futhark(),
-                                             self.org_dtype.format_futhark()))
+                                             arg[0].dtype.format_futhark()))
   }
 }
 
@@ -3192,8 +3192,20 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply");
+    TL_PCTX.with(|pctx| {
+      let gpu = &pctx.nvgpu.as_ref().unwrap();
+      let ret = gpu.compute.sync();
+      match ret {
+        Err(e) => {
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm pre sync error: {:?}", e);
+          Err(ThunkErr::Failure)
+        }
+        Ok(_) => Ok(())
+      }
+    })?;
+    let t0 = Stopwatch::tl_stamp();
     let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
     /*self.alpha.set(1.0);*/
     match &spec.o_scale {
@@ -3367,11 +3379,23 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm pre sync error: {:?}", e);
-          return ThunkRet::Failure;
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: pre gemm sync error: {:?}", e);
+          Err(ThunkErr::Failure)
         }
-        Ok(_) => {}
-      }
+        Ok(_) => Ok(())
+      }?;
+      let t1 = Stopwatch::tl_stamp();
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: pre gemm elapsed: {:.06} s", t1 - t0);
+      TL_CTX.with(|ctx| {
+        if oclk.rst <= 0 {
+          panic!("bug");
+        } else if oclk.rst == 1 {
+          ctx.timing.pregemm1.borrow_mut().push(t1 - t0);
+        } else {
+          ctx.timing.pregemm.borrow_mut().push(t1 - t0);
+        }
+      });
+      let t0 = t1;
       //let tmp_a = self.tmp_a.borrow();
       //let tmp_b = self.tmp_b.borrow();
       //let tmp_c = self.tmp_c.borrow();
@@ -3445,27 +3469,37 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       match ret {
         Err(e) => {
           println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm error: {:?}", e);
-          return ThunkRet::Failure;
+          Err(ThunkErr::Failure)
         }
-        Ok(_) => {}
-      }
+        Ok(_) => Ok(())
+      }?;
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
           println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm sync error: {:?}", e);
-          return ThunkRet::Failure;
+          Err(ThunkErr::Failure)
         }
-        Ok(_) => {}
-      }
+        Ok(_) => Ok(())
+      }?;
+      let t1 = Stopwatch::tl_stamp();
       //drop(tmp_c);
       //drop(tmp_b);
       //drop(tmp_a);
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm OK");
-      ThunkRet::Success
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm OK elapsed: {:.06} s", t1 - t0);
+      TL_CTX.with(|ctx| {
+        if oclk.rst <= 0 {
+          panic!("bug");
+        } else if oclk.rst == 1 {
+          ctx.timing.gemm1.borrow_mut().push(t1 - t0);
+        } else {
+          ctx.timing.gemm.borrow_mut().push(t1 - t0);
+        }
+      });
+      Ok(())
     })
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkRet {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
     let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
     /*self.alpha.set(1.0);*/
     match &spec.o_scale {

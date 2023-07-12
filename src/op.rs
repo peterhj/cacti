@@ -91,82 +91,92 @@ pub struct T;
 pub struct T_(pub i8, pub i8);
 
 impl<'l> BitXor<T> for &'l CellPtr {
-  type Output = CellView;
+  type Output = &'l CellViewHandle;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellView {
+  fn bitxor(self, _: T) -> &'l CellViewHandle {
     panick_wrap(|| {
-      CellView(*self, vec![CellVOp::Swap(-2, -1)])
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(-2, -1)])
+      CellViewHandle::_from(*self)
     })
   }
 }
 
 impl<'l> BitXor<T_> for &'l CellPtr {
-  type Output = CellView;
+  type Output = &'l CellViewHandle;
 
   #[track_caller]
-  fn bitxor(self, t: T_) -> CellView {
+  fn bitxor(self, t: T_) -> &'l CellViewHandle {
     panick_wrap(|| {
-      CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+      CellViewHandle::_from(*self)
     })
   }
 }
 
-impl BitXor<T> for CellPtr {
-  type Output = CellView;
+/*impl BitXor<T> for CellPtr {
+  type Output = CellViewHandle;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellView {
+  fn bitxor(self, _: T) -> CellViewHandle {
     panick_wrap(|| (&self).bitxor(T))
   }
-}
+}*/
 
 impl<'l> BitXor<T> for &'l StableCell {
-  type Output = CellView;
+  type Output = &'l CellViewHandle;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellView {
+  fn bitxor(self, _: T) -> &'l CellViewHandle {
     panick_wrap(|| self.as_ptr_ref().bitxor(T))
   }
 }
 
 impl BitXor<T> for StableCell {
-  type Output = CellView;
+  type Output = CellViewHandle2;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellView {
-    panick_wrap(|| self.as_ptr_ref().bitxor(T))
+  fn bitxor(self, _: T) -> CellViewHandle2 {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+      CellViewHandle2::_from(*self.as_ptr_ref())
+    })
   }
 }
 
-impl BitXor<T_> for CellPtr {
-  type Output = CellView;
+/*impl BitXor<T_> for StableCell {
+  type Output = CellViewHandle;
 
   #[track_caller]
-  fn bitxor(self, t: T_) -> CellView {
+  fn bitxor(self, t: T_) -> CellViewHandle {
     panick_wrap(|| (&self).bitxor(t))
   }
-}
+}*/
 
-impl BitXor<T> for CellView {
-  type Output = CellView;
+impl<'l> BitXor<T> for &'l CellViewHandle {
+  type Output = &'l CellViewHandle;
 
   #[track_caller]
-  fn bitxor(mut self, _: T) -> CellView {
+  fn bitxor(mut self, _: T) -> &'l CellViewHandle {
     panick_wrap(|| {
-      self.1.push(CellVOp::Swap(-2, -1));
+      // FIXME FIXME
+      //self.1.push(CellVOp::Swap(-2, -1));
       self
     })
   }
 }
 
-impl BitXor<T_> for CellView {
-  type Output = CellView;
+impl<'l> BitXor<T_> for &'l CellViewHandle {
+  type Output = &'l CellViewHandle;
 
   #[track_caller]
-  fn bitxor(mut self, t: T_) -> CellView {
+  fn bitxor(mut self, t: T_) -> &'l CellViewHandle {
     panick_wrap(|| {
-      self.1.push(CellVOp::Swap(t.0, t.1));
+      // FIXME FIXME
+      //self.1.push(CellVOp::Swap(t.0, t.1));
       self
     })
   }
@@ -1117,6 +1127,24 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   }*/
 
   #[track_caller]
+  fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
+    panick_wrap(|| {
+      if !(inner_len > 0) {
+        panic!("ERROR: inner_one_hot: invalid parameter: expected inner_len > 0, actual {:?}", inner_len);
+      }
+      let x = *self.borrow();
+      let org_dtype = ctx_lookup_dtype(x);
+      if !org_dtype.is_uint() {
+        panic!("ERROR: inner_one_hot: invalid argument: expected dtype uint, actual {:?}", org_dtype);
+      }
+      let op = InnerOneHotFutThunkSpec{inner_len, /*org_dtype,*/ new_dtype};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(op)
+    })
+  }
+
+  #[track_caller]
   fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
       let op = FlatSumFutThunkSpec;
@@ -1297,7 +1325,7 @@ pub trait CastOps: Borrow<CellPtr> {
         }
         _ => {
           // FIXME: other bf16 special cases.
-          let op = CastFutThunkSpec{org_dtype, new_dtype};
+          let op = CastFutThunkSpec{new_dtype};
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
@@ -1381,29 +1409,11 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
     // FIXME
     unimplemented!();
   }
-
-  #[track_caller]
-  fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
-    panick_wrap(|| {
-      if !(inner_len > 0) {
-        panic!("ERROR: inner_one_hot: invalid parameter: expected inner_len > 0, actual {:?}", inner_len);
-      }
-      let x = *self.borrow();
-      let org_dtype = ctx_lookup_dtype(x);
-      if !org_dtype.is_uint() {
-        panic!("ERROR: inner_one_hot: invalid argument: expected dtype uint, actual {:?}", org_dtype);
-      }
-      let op = InnerOneHotFutThunkSpec{inner_len, /*org_dtype,*/ new_dtype};
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(x);
-      ctx_pop_thunk(op)
-    })
-  }
 }
 
 impl<L: Borrow<CellPtr> + Sized> ArrayOps for L {}
 
-pub trait CtlOps: Borrow<CellPtr> + Sized {
+pub trait Ops_: Borrow<CellPtr> + Sized {
   /*
   #[track_caller]
   fn yield_(self) -> CellPtr {
@@ -1439,7 +1449,7 @@ pub trait CtlOps: Borrow<CellPtr> + Sized {
   }
 }
 
-impl<L: Borrow<CellPtr> + Sized> CtlOps for L {}
+impl<L: Borrow<CellPtr> + Sized> Ops_ for L {}
 
 pub trait Ops: Borrow<CellPtr> + Sized {
   /*fn bar(self) -> Self {
@@ -1464,10 +1474,10 @@ pub trait Ops: Borrow<CellPtr> + Sized {
 
   //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
 
-  #[track_caller]
+  /*#[track_caller]
   fn apply_futhark(&self, lam_src: Cow<'static, str>) -> CellPtr {
     apply_futhark(lam_src, &[self.borrow()])
-  }
+  }*/
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
@@ -1502,24 +1512,24 @@ pub trait Ops: Borrow<CellPtr> + Sized {
     panick_wrap(|| StableCell::from(*self.borrow()))
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn set<X: AsRef<CellPtr>>(&self, _x: X) where Self: Sized {
     unimplemented!();
-  }
+  }*/
 
-  #[track_caller]
+  /*#[track_caller]
   fn unsafe_unseal(self) -> Self {
     unimplemented!();
-  }
+  }*/
 
-  #[track_caller]
+  /*#[track_caller]
   fn unsafe_unseal_init(self) -> Self {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow_mut();
       spine.unseal_mux(*self.borrow());
       self
     }))
-  }
+  }*/
 
   /*#[track_caller]
   fn yield_get_and_set(self) -> Self {
@@ -1555,31 +1565,6 @@ pub trait Ops: Borrow<CellPtr> + Sized {
     panick_wrap(|| self.mem_init_yield_())
   }
 
-  #[track_caller]
-  fn get_mem(&self) -> MemReg {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let x = *self.borrow();
-      let xclk = ctx_lookup_clk(x);
-      match ctx.env.borrow_mut().pread_ref(x, xclk) {
-        None => panic!("bug"),
-        Some(e) => {
-          match e.cel_ {
-            &mut Cell_::Phy(.., ref mut cel_) => {
-              // FIXME FIXME
-              let pm = PMach::NvGpu;
-              let addr = cel_.get(x, xclk, &e.ty, Locus::Mem, pm);
-              TL_PCTX.with(|pctx| {
-                let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
-                icel.as_mem_reg().unwrap()
-              })
-            }
-            _ => panic!("bug")
-          }
-        }
-      }
-    }))
-  }
-
   /*#[track_caller]
   fn eval(self) -> Self {
     panick_wrap(|| {
@@ -1610,11 +1595,6 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   }*/
 
   #[track_caller]
-  fn version(&self) -> Clock {
-    panick_wrap(|| ctx_lookup_clk(*self.borrow()))
-  }
-
-  #[track_caller]
   fn snapshot(&self) -> CellPtr {
     panick_wrap(|| ctx_snapshot(*self.borrow()))
   }
@@ -1626,6 +1606,40 @@ pub trait Ops: Borrow<CellPtr> + Sized {
 }
 
 impl<L: Borrow<CellPtr> + Sized> Ops for L {}
+
+pub trait CtlOps: Borrow<CellPtr> + Sized {
+  #[track_caller]
+  fn version(&self) -> Clock {
+    panick_wrap(|| ctx_lookup_clk(*self.borrow()))
+  }
+
+  #[track_caller]
+  fn _get_mem(&self) -> MemReg {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let x = *self.borrow();
+      let xclk = ctx_lookup_clk(x);
+      match ctx.env.borrow_mut().pread_ref(x, xclk) {
+        None => panic!("bug"),
+        Some(e) => {
+          match e.cel_ {
+            &mut Cell_::Phy(.., ref mut cel_) => {
+              // FIXME FIXME
+              let pm = PMach::NvGpu;
+              let addr = cel_.get(x, xclk, &e.ty, Locus::Mem, pm);
+              TL_PCTX.with(|pctx| {
+                let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                icel.as_mem_reg().unwrap()
+              })
+            }
+            _ => panic!("bug")
+          }
+        }
+      }
+    }))
+  }
+}
+
+impl<L: Borrow<CellPtr> + Sized> CtlOps for L {}
 
 impl MSet {
   #[track_caller]

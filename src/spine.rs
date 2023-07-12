@@ -974,7 +974,7 @@ impl Spine {
                       unimplemented!();
                     }
                     (Locus::Mem, &SpineResume::PutMemF(_, fun)) => {
-                      let (pm, addr) = cel_.get_loc(x, xclk, &e.ty, Locus::Mem);
+                      let (pm, addr) = cel_.get_loc_nosync(x, xclk, &e.ty, Locus::Mem);
                       TL_PCTX.with(|pctx| {
                         let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
                         (fun)(e.ty.clone(), icel.as_mem_reg().unwrap());
@@ -1117,15 +1117,15 @@ impl Spine {
           };
           let ret = te.pthunk.initialize(ctr, env, &tclo.arg, th, x, xclk);
           match ret {
-            ThunkRet::NotImpl => {
+            Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Initialize: thunk not implemented");
               panic!();
             }
-            ThunkRet::Failure => {
+            Err(ThunkErr::Failure) => {
               println!("ERROR: Spine::_step: Initialize: unrecoverable thunk failure");
               panic!();
             }
-            ThunkRet::Success => {}
+            Ok(_) => {}
           }
           match env.lookup_ref(x) {
             None => panic!("bug"),
@@ -1181,15 +1181,15 @@ impl Spine {
           };
           let ret = te.pthunk.apply(ctr, env, &tclo.arg, th, x, xclk);
           match ret {
-            ThunkRet::NotImpl => {
+            Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Apply: thunk not implemented");
               panic!();
             }
-            ThunkRet::Failure => {
+            Err(ThunkErr::Failure) => {
               println!("ERROR: Spine::_step: Apply: unrecoverable thunk failure");
               panic!();
             }
-            ThunkRet::Success => {}
+            Ok(_) => {}
           }
           match env.lookup_ref(x) {
             None => panic!("bug"),
@@ -1244,15 +1244,15 @@ impl Spine {
           };
           let ret = te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, xclk);
           match ret {
-            ThunkRet::NotImpl => {
+            Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Accumulate: thunk not implemented");
               panic!();
             }
-            ThunkRet::Failure => {
+            Err(ThunkErr::Failure) => {
               println!("ERROR: Spine::_step: Accumulate: unrecoverable thunk failure");
               panic!();
             }
-            ThunkRet::Success => {}
+            Ok(_) => {}
           }
           match env.lookup_ref(x) {
             None => panic!("bug"),

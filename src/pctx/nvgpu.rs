@@ -1144,12 +1144,12 @@ impl GpuMemPool {
       None => {
         let mut addr_set = BTreeSet::new();
         addr_set.insert(addr);
-        println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
+        //println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
         size_index.insert(req_sz, addr_set);
       }
       Some(addr_set) => {
         addr_set.insert(addr);
-        println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
+        //println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
       }
     }
     assert!(self.alloc_index.borrow_mut().insert(Region{off: offset, sz: req_sz}, addr).is_none());
@@ -1185,12 +1185,12 @@ impl GpuMemPool {
       None => {
         let mut addr_set = BTreeSet::new();
         addr_set.insert(addr);
-        println!("DEBUG: NvGpuMemPool::_front_alloc:   sz set={:?}", &addr_set);
+        //println!("DEBUG: NvGpuMemPool::_front_alloc:   sz set={:?}", &addr_set);
         size_index.insert(req_sz, addr_set);
       }
       Some(addr_set) => {
         addr_set.insert(addr);
-        println!("DEBUG: NvGpuMemPool::_front_alloc:   sz set={:?}", &addr_set);
+        //println!("DEBUG: NvGpuMemPool::_front_alloc:   sz set={:?}", &addr_set);
       }
     }
     assert!(self.alloc_index.borrow_mut().insert(Region{off: offset, sz: req_sz}, addr).is_none());

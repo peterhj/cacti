@@ -6,6 +6,7 @@ use crate::pctx::{Locus, MemReg};
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
+use crate::util::stat::*;
 
 use futhark_syntax::{Token as FutToken};
 use futhark_syntax::re::{ReTrie};
@@ -101,8 +102,20 @@ pub struct Ctx {
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
-  //pub arg:      RefCell<Vec<(CellPtr, Clock)>>,
   pub futhark:  RefCell<FutharkCtx>,
+  pub timing:   TimingCtx,
+}
+
+impl Drop for Ctx {
+  fn drop(&mut self) {
+    let digest = self.timing.digest();
+    println!("DEBUG: Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
+    println!("DEBUG: Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
+    println!("DEBUG: Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
+    println!("DEBUG: Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
+    println!("DEBUG: Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
+    println!("DEBUG: Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+  }
 }
 
 impl Ctx {
@@ -113,8 +126,8 @@ impl Ctx {
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
-      //arg:      RefCell::new(Vec::new()),
       futhark:  RefCell::new(FutharkCtx::default()),
+      timing:   TimingCtx::default(),
     }
   }
 }
@@ -122,6 +135,39 @@ impl Ctx {
 #[derive(Default)]
 pub struct FutharkCtx {
   pub trie: Option<Rc<ReTrie<FutToken>>>,
+}
+
+#[derive(Default)]
+pub struct TimingCtx {
+  pub pregemm1: RefCell<Vec<f64>>,
+  pub pregemm:  RefCell<Vec<f64>>,
+  pub gemm1:    RefCell<Vec<f64>>,
+  pub gemm:     RefCell<Vec<f64>>,
+  pub futhark1: RefCell<Vec<f64>>,
+  pub futhark:  RefCell<Vec<f64>>,
+}
+
+#[derive(Debug)]
+pub struct TimingDigest {
+  pub pregemm1: StatDigest,
+  pub pregemm:  StatDigest,
+  pub gemm1:    StatDigest,
+  pub gemm:     StatDigest,
+  pub futhark1: StatDigest,
+  pub futhark:  StatDigest,
+}
+
+impl TimingCtx {
+  pub fn digest(&self) -> TimingDigest {
+    TimingDigest{
+      pregemm1: StatDigest::from(&*self.pregemm1.borrow()),
+      pregemm:  StatDigest::from(&*self.pregemm.borrow()),
+      gemm1:    StatDigest::from(&*self.gemm1.borrow()),
+      gemm:     StatDigest::from(&*self.gemm.borrow()),
+      futhark1: StatDigest::from(&*self.futhark1.borrow()),
+      futhark:  StatDigest::from(&*self.futhark.borrow()),
+    }
+  }
 }
 
 #[track_caller]
@@ -172,7 +218,7 @@ pub fn resume_put_mem_fun<K: Borrow<CellPtr>, F: Fn(CellType, MemReg)>(key: K, f
   }))
 }
 
-#[track_caller]
+/*#[track_caller]
 pub fn eval(x: CellPtr) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
@@ -181,7 +227,7 @@ pub fn eval(x: CellPtr) -> SpineRet {
     // FIXME FIXME: observe the arg clock.
     spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*x, _,*/ SpineResume::_Top)
   }))
-}
+}*/
 
 /*#[track_caller]
 pub fn yield_() {
@@ -538,13 +584,9 @@ pub fn ctx_clean_arg() -> bool {
 
 pub fn ctx_push_cell_arg(x: CellPtr) {
   TL_CTX.with(|ctx| {
-    // FIXME FIXME: need to look up the clock.
-    /*ctx.arg.borrow_mut().push(x)*/
     match ctx.env.borrow().lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
-        //let xclk = Clock::default();
-        //let xclk = e.state().clk;
         let xclk = ctx.spine.borrow()._version(x).unwrap();
         if xclk.is_nil() {
           println!("ERROR: ctx_push_cell_arg: tried to push an uninitialized thunk argument: {:?}", x);
@@ -556,23 +598,6 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
     }
   })
 }
-
-/*pub fn ctx_push_cell_out(x: CellPtr) {
-  TL_CTX.with(|ctx| {
-    /*assert!(ctx.out.get().is_none());
-    ctx.out.set(Some(x));*/
-    ctx.out.borrow_mut().push(x)
-  })
-}
-
-pub fn ctx_push_cell_tmp_out() {
-  TL_CTX.with(|ctx| {
-    //assert!(ctx.out.get().is_none());
-    let x = ctx.ctr.fresh_tmp();
-    //ctx.out.set(Some(x));
-    ctx.out.borrow_mut().push(x)
-  })
-}*/
 
 pub fn ctx_pop_thunk<Th: ThunkSpec_ + 'static>(th: Th) -> CellPtr {
   TL_CTX.with(|ctx| {
@@ -973,6 +998,7 @@ pub enum CellName {
   Phy,
   Cow,
   Alias,
+  VAlias,
   Bot,
 }
 
@@ -980,9 +1006,8 @@ pub enum Cell_ {
   Top(RefCell<CellState>, CellPtr),
   Phy(RefCell<CellState>, RefCell<CellClosure>, PCell),
   Cow(RefCell<CellState>, RefCell<CellClosure>, CowCell),
-  // FIXME
-  //VAlias(CellVOp, CellPtr),
   Alias(CellPtr),
+  VAlias(CellVOp, CellPtr),
   Bot,
 }
 
@@ -993,6 +1018,7 @@ impl Cell_ {
       &Cell_::Phy(..) => CellName::Phy,
       &Cell_::Cow(..) => CellName::Cow,
       &Cell_::Alias(..) => CellName::Alias,
+      &Cell_::VAlias(..) => CellName::VAlias,
       &Cell_::Bot => CellName::Bot,
     }
   }

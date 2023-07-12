@@ -14,7 +14,7 @@ use std::borrow::{Borrow};
 use std::cell::{Cell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::mem::{size_of, swap};
+use std::mem::{forget, size_of, swap};
 use std::ops::{Deref, Range};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
@@ -269,8 +269,8 @@ impl MCellPtr {
   }
 }
 
-pub trait BorrowCellPtr {
-  fn _borrow(&self) -> CellPtr;
+pub trait CellDeref {
+  fn _deref(&self) -> CellPtr;
 }
 
 const VOID_MASK: usize = 0x8000_0000_0000_0000;
@@ -280,6 +280,12 @@ enum _Void {}
 #[repr(transparent)]
 pub struct CellViewHandle([_Void]);
 
+impl Debug for CellViewHandle {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "CellViewHandle({})", self._deref().raw_)
+  }
+}
+
 impl CellViewHandle {
   pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
     unsafe { &*(from_raw_parts((x.raw_ as usize ^ VOID_MASK) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
@@ -288,11 +294,46 @@ impl CellViewHandle {
   pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
     unsafe { &mut *(from_raw_parts_mut((x.raw_ as usize ^ VOID_MASK) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
   }
+
+  pub fn materialize(&self) -> CellPtr {
+    // FIXME FIXME
+    self._deref()
+    //unimplemented!();
+  }
 }
 
-impl BorrowCellPtr for CellViewHandle {
-  fn _borrow(&self) -> CellPtr {
+impl CellDeref for CellViewHandle {
+  fn _deref(&self) -> CellPtr {
     CellPtr::from_unchecked((self.0.as_ptr() as usize ^ VOID_MASK) as i32)
+  }
+}
+
+pub type CellViewHandle2 = CellViewHandleEx;
+
+#[repr(C)]
+pub struct CellViewHandleEx(usize, usize);
+
+impl Debug for CellViewHandleEx {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "CellViewHandleEx({})", self._deref().raw_)
+  }
+}
+
+impl CellViewHandleEx {
+  pub fn _from(x: CellPtr) -> CellViewHandleEx {
+    CellViewHandleEx((x.raw_ as usize) ^ VOID_MASK, 0)
+  }
+
+  pub fn materialize(&self) -> CellPtr {
+    // FIXME FIXME
+    self._deref()
+    //unimplemented!();
+  }
+}
+
+impl CellDeref for CellViewHandleEx {
+  fn _deref(&self) -> CellPtr {
+    CellPtr::from_unchecked((self.0 ^ VOID_MASK) as i32)
   }
 }
 
@@ -994,31 +1035,25 @@ impl CellLayout {
   }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct CellViewType {
-  pub perm:     Vec<i8>,
+// FIXME
+pub type CellViewType = CellSliceType;
+
+#[derive(Clone, Debug)]
+pub struct CellSliceType {
   pub base:     Vec<i64>,
   pub shape:    Vec<i64>,
   pub oshape:   Vec<i64>,
   pub dtype:    Dtype,
 }
 
-impl CellViewType {
+impl CellSliceType {
   pub fn is_packed(&self) -> bool {
     let nd = self.shape.len();
-    // FIXME FIXME: index permutation.
     let mut fakestride = Vec::with_capacity(nd);
     let mut origstride = Vec::with_capacity(nd);
-    if nd >= 1 {
+    if nd > 1 {
       fakestride.push(1);
       origstride.push(1);
-      /*
-      // FIXME
-      let idx = self.perm[nd - 1];
-      let s = self.shape[idx as usize];
-      fakestride.push((idx, s));
-      origstride.push((nd - 1, 1));
-      */
     }
     for d in 1 .. nd {
       let s = self.shape[nd - d];
@@ -1029,6 +1064,60 @@ impl CellViewType {
       origstride.push(og_s * origstride[d - 1]);
       if fakestride[d] != origstride[d] {
         return false;
+      }
+    }
+    true
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct CellTransposeType {
+  pub perm: Vec<i8>,
+}
+
+impl CellTransposeType {
+  pub fn is_identity(&self) -> bool {
+    let nd = self.perm.len();
+    for d in 1 .. nd {
+      if self.perm[d - 1] == self.perm[d] {
+        panic!("bug");
+      } else if self.perm[d - 1] > self.perm[d] {
+        return false;
+      }
+    }
+    true
+  }
+
+  pub fn is_new_shape(&self, shape: &[i64]) -> bool {
+    let nd = self.perm.len();
+    assert_eq!(nd, shape.len());
+    let mut tag = Vec::with_capacity(nd);
+    let mut rank: i8 = 1;
+    for d in 0 .. nd {
+      if shape[d] < 0 {
+        panic!("bug");
+      } else if shape[d] == 0 {
+        return true;
+      } else if shape[d] == 1 {
+        tag.push(0);
+      } else {
+        tag.push(rank);
+        rank += 1;
+      }
+    }
+    let mut perm_tag = Vec::with_capacity(nd);
+    for d in 0 .. nd {
+      perm_tag.push(tag[self.perm[d] as usize]);
+    }
+    rank = 1;
+    for d in 0 .. nd {
+      if perm_tag[d] < 0 {
+        panic!("bug");
+      } else if perm_tag[d] == 0 {
+      } else if perm_tag[d] != rank {
+        return false;
+      } else {
+        rank += 1;
       }
     }
     true
@@ -1331,7 +1420,7 @@ impl PCell {
     }
   }
 
-  pub fn get_loc(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+  pub fn get_loc_nosync(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
       Some((pmach, rep)) => {

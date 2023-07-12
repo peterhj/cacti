@@ -8,20 +8,9 @@ use cacti::util::cell::*;
 use cacti::util::pickle::*;
 
 fn main() {
-  /*let ubat_sz = 1;
-  let seq_cap = 512;
-  //let seq_cap = 2048;
-  let tok_dim = 32000;
-  let head_dim = 100;
-  let num_head = 32;
-  let inner_dim = head_dim * num_head;
-  let mlp_inner_dim = 8640;
-  let num_layer = 26;
-  let rms_norm_eps = 1.0e-6_f32;
-  let dtype = f16::dtype();*/
   let mut cfg = LlamaConfig::open_llama_3b();
-  //let cfg = LlamaConfig::open_llama_7b();
-  //let cfg = LlamaConfig::open_llama_13b();
+  //let mut cfg = LlamaConfig::open_llama_7b();
+  //let mut cfg = LlamaConfig::open_llama_13b();
   cfg.seq_cap = 256;
   //cfg.seq_cap = 512;
   //cfg.seq_cap = 1024;
@@ -45,79 +34,6 @@ fn main() {
   println!("boot: tokenizer: text str.len={}", text_str.len());
   println!("boot: tokenizer: text tok={:?}", text_tok.as_ref());
   println!("boot: tokenizer: text tok.len={}", text_tok.len());
-  /*let mut matcher = CellMatcher::new();
-  let in_tok = StableCell::array([ubat_sz, seq_len], u16::dtype());
-  //let out_next_tok_logit = StableCell::array([ubat_sz, seq_len, tok_dim], f32::dtype());
-  //let out_next_tok_prob = StableCell::array([ubat_sz, seq_len, tok_dim], f32::dtype());
-  //let out_model_loss = StableCell::array([ubat_sz, seq_len], f32::dtype());
-  let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
-  matcher.insert("embed", embed.clone());
-  //let w = StableCell::array([inner_dim, inner_dim], f32::dtype());
-  //let w = StableCell::array([inner_dim, inner_dim], bf16::dtype());
-  fn block_causal_attention_mask(x: CellPtr) -> CellPtr {
-    x
-    //unimplemented!();
-  }
-  struct LlamaLayer {
-    in_norm: StableCell,
-    inv_freq: StableCell,
-    q: StableCell,
-    k: StableCell,
-    v: StableCell,
-    o: StableCell,
-    post_norm: StableCell,
-    gate: StableCell,
-    up: StableCell,
-    down: StableCell,
-  }
-  let mut layers = Vec::new();
-  for layer_idx in 0 .. num_layer {
-    let q = StableCell::array([inner_dim, inner_dim], f16::dtype());
-    let k = StableCell::array([inner_dim, inner_dim], f16::dtype());
-    let v = StableCell::array([inner_dim, inner_dim], f16::dtype());
-    let o = StableCell::array([inner_dim, inner_dim], f16::dtype());
-    matcher.insert((layer_idx, "attn", "q_proj"), q.clone());
-    matcher.insert((layer_idx, "attn", "k_proj"), k.clone());
-    matcher.insert((layer_idx, "attn", "v_proj"), v.clone());
-    matcher.insert((layer_idx, "attn", "o_proj"), o.clone());
-    let inv_freq = StableCell::array([num_head], f32::dtype());
-    matcher.insert((layer_idx, "inv_freq"), inv_freq.clone());
-    let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-    let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
-    let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-    matcher.insert((layer_idx, "mlp", "gate"), gate.clone());
-    matcher.insert((layer_idx, "mlp", "down"), down.clone());
-    matcher.insert((layer_idx, "mlp", "up"), up.clone());
-    let in_norm = StableCell::array([inner_dim], f16::dtype());
-    let post_norm = StableCell::array([inner_dim], f16::dtype());
-    matcher.insert((layer_idx, "input_layernorm"), in_norm.clone());
-    matcher.insert((layer_idx, "post_attention_layernorm"), post_norm.clone());
-    layers.push(LlamaLayer{q, k, v, o, inv_freq, gate, down, up, in_norm, post_norm});
-  }
-  let head_norm = StableCell::array([inner_dim], f16::dtype());
-  let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype());
-  matcher.insert("norm", head_norm.clone());
-  matcher.insert("lm_head", lm_head.clone());
-  let matches = matcher.match_(pickdir.clone_keys());
-  let inv_matches = matches.inv();*/
-  /*let cfg = LlamaConfig{
-    /*ubat_sz: 1,
-    seq_len: 512,
-    tok_dim: 32000,
-    head_dim: 64,
-    num_head: 50,
-    mlp_inner_dim: 8640,
-    num_layer: 26,*/
-    ubat_sz,
-    seq_cap,
-    tok_dim,
-    head_dim,
-    num_head,
-    mlp_inner_dim,
-    num_layer,
-    rms_norm_eps,
-    dtype,
-  };*/
   let mut model = Llama::from(cfg);
   let inv_matches = model.match_pickle_dir(&pickdir);
   let input = model.make_input();
@@ -126,80 +42,22 @@ fn main() {
   for &(ref cel, ref key) in inv_matches.mat.iter() {
     println!("boot: matches: key={:?} cel={:?}", key, cel);
   }
-  for iter_nr in 0 .. 1 {
+  for iter_nr in 0 .. 3 {
     println!("boot: start iter...");
     reset();
     if iter_nr == 0 {
-      //embed.mem_set_yield_();
       for (cel, _) in inv_matches.iter() {
         cel.mem_set_yield_();
       }
-      //w.mem_set_yield_();
       model.init();
     } else {
-      //embed.cache();
       for (cel, _) in inv_matches.iter() {
         cel.cache();
       }
-      //w.cache();
       model.cache();
     }
     in_tok.mem_set_yield_();
     input.in_lm_tok.mem_set_yield_();
-    /*let stream = in_tok.inner_one_hot(tok_dim, f16::dtype());
-    let stream = stream.new_shape([ubat_sz * seq_len, tok_dim])
-                       .block_mm([ubat_sz * seq_len, tok_dim], false, &model.embed, [tok_dim, inner_dim], false)
-                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    // FIXME FIXME: layer norm.
-    let prenrm = stream;
-    //let prenrm = pre_layer_norm(&stream);
-    let q_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].q, [inner_dim, inner_dim], true)
-                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    let k_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].k, [inner_dim, inner_dim], true)
-                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    let v_proj = prenrm.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                       .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].v, [inner_dim, inner_dim], true)
-                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    // FIXME FIXME: rotary embedding.
-    /*
-    let (vcos, vsin) = rotational_embed(&v_proj, );
-    let (q_proj, k_proj) = rotational_pos_embed((q_proj, k_proj, vcos, vsin, );
-    */
-    let q_proj = q_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
-    let k_proj = k_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
-    let attn = q_proj.block_mm_scale([seq_len, head_dim], false, k_proj, [seq_len, head_dim], true, 1.0 / (head_dim as f32).sqrt())
-              .new_shape([ubat_sz, seq_len, num_head, seq_len])
-              .cast(f32::dtype());
-    let attn = block_causal_attention_mask(attn)
-              .inner_softmax()
-              .cast(f16::dtype())
-              .new_shape([ubat_sz * seq_len, num_head * seq_len]);
-    let v_proj = v_proj.new_shape([ubat_sz * seq_len, num_head * head_dim]);
-    let v_attn = attn.block_mm([seq_len, seq_len], false, v_proj, [seq_len, head_dim], false);
-    let o_proj = v_attn.block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].o, [inner_dim, inner_dim], true)
-                       .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    let stream = stream + o_proj;
-    // FIXME FIXME: post layer norm, mlp.
-    //let stream = post_layer_norm(stream);
-    let up_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                        .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].up, [mlp_inner_dim, inner_dim], true);
-    let gate_proj = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                          .block_mm([ubat_sz * seq_len, inner_dim], false, &model.layers[0].gate, [mlp_inner_dim, inner_dim], true);
-    //let gate_proj = activation(gate_proj);
-    let gate_up = gate_proj * up_proj;
-    let down_proj = gate_up.block_mm([ubat_sz * seq_len, mlp_inner_dim], false, &model.layers[0].down, [inner_dim, mlp_inner_dim], true)
-                           .new_shape([ubat_sz, seq_len, num_head, head_dim]);
-    let stream = stream + down_proj;
-    /*
-    // TODO
-    // ...
-    */
-    let out_lm_logit = stream.new_shape([ubat_sz * seq_len, num_head * head_dim])
-                             .block_mm([1, inner_dim], false, &model.lm_head, [tok_dim, inner_dim], true)
-                             .new_shape([ubat_sz, seq_len, tok_dim]);
-    let out_lm_prob = out_lm_logit.inner_softmax();*/
     let out = model.apply(&in_tok, &input.in_lm_tok);
     println!("boot: in_lm_tok.shape={:?}", input.in_lm_tok.shape());
     println!("boot: in_lm_tok.dtype={:?}", input.in_lm_tok.dtype());
@@ -212,15 +70,6 @@ fn main() {
     let seq_cap = cfg.seq_cap;
     let tok_dim = cfg.tok_dim;
     if iter_nr == 0 {
-      //resume_put_mem_val(&embed, &0.0_f32);
-      //resume_put_mem_val(&w, &0.0_f32);
-      //resume_put_mem_fun(&embed, |_, mem| mem.copy_from_slice(&[0.0_f32]));
-      /*resume_put_mem_fun(&embed, |ty, mem| {
-        let (pickty, pickfile) = pickdir.get(inv_matches.get(&embed));
-        assert_eq!(ty, pickty);
-        mem.copy_from_reader(pickfile);
-        mem._debug_dump_f16();
-      });*/
       for (cel, key) in inv_matches.iter() {
         resume_put_mem_fun(cel, |ty, mem| {
           let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
@@ -235,16 +84,10 @@ fn main() {
           }
         });
       }
-      //resume_put_mem_fun(&w, |_, mem| mem.copy_from_slice(&[0.0_f32]));
     }
     resume_put_mem_fun(&in_tok, |_, mem| {
       println!("boot: set in_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
-      /*for _ in 0 .. seq_cap {
-        // FIXME: this should cause failure.
-        //tok_buf.push(50000_u16);
-        tok_buf.push(0_u16);
-      }*/
       tok_buf.push(1_u16);
       tok_buf.extend_from_slice(text_tok.as_ref());
       tok_buf.resize(seq_cap as _, 0_u16);
@@ -258,7 +101,7 @@ fn main() {
       }
       mem.copy_from_slice(&tok_buf);
     });
-    let out_lm_prob_mem = out.out_lm_prob.get_mem();
+    let out_lm_prob_mem = out.out_lm_prob._get_mem();
     println!("boot: out lm prob type   ={:?}", out.out_lm_prob.type_());
     println!("boot: out lm prob version={:?}", out.out_lm_prob.version());
     println!("boot: out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);

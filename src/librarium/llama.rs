@@ -183,10 +183,7 @@ impl Llama {
   pub fn init(&mut self) {
     // TODO
     let init_embed = || {
-      //let ubat_sz = self.cfg.ubat_sz;
       let seq_cap = self.cfg.seq_cap;
-      //let num_head = self.cfg.num_head;
-      let head_dim = self.cfg.head_dim;
       let dtype = self.cfg.dtype;
       let pos = iota(seq_cap).cast(f32::dtype());
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
@@ -225,7 +222,6 @@ impl Llama {
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       y
     };
-    // FIXME FIXME
     /*let inner_symplectic_map = |x: CellPtr| {
       let xty = x.type_();
       let (lx, rx) = x.inner_split(xty.inner_len() / 2);
@@ -259,7 +255,6 @@ impl Llama {
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);*/
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-    // TODO TODO
     for i in 0 .. num_layer as usize {
       let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
@@ -285,14 +280,12 @@ impl Llama {
                 .inner_softmax()
                 .cast(f16::dtype())
                 .new_shape([ubat_sz * seq_cap, num_head * seq_cap]);
-      // FIXME FIXME: need pad for fp16 gemm.
-      /*
-      let v_proj = v_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, head_dim], false);
-      */
+      // FIXME: pad because block_mm is a very low level wrapper.
       let pad_head_dim = ((head_dim + 8 - 1) / 8) * 8;
       let v_attn = if head_dim == pad_head_dim {
-        unimplemented!();
+        let v_proj = v_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+        let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, head_dim], false);
+        v_attn
       } else {
         let v_proj = v_proj
                     .block_pad([seq_cap, pad_head_dim], f16::zero())
@@ -313,8 +306,6 @@ impl Llama {
       let gate_proj = post_nrm
                      .new_shape([ubat_sz * seq_cap, num_head * head_dim])
                      .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].gate, [mlp_inner_dim, inner_dim], true);
-      // FIXME: intermediate activation dtype.
-      //let gate_proj = gate_proj.cast(f32::dtype()).standard_silu().cast(f16::dtype());
       let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
       let down_proj = gate_up
@@ -322,7 +313,6 @@ impl Llama {
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }
-    // TODO TODO
     let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
                       .new_shape([ubat_sz * seq_cap, num_head * head_dim])
@@ -331,7 +321,7 @@ impl Llama {
                       .keep();
     let logit32 = out_lm_logit.cast(f32::dtype());
     let out_lm_prob = logit32.inner_softmax().keep();
-    //let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();
+    /*let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();*/
     let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
     LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
   }
@@ -348,8 +338,8 @@ pub struct LlamaLayerCachedKV {
 #[derive(Clone)]
 pub struct LlamaCached {
   pub cfg: LlamaConfig,
-  //pub cos: StableCell,
-  //pub sin: StableCell,
+  pub cos: Option<StableCell>,
+  pub sin: Option<StableCell>,
   pub embed: StableCell,
   pub layers: Vec<(LlamaLayer, LlamaLayerCachedKV)>,
   pub head_norm: StableCell,
