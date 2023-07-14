@@ -41,11 +41,10 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
           let spine = ctx.spine.borrow();
           let mut this_clk = spine._version(this).unwrap();
           let rhs_clk = spine._version(rhs).unwrap();
-          // FIXME: should also check the thunk mode.
-          if rhs_clk.up == 1 &&
-             !thunkenv.update.contains_key(&(rhs, rhs_clk.init()))
-          {
-            this_clk.up += 1;
+          if rhs_clk.is_init_once() {
+            // FIXME: must update the spine.
+            // FIXME: should seal rhs.
+            this_clk = this_clk.init_or_update();
             let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
             assert!(thunkenv.update.insert((this, this_clk), tclo).is_none());
             success = true;
@@ -1252,7 +1251,8 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       //println!("DEBUG: block_pad: org block={:?} new_block={:?}", org_block, new_block);
       if org_block == new_block {
         //println!("DEBUG: block_unpad:   snapshot");
-        return x.snapshot();
+        //return x.snapshot();
+        return x;
       }
       let pad_val = pad_val.into_scalar_val_();
       let op = BlockPadFutThunkSpec{org_block, new_block, pad_val};
@@ -1273,7 +1273,8 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       //println!("DEBUG: block_unpad: org block={:?} new_block={:?}", org_block, new_block);
       if org_block == new_block {
         //println!("DEBUG: block_unpad:   snapshot");
-        return x.snapshot();
+        //return x.snapshot();
+        return x;
       }
       let pad_val = ScalarVal_::Bot;
       let op = BlockPadFutThunkSpec{org_block, new_block, pad_val};

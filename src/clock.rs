@@ -1,4 +1,4 @@
-use std::cmp::{Ordering};
+use std::cmp::{Ordering, max};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
 pub fn rst_signed_distance(a: u32, b: u32) -> Option<i32> {
@@ -61,6 +61,7 @@ impl Counter {
     self.rst == 0
   }
 
+  #[must_use]
   pub fn advance(&self) -> Counter {
     let mut next_rst = self.rst.wrapping_add(1);
     if next_rst == 0 {
@@ -69,7 +70,7 @@ impl Counter {
     Counter{rst: next_rst}
   }
 
-  pub fn succeeds<Ctr: Into<Counter>>(&self, r_ctr: Ctr) -> bool {
+  /*pub fn succeeds<Ctr: Into<Counter>>(&self, r_ctr: Ctr) -> bool {
     let r_ctr = r_ctr.into();
     if self.rst > 1 {
       r_ctr.rst.wrapping_add(1) == self.rst
@@ -78,7 +79,7 @@ impl Counter {
     } else {
       false
     }
-  }
+  }*/
 }
 
 impl PartialOrd for Counter {
@@ -102,25 +103,25 @@ impl PartialOrd for Counter {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Clock {
   pub rst:  u32,
-  pub up:   u32,
+  pub up:   i32,
+}
+
+impl Debug for Clock {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "Clock(rst={}, up={})", self.rst, self.up)
+  }
 }
 
 impl Default for Clock {
   fn default() -> Clock {
-    Clock{rst: 0, up: 0}
+    Clock{rst: 0, up: i32::min_value()}
   }
 }
 
 impl From<Counter> for Clock {
   #[inline(always)]
   fn from(ctr: Counter) -> Clock {
-    Clock{rst: ctr.rst, up: 0}
-  }
-}
-
-impl Debug for Clock {
-  fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "Clock(rst={}, up={})", self.rst, self.up)
+    Clock{rst: ctr.rst, up: i32::min_value()}
   }
 }
 
@@ -133,66 +134,77 @@ impl Clock {
     self.rst == 0
   }
 
+  #[must_use]
   pub fn advance(&self) -> Clock {
     let mut next_rst = self.rst.wrapping_add(1);
     if next_rst == 0 {
       next_rst = next_rst.wrapping_add(1);
     }
-    Clock{rst: next_rst, up: 0}
+    Clock{rst: self.rst, up: i32::min_value()}
   }
 
-  pub fn finish(&self) -> Clock {
-    assert!(self.up != u32::max_value());
-    Clock{rst: self.rst, up: u32::max_value()}
+  pub fn is_uninit(&self) -> bool {
+    self.up < 0
   }
 
-  pub fn init(&self) -> Clock {
+  #[must_use]
+  pub fn uninit(&self) -> Clock {
+    Clock{rst: self.rst, up: i32::min_value()}
+  }
+
+  pub fn is_init_once(&self) -> bool {
+    if self.rst == 0 {
+      panic!("bug: Clock::is_init_once: rst=0");
+    }
+    self.up == 0
+  }
+
+  #[must_use]
+  pub fn init_once(&self) -> Clock {
+    if self.rst == 0 {
+      panic!("bug: Clock::init_once: trying to init at rst=0");
+    }
+    if self.up >= 0 {
+      panic!("bug: Clock::init_once: trying to init at up={}", self.up);
+    }
     Clock{rst: self.rst, up: 0}
   }
 
+  pub fn is_update(&self) -> bool {
+    if self.rst == 0 {
+      panic!("bug: Clock::is_update: rst=0");
+    }
+    self.up > 0
+  }
+
+  #[must_use]
   pub fn update(&self) -> Clock {
     if self.rst == 0 {
       panic!("bug: Clock::update: trying to update at rst=0");
     }
+    if self.up < 0 {
+      panic!("bug: Clock::update: trying to update at up={}", self.up);
+    }
     let next_up = self.up + 1;
-    assert!(next_up != u32::max_value());
+    assert!(next_up > 0);
+    // FIXME: is this a vestige of final?
+    /*assert!(next_up != i32::max_value());*/
     Clock{rst: self.rst, up: next_up}
   }
 
-  /*pub fn happens_after<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<bool> {
-    let r_clk = r_clk.into();
-    let diff = self.rst.wrapping_sub(r_clk.rst);
-    if diff == 0 {
-      if self.up > r_clk.up {
-        return Some(true);
-      } else {
-        return Some(false);
-      }
-    // FIXME FIXME: these conditions are wrong; use intervals.
-    } else if diff < 0x4000 {
-      return Some(true);
-    } else if diff > 0xc000 {
-      return Some(false);
+  #[must_use]
+  pub fn init_or_update(&self) -> Clock {
+    if self.rst == 0 {
+      panic!("bug: Clock::update: trying to init or update at rst=0");
     }
-    None
+    let next_up = max(self.up, -1) + 1;
+    assert!(next_up >= 0);
+    Clock{rst: self.rst, up: next_up}
   }
 
-  pub fn happens_before<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<bool> {
-    let r_clk = r_clk.into();
-    let diff = r_clk.rst.wrapping_sub(self.rst);
-    if diff == 0 {
-      if r_clk.up > self.up {
-        return Some(true);
-      } else {
-        return Some(false);
-      }
-    // FIXME FIXME: these conditions are wrong; use intervals.
-    } else if diff < 0x4000 {
-      return Some(true);
-    } else if diff > 0xc000 {
-      return Some(false);
-    }
-    None
+  /*pub fn finish(&self) -> Clock {
+    assert!(self.up != u32::max_value());
+    Clock{rst: self.rst, up: u32::max_value()}
   }*/
 
   pub fn partial_cmp_<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
@@ -204,14 +216,13 @@ impl PartialOrd for Clock {
   fn partial_cmp(&self, r_clk: &Clock) -> Option<Ordering> {
     match rst_signed_distance(self.rst, r_clk.rst) {
       None => None,
-      Some(0) => {
-        Some(self.up.cmp(&r_clk.up))
-      }
       Some(d) => {
-        if d > 0 {
+        if d < 0 {
+          Some(Ordering::Less)
+        } else if d > 0 {
           Some(Ordering::Greater)
         } else {
-          Some(Ordering::Less)
+          Some(self.up.cmp(&r_clk.up))
         }
       }
     }

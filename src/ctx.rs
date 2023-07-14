@@ -306,16 +306,16 @@ pub fn ctx_unify(x: CellPtr, uty: Option<CellType>) -> CellPtr {
   })
 }*/
 
-pub fn ctx_retain(x: CellPtr) {
-  TL_CTX.with(|ctx| {
-    ctx.env.borrow().retain(x);
-  })
-}
-
 pub fn ctx_release(x: CellPtr) {
   TL_CTX.try_with(|ctx| {
     ctx.env.borrow().release(x);
   }).unwrap_or(())
+}
+
+pub fn ctx_retain(x: CellPtr) {
+  TL_CTX.with(|ctx| {
+    ctx.env.borrow().retain(x);
+  })
 }
 
 pub fn ctx_lookup_type(x: CellPtr) -> CellType {
@@ -384,6 +384,22 @@ pub fn ctx_lookup_clk(x: CellPtr) -> Clock {
         }
       }
     }
+  })
+}
+
+pub fn ctx_fresh_mset() -> MCellPtr {
+  TL_CTX.with(|ctx| {
+    let x = ctx.ctr.fresh_cel()._into_mcel_ptr();
+    ctx.env.borrow_mut().mceltab.insert(x, MCellEnvEntry{mcel_: MCell_::Set(MCellSet::default())});
+    x
+  })
+}
+
+pub fn ctx_fresh_mmap() -> MCellPtr {
+  TL_CTX.with(|ctx| {
+    let x = ctx.ctr.fresh_cel()._into_mcel_ptr();
+    ctx.env.borrow_mut().mceltab.insert(x, MCellEnvEntry{mcel_: MCell_::Map(MCellMap::default())});
+    x
   })
 }
 
@@ -956,8 +972,8 @@ impl Default for CellClosure {
 }
 
 impl CellClosure {
-  pub fn init(&mut self, clk: Clock, th: ThunkPtr) {
-    assert_eq!(clk.up, 0);
+  pub fn init_once(&mut self, clk: Clock, th: ThunkPtr) {
+    assert!(clk.is_init_once());
     if self.ctr > clk.ctr() {
       panic!("bug");
     } else if self.ctr < clk.ctr() {
@@ -969,13 +985,15 @@ impl CellClosure {
   }
 
   pub fn update(&mut self, clk: Clock, th: ThunkPtr) {
-    assert!(clk.up > 0);
+    assert!(clk.is_update());
     if self.ctr > clk.ctr() {
       panic!("bug");
-    } else if self.ctr < clk.ctr() {
+    /*} else if self.ctr < clk.ctr() {
       self.ctr = clk.ctr();
       self.thunk.clear();
-      self.thunk.push(ThunkPtr::nil());
+      self.thunk.push(ThunkPtr::nil());*/
+    } else if self.ctr < clk.ctr() {
+      panic!("bug");
     }
     if clk.up as usize != self.thunk.len() {
       println!("DEBUG: CellClosure::update: clk={:?} th={:?} self.ctr={:?} self.thunk={:?}",
@@ -1062,9 +1080,12 @@ impl Cell_ {
 
 pub enum MCell_ {
   // FIXME
+  //Tup(_),
+  Set(MCellSet),
+  Map(MCellMap),
   //Tup(RefCell<CellState>, MCellTup),
-  Set(RefCell<CellState>, MCellSet),
-  Map(RefCell<CellState>, MCellMap),
+  //Set(RefCell<CellState>, MCellSet),
+  //Map(RefCell<CellState>, MCellMap),
 }
 
 #[derive(Clone, Copy, Default)]

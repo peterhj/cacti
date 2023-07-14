@@ -5,7 +5,7 @@ if [ -e "../.gitmodules" ] ; then
 fi
 echo "- cacti: bootstrapping from git HEAD..."
 cacti_remote_prefix="https://git.sr.ht/~ptrj"
-echo "- cacti: cloning via remote url ${cacti_remote_prefix}..."
+echo "- cacti: cloning recursive dependencies via remote url ${cacti_remote_prefix}..."
 git clone -b patch "${cacti_remote_prefix}/aho_corasick" ../aho_corasick
 git clone "${cacti_remote_prefix}/byteorder" ../byteorder
 git clone -b patch "${cacti_remote_prefix}/cc" ../cc

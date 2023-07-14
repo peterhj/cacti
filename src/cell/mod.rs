@@ -2,6 +2,7 @@ use crate::algo::{HashMap, RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
+use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -20,7 +21,7 @@ use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct CellPtr{
   pub raw_: i32,
@@ -80,9 +81,13 @@ impl CellPtr {
     assert_eq!(len, 4);
     unsafe { from_raw_parts(ptr, len) }
   }
+
+  pub fn _into_mcel_ptr(self) -> MCellPtr {
+    MCellPtr{raw_: self.raw_}
+  }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct StableCell {
   pub ptr_: CellPtr,
@@ -227,45 +232,135 @@ pub type StableCheckpoint = Checkpoint;*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct Atom(pub i32);
+pub struct Atom {
+  pub raw_: i32,
+}
 
 impl Atom {
   pub fn nil() -> Atom {
-    Atom(0)
+    Atom{raw_: 0}
   }
 
-  pub fn from_unchecked(p: i32) -> Atom {
-    Atom(p)
+  pub fn from_unchecked(raw_: i32) -> Atom {
+    Atom{raw_}
   }
 
   pub fn to_unchecked(&self) -> i32 {
-    self.0
+    self.raw_
   }
 
   pub fn is_nil(&self) -> bool {
-    self.0 == 0
+    self.raw_ == 0
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct MCellPtr(pub i32);
+pub struct MCellPtr {
+  pub raw_: i32,
+}
+
+impl Debug for MCellPtr {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "MCellPtr({})", self.raw_)
+  }
+}
 
 impl MCellPtr {
   pub fn nil() -> MCellPtr {
-    MCellPtr(0)
+    MCellPtr{raw_: 0}
   }
 
-  pub fn from_unchecked(p: i32) -> MCellPtr {
-    MCellPtr(p)
+  pub fn from_unchecked(raw_: i32) -> MCellPtr {
+    MCellPtr{raw_}
   }
 
   pub fn to_unchecked(&self) -> i32 {
-    self.0
+    self.raw_
   }
 
   pub fn is_nil(&self) -> bool {
-    self.0 == 0
+    self.raw_ == 0
+  }
+
+  pub fn _into_cel_ptr(self) -> CellPtr {
+    CellPtr{raw_: self.raw_}
+  }
+}
+
+pub struct StableSet {
+  pub ptr_: MCellPtr,
+}
+
+impl Debug for StableSet {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "StableSet({})", self.ptr_.raw_)
+  }
+}
+
+impl Clone for StableSet {
+  fn clone(&self) -> StableSet {
+    StableSet::from(self.ptr_)
+  }
+}
+
+impl Drop for StableSet {
+  fn drop(&mut self) {
+    ctx_release(self.ptr_._into_cel_ptr());
+  }
+}
+
+impl From<MCellPtr> for StableSet {
+  fn from(ptr: MCellPtr) -> StableSet {
+    ctx_retain(ptr._into_cel_ptr());
+    StableSet{ptr_: ptr}
+  }
+}
+
+impl StableSet {
+  #[track_caller]
+  pub fn new() -> StableSet {
+    panick_wrap(|| {
+      ctx_fresh_mset().into()
+    })
+  }
+
+  #[track_caller]
+  pub fn add<X: Borrow<CellPtr>>(&self, x: X) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.add(self.ptr_, *x.borrow());
+    }))
+  }
+}
+
+pub struct StableMap {
+  pub ptr_: MCellPtr,
+}
+
+// TODO
+
+impl From<MCellPtr> for StableMap {
+  fn from(ptr: MCellPtr) -> StableMap {
+    ctx_retain(ptr._into_cel_ptr());
+    StableMap{ptr_: ptr}
+  }
+}
+
+impl StableMap {
+  #[track_caller]
+  pub fn new() -> StableMap {
+    panick_wrap(|| {
+      ctx_fresh_mset().into()
+    })
+  }
+
+  #[track_caller]
+  pub fn add<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: K, v: V) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut spine = ctx.spine.borrow_mut();
+      spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+    }))
   }
 }
 

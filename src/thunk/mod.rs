@@ -89,6 +89,10 @@ impl ThunkPtr {
     self.0 == 0
   }
 
+  pub fn is_opaque(&self) -> bool {
+    self.0 == i32::max_value()
+  }
+
   pub fn as_bytes_repr(&self) -> &[u8] {
     // SAFETY: This is safe because the type is `Copy` and transparent.
     let ptr = ((self as *const ThunkPtr) as *const i32) as *const u8;
@@ -1076,7 +1080,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
               ctx.spine.borrow().ctr.into()
             });*/
             let mut xclk: Clock = rst.into();
-            xclk.up = 1;
+            xclk = xclk.init_once();
             pcel.push_new_replica(x, xclk, locus, pmach, p);
             env.insert_phy(x, ty, pcel);
           });
