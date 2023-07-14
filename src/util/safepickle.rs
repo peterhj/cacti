@@ -1,4 +1,5 @@
 use crate::algo::{HashMap, HashSet};
+use crate::algo::str::*;
 use crate::cell::{CellType, Dtype};
 
 use glob::{glob};
@@ -112,7 +113,7 @@ impl PickleDir {
     };
     for file_or_p in files.into_iter() {
       let (p, file) = file_or_p.try_open().map_err(|_| PickleDirErr::File)?;
-      println!("DEBUG: PickleDir::_reopen: open \"{}\"...", p.display());
+      println!("DEBUG: PickleDir::_reopen: open \"{}\"...", safe_ascii(p.to_str().unwrap().as_bytes()));
       let mut file = PickleFile::new(file).map_err(|_| PickleDirErr::PickleFile)?;
       let mut iter = file.iter_tensors_data();
       iter._fixup_offsets();
@@ -123,7 +124,7 @@ impl PickleDir {
         if self.tensor_key.contains(&t.name) {
           return Err(PickleDirErr::DuplicateName(t.name.clone()));
         }
-        println!("DEBUG: PickleDir::_reopen:   name=\"{}\"", &t.name);
+        println!("DEBUG: PickleDir::_reopen:   name=\"{}\"", safe_ascii(t.name.as_bytes()));
         self.tensor_key.insert(t.name.clone());
         self.tensor_map.insert(t.name.clone(), (model_idx, t.clone()));
       }

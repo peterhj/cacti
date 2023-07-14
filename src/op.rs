@@ -91,76 +91,132 @@ pub struct T;
 pub struct T_(pub i8, pub i8);
 
 impl<'l> BitXor<T> for &'l CellPtr {
-  type Output = &'l CellViewHandle;
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> &'l CellViewHandle {
+  fn bitxor(self, _: T) -> CellViewHandleEx {
     panick_wrap(|| {
       // FIXME FIXME
       //CellView(*self, vec![CellVOp::Swap(-2, -1)])
-      CellViewHandle::_from(*self)
+      CellViewHandleEx::_from(*self)
     })
   }
 }
 
 impl<'l> BitXor<T_> for &'l CellPtr {
-  type Output = &'l CellViewHandle;
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, t: T_) -> &'l CellViewHandle {
+  fn bitxor(self, t: T_) -> CellViewHandleEx {
     panick_wrap(|| {
       // FIXME FIXME
       //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
-      CellViewHandle::_from(*self)
+      CellViewHandleEx::_from(*self)
     })
   }
 }
 
-/*impl BitXor<T> for CellPtr {
-  type Output = CellViewHandle;
+impl BitXor<T> for CellPtr {
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellViewHandle {
-    panick_wrap(|| (&self).bitxor(T))
+  fn bitxor(self, _: T) -> CellViewHandleEx {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(-2, -1)])
+      CellViewHandleEx::_from(self)
+    })
   }
-}*/
+}
+
+impl BitXor<T_> for CellPtr {
+  type Output = CellViewHandleEx;
+
+  #[track_caller]
+  fn bitxor(self, t: T_) -> CellViewHandleEx {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+      CellViewHandleEx::_from(self)
+    })
+  }
+}
 
 impl<'l> BitXor<T> for &'l StableCell {
-  type Output = &'l CellViewHandle;
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> &'l CellViewHandle {
+  fn bitxor(self, _: T) -> CellViewHandleEx {
     panick_wrap(|| self.as_ptr_ref().bitxor(T))
   }
 }
 
-impl BitXor<T> for StableCell {
-  type Output = CellViewHandle2;
+impl<'l> BitXor<T_> for &'l StableCell {
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, _: T) -> CellViewHandle2 {
+  fn bitxor(self, t: T_) -> CellViewHandleEx {
+    panick_wrap(|| self.as_ptr_ref().bitxor(t))
+  }
+}
+
+impl BitXor<T> for StableCell {
+  type Output = CellViewHandleEx;
+
+  #[track_caller]
+  fn bitxor(self, _: T) -> CellViewHandleEx {
     panick_wrap(|| {
       // FIXME FIXME
-      //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
-      CellViewHandle2::_from(*self.as_ptr_ref())
+      //CellView(*self, vec![CellVOp::Swap(-2, -1)])
+      CellViewHandleEx::_from(*self.as_ptr_ref())
     })
   }
 }
 
-/*impl BitXor<T_> for StableCell {
-  type Output = CellViewHandle;
+impl BitXor<T_> for StableCell {
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(self, t: T_) -> CellViewHandle {
-    panick_wrap(|| (&self).bitxor(t))
+  fn bitxor(self, t: T_) -> CellViewHandleEx {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //CellView(*self, vec![CellVOp::Swap(t.0, t.1)])
+      CellViewHandleEx::_from(*self.as_ptr_ref())
+    })
   }
-}*/
+}
 
 impl<'l> BitXor<T> for &'l CellViewHandle {
-  type Output = &'l CellViewHandle;
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(mut self, _: T) -> &'l CellViewHandle {
+  fn bitxor(mut self, _: T) -> CellViewHandleEx {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //self.1.push(CellVOp::Swap(-2, -1));
+      CellViewHandleEx::_from(self._deref())
+    })
+  }
+}
+
+impl<'l> BitXor<T_> for &'l CellViewHandle {
+  type Output = CellViewHandleEx;
+
+  #[track_caller]
+  fn bitxor(mut self, t: T_) -> CellViewHandleEx {
+    panick_wrap(|| {
+      // FIXME FIXME
+      //self.1.push(CellVOp::Swap(t.0, t.1));
+      CellViewHandleEx::_from(self._deref())
+    })
+  }
+}
+
+impl BitXor<T> for CellViewHandleEx {
+  type Output = CellViewHandleEx;
+
+  #[track_caller]
+  fn bitxor(mut self, _: T) -> CellViewHandleEx {
     panick_wrap(|| {
       // FIXME FIXME
       //self.1.push(CellVOp::Swap(-2, -1));
@@ -169,11 +225,11 @@ impl<'l> BitXor<T> for &'l CellViewHandle {
   }
 }
 
-impl<'l> BitXor<T_> for &'l CellViewHandle {
-  type Output = &'l CellViewHandle;
+impl BitXor<T_> for CellViewHandleEx {
+  type Output = CellViewHandleEx;
 
   #[track_caller]
-  fn bitxor(mut self, t: T_) -> &'l CellViewHandle {
+  fn bitxor(mut self, t: T_) -> CellViewHandleEx {
     panick_wrap(|| {
       // FIXME FIXME
       //self.1.push(CellVOp::Swap(t.0, t.1));
@@ -1623,9 +1679,7 @@ pub trait CtlOps: Borrow<CellPtr> + Sized {
         Some(e) => {
           match e.cel_ {
             &mut Cell_::Phy(.., ref mut cel_) => {
-              // FIXME FIXME
-              let pm = PMach::NvGpu;
-              let addr = cel_.get(x, xclk, &e.ty, Locus::Mem, pm);
+              let (pm, addr) = cel_.get_loc(x, xclk, &e.ty, Locus::Mem);
               TL_PCTX.with(|pctx| {
                 let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
                 icel.as_mem_reg().unwrap()

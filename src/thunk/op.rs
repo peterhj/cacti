@@ -102,9 +102,9 @@ impl FutharkThunkSpec for NopFutThunkSpec {
     code.into()
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -548,12 +548,12 @@ impl FutharkThunkSpec for InnerSelectFutThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     let arg0_ty = arg[0].0.type_();
     let arg0_nd = arg0_ty.ndim() as usize;
     let inner_len = arg0_ty.shape[arg0_nd - 1];
     arg_adj[0] += out_adj.inner_inv_select(arg[1].0, inner_len);
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -648,9 +648,9 @@ impl FutharkThunkSpec for InnerInvSelectFutThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj.inner_select(arg[1].0);
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -830,9 +830,9 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> u + {}", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -882,10 +882,10 @@ impl FutharkThunkSpec for AddFutThunkSpec {
     FutharkThunkCode::nd_map2(arg[0], arg[1], r"+")
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj;
     arg_adj[1] += out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -989,9 +989,9 @@ impl FutharkThunkSpec for LSubScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> {} - u", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += -out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1027,9 +1027,9 @@ impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> u - {}", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1079,10 +1079,10 @@ impl FutharkThunkSpec for SubFutThunkSpec {
     FutharkThunkCode::nd_map2(arg[0], arg[1], r"-")
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj;
     arg_adj[1] += -out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1187,9 +1187,9 @@ impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> u * {}", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * self.val.0;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1239,10 +1239,10 @@ impl FutharkThunkSpec for MulFutThunkSpec {
     FutharkThunkCode::nd_map2(arg[0], arg[1], r"*")
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * arg[1].0;
     arg_adj[1] += arg[0].0 * out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1428,9 +1428,9 @@ impl FutharkThunkSpec for LDivScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> {} / u", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += -((out_adj * self.val.0) / (arg[0].0 * arg[0].0));
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1467,9 +1467,9 @@ impl FutharkThunkSpec for RDivScalarF32FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> u / {}", fmt.format(&self.val)))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj / self.val.0;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1519,10 +1519,10 @@ impl FutharkThunkSpec for DivFutThunkSpec {
     FutharkThunkCode::nd_map2(arg[0], arg[1], r"/")
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj / arg[1].0;
     arg_adj[1] += (out_adj * arg[0].0) / -arg[1].0.square();
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1626,9 +1626,9 @@ impl FutharkThunkSpec for NegFutThunkSpec {
     //FutharkThunkCode::nd_map(arg[0], format!(r"\u -> ({}.neg u)", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += -out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1671,9 +1671,9 @@ impl FutharkThunkSpec for NegF16FutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], r"\u -> f16.from_bits ((f16.to_bits u) ^ 0x8000u16)")
   }
 
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += -out_adj;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1708,7 +1708,7 @@ impl FutharkThunkSpec for SquareFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], r"\u -> u * u")
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     // FIXME FIXME
     unimplemented!();
     /*
@@ -1750,9 +1750,9 @@ impl FutharkThunkSpec for RecipFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], r"recip")
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj / -arg[0].0.square();
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1787,7 +1787,7 @@ impl FutharkThunkSpec for SqrtFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"{}.sqrt", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     // FIXME FIXME
     unimplemented!();
   }
@@ -1826,7 +1826,7 @@ impl FutharkThunkSpec for RsqrtFutThunkSpec {
     //FutharkThunkCode::nd_map(arg[0], r"\u -> rsqrt u")
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     // FIXME FIXME
     unimplemented!();
   }
@@ -1863,9 +1863,9 @@ impl FutharkThunkSpec for CosFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"{}.cos", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * -arg[0].0.sin();
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1900,9 +1900,9 @@ impl FutharkThunkSpec for SinFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"{}.sin", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * arg[0].0.cos();
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1937,9 +1937,9 @@ impl FutharkThunkSpec for ExpFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"{}.exp", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * arg[0].0.exp();
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1974,10 +1974,9 @@ impl FutharkThunkSpec for LogisticFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> recip (1 + ({}.exp (-u)))", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     // FIXME
     unimplemented!();
-    //Some(Ok(()))
   }
 }
 
@@ -2012,12 +2011,12 @@ impl FutharkThunkSpec for StandardSiluFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> u / (1 + ({}.exp (-u)))", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     // FIXME: scalar dtype.
     let x = arg[0].0;
     let y = x.standard_silu();
     arg_adj[0] += out_adj * y * (x * (1.0_f32 - y) + 1.0_f32);
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -2122,9 +2121,9 @@ impl FutharkThunkSpec for LogFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"{}.log", arg[0].dtype.format_futhark()))
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj / arg[0].0;
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -2500,7 +2499,7 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     let x = arg[0].0;
     let x_ty = x.type_();
     let x_nd = x_ty.ndim() as usize;
@@ -2510,7 +2509,7 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     let rank = arg[1].0;
     let target = rank.inner_one_hot(inner_len, dtype);
     arg_adj[0] += out_adj * (y - target);
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -2833,7 +2832,7 @@ impl FutharkThunkSpec for BlockPadFutThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     let arg_ty_ = arg[0].0.type_();
     let nd = arg_ty_.ndim() as usize;
     assert_eq!(arg_ty_.shape[nd - 3], self.org_block[0]);
@@ -2851,7 +2850,7 @@ impl FutharkThunkSpec for BlockPadFutThunkSpec {
           arg_ty_.ndim(), self.org_block, self.new_block);
       unimplemented!();
     }
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -2922,7 +2921,7 @@ impl FutharkThunkSpec for BlockTriElemAffineFutThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     let arg0_ty = arg[0].0.type_();
     let dtype = arg0_ty.dtype;
     arg_adj[0] += out_adj.block_tri_elem_affine(
@@ -2933,7 +2932,7 @@ impl FutharkThunkSpec for BlockTriElemAffineFutThunkSpec {
         self.up_scale,
         ScalarVal_::zero(dtype),
     );
-    Some(Ok(()))
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -3195,7 +3194,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply");
     TL_PCTX.with(|pctx| {
-      let gpu = &pctx.nvgpu.as_ref().unwrap();
+      let gpu = pctx.nvgpu.as_ref().unwrap();
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
@@ -3374,7 +3373,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       _ => unimplemented!()
     };
     TL_PCTX.with(|pctx| {
-      let gpu = &pctx.nvgpu.as_ref().unwrap();
+      let gpu = pctx.nvgpu.as_ref().unwrap();
       println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm...");
       let ret = gpu.compute.sync();
       match ret {

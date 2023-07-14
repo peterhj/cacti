@@ -10,10 +10,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anyhow"
-version = "1.0.70"
-
-[[package]]
 name = "byteorder"
 version = "1.4.3"
 
@@ -159,7 +155,6 @@ version = "0.7.2"
 name = "repugnant_pickle"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "nom",
  "smol_str",
  "zip",

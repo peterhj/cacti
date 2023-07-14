@@ -308,8 +308,7 @@ impl CellDeref for CellViewHandle {
   }
 }
 
-pub type CellViewHandle2 = CellViewHandleEx;
-
+#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct CellViewHandleEx(usize, usize);
 
@@ -1416,6 +1415,64 @@ impl PCell {
           }
         });*/
         rep.addr.get()
+      }
+    }
+  }
+
+  pub fn get_loc(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+    let mut f_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
+          // FIXME FIXME
+          println!("DEBUG: PCell::get: prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+              prev_clk, q_clk, ty, q_locus, pmach);
+          panic!("bug");
+        }
+        Some(pmach)
+      }
+    };
+    if f_pmach.is_none() {
+      let (pmach, addr) = TL_PCTX.with(|pctx| {
+        pctx.alloc_loc(ty, q_locus)
+      });
+      self.push_new_replica(x, Clock::default(), q_locus, pmach, addr);
+      f_pmach = Some(pmach);
+    }
+    let f_pmach = f_pmach.unwrap();
+    match self.lookup(q_locus, f_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        //assert_eq!(rep.clk.get(), q_clk);
+        let prev_clk = rep.clk.get();
+        if prev_clk < q_clk {
+          // FIXME: actually copy from any existing replica.
+          // FIXME: depends on whether we want fresh or non-fresh get...
+          match self.find_any(q_clk, ty) {
+            None => {
+              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+                  self.optr, &self.ogty,
+                  prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+              );
+              println!("ERROR: PCell::get: no replica to copy from");
+              panic!();
+            }
+            Some((o_loc, o_pm, o_addr)) => {
+              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+                  self.optr, &self.ogty,
+                  prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+                  o_loc, o_pm, o_addr,
+              );
+              // FIXME FIXME: only set clock on successful copy.
+              TL_PCTX.with(|pctx| {
+                pctx.hard_copy(q_locus, f_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
+              });
+              rep.clk.set(q_clk);
+            }
+          }
+        }
+        (f_pmach, rep.addr.get())
       }
     }
   }

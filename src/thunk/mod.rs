@@ -342,6 +342,13 @@ impl From<FutharkThunkCode> for Result<FutharkThunkCode, FutharkGenErr> {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum FutharkThunkAdj {
+  Auto,
+  Spec,
+}
+
 pub trait FutharkThunkSpec {
   //fn tag(&self) -> Option<&'static str> { None }
   fn debug_name(&self) -> Option<&'static str> { None }
@@ -357,7 +364,7 @@ pub trait FutharkThunkSpec {
   fn set_out_ty_(&self, _arg: &[CellType], _out: CellType) -> Result<(), ThunkTypeErr> { Err(ThunkTypeErr::Immutable) }
   //fn mode(&self) -> CellMode { CellMode::Aff }
   fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr>;
-  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, _out_adj: CellPtr, _arg_adj: &mut [CellPtr]) -> Option<Result<(), ThunkAdjErr>> { None }
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, _out_adj: CellPtr, _arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> { Ok(FutharkThunkAdj::Auto) }
 }
 
 impl<T: FutharkThunkSpec> ThunkSpec for T {
@@ -462,6 +469,17 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
       }
       _ => unimplemented!()
     })
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+    match FutharkThunkSpec::pop_adj(self, arg, out, out_clk, out_adj, arg_adj) {
+      Ok(FutharkThunkAdj::Auto) => {
+        // FIXME
+        unimplemented!();
+      }
+      Ok(FutharkThunkAdj::Spec) => Ok(()),
+      Err(e) => Err(e)
+    }
   }
 }
 
@@ -1663,7 +1681,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       if ret.is_err() {
         // FIXME FIXME: failure handling.
         println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: runtime failure: {:?}", ret);
-        if let Some(e) = obj.error().map(|c| sane_ascii(c.to_bytes())) {
+        if let Some(e) = obj.error().map(|c| safe_ascii(c.to_bytes())) {
           println!("ERROR: FutharkThunkImpl::<CudaBackend>::apply: runtime failure: {}", e);
         }
         panic!();
@@ -1730,7 +1748,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=null");
       }
       Some(ctag) => {
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=\"{}\"", sane_ascii(ctag.to_bytes()));
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=\"{}\"", safe_ascii(ctag.to_bytes()));
         let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
         match out0_tag.as_ref() {
           None => {
