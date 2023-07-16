@@ -426,7 +426,7 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
         let x = ctx.ctr.fresh_cel();
         //println!("DEBUG: ctx_alias_bits: og={:?} old dtype={:?} x={:?} new dtype={:?}", og, e.ty.dtype, x, new_dtype);
         env.insert_alias(x, new_ty, og);
-        let mut spine = ctx.spine.borrow_mut();
+        let spine = ctx.spine.borrow();
         spine.alias(x, og);
         x
       }
@@ -449,7 +449,7 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
         let x = ctx.ctr.fresh_cel();
         //println!("DEBUG: ctx_alias_new_shape: og={:?} old shape={:?} x={:?} new shape={:?} compat={:?}", og, &e.ty.shape, x, &new_ty.shape, cmp);
         env.insert_alias(x, new_ty, og);
-        let mut spine = ctx.spine.borrow_mut();
+        let spine = ctx.spine.borrow();
         spine.alias(x, og);
         x
       }
@@ -461,7 +461,7 @@ pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let x = env.snapshot(&ctx.ctr, og);
-    let mut spine = ctx.spine.borrow_mut();
+    let spine = ctx.spine.borrow();
     spine.snapshot(x, og);
     x
   })
@@ -544,7 +544,7 @@ pub fn ctx_opaque(og: CellPtr) -> CellPtr {
         let x = ctx.ctr.fresh_cel();
         env.insert_alias(x, ty, og);
         // FIXME
-        let mut spine = ctx.spine.borrow_mut();
+        let spine = ctx.spine.borrow();
         spine.opaque(x, og);
         x
       }
@@ -656,7 +656,7 @@ pub fn ctx_pop_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType) -> Cel
         Some(e) => e.ty.clone()
       };
       dims.push(ty_.to_dim());
-      let mut spine = ctx.spine.borrow_mut();
+      let spine = ctx.spine.borrow();
       spine.push_seal(arg);
     }
     // FIXME FIXME: multiple arity out.
@@ -669,7 +669,7 @@ pub fn ctx_pop_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType) -> Cel
     let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
-    let mut spine = ctx.spine.borrow_mut();
+    let spine = ctx.spine.borrow();
     spine.intro_aff(y);
     spine.apply(y, tp);
     let yclk = spine._version(y).unwrap();
@@ -720,7 +720,7 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
         Some(e) => e.ty.clone()
       };
       dims.push(ty_.to_dim());
-      let mut spine = ctx.spine.borrow_mut();
+      let spine = ctx.spine.borrow();
       spine.push_seal(arg);
     }
     let odim = out_ty.to_dim();
@@ -732,7 +732,8 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
     let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
-    let mut spine = ctx.spine.borrow_mut();
+    let spine = ctx.spine.borrow();
+    spine.uninit(y);
     spine.initialize(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
@@ -753,7 +754,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
       };
       dims.push(ty_.to_dim());
       tys_.push(ty_);
-      let mut spine = ctx.spine.borrow_mut();
+      let spine = ctx.spine.borrow();
       spine.push_seal(arg);
     }
     let odim = match th.out_dim(&dims) {
@@ -783,7 +784,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
         assert_eq!(e.ty, &oty_);
       }
     }
-    let mut spine = ctx.spine.borrow_mut();
+    let spine = ctx.spine.borrow();
     spine.accumulate(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();

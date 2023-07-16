@@ -298,6 +298,12 @@ impl Debug for StableSet {
   }
 }
 
+impl Borrow<MCellPtr> for StableSet {
+  fn borrow(&self) -> &MCellPtr {
+    &self.ptr_
+  }
+}
+
 impl Clone for StableSet {
   fn clone(&self) -> StableSet {
     StableSet::from(self.ptr_)
@@ -325,10 +331,15 @@ impl StableSet {
     })
   }
 
+  pub fn as_ptr(&self) -> MCellPtr {
+    self.ptr_
+  }
+
   #[track_caller]
   pub fn add<X: Borrow<CellPtr>>(&self, x: X) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      // FIXME: retain?
+      let spine = ctx.spine.borrow();
       spine.add(self.ptr_, *x.borrow());
     }))
   }
@@ -338,7 +349,29 @@ pub struct StableMap {
   pub ptr_: MCellPtr,
 }
 
-// TODO
+impl Debug for StableMap {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "StableMap({})", self.ptr_.raw_)
+  }
+}
+
+impl Borrow<MCellPtr> for StableMap {
+  fn borrow(&self) -> &MCellPtr {
+    &self.ptr_
+  }
+}
+
+impl Clone for StableMap {
+  fn clone(&self) -> StableMap {
+    StableMap::from(self.ptr_)
+  }
+}
+
+impl Drop for StableMap {
+  fn drop(&mut self) {
+    ctx_release(self.ptr_._into_cel_ptr());
+  }
+}
 
 impl From<MCellPtr> for StableMap {
   fn from(ptr: MCellPtr) -> StableMap {
@@ -351,15 +384,43 @@ impl StableMap {
   #[track_caller]
   pub fn new() -> StableMap {
     panick_wrap(|| {
-      ctx_fresh_mset().into()
+      ctx_fresh_mmap().into()
     })
+  }
+
+  pub fn as_ptr(&self) -> MCellPtr {
+    self.ptr_
   }
 
   #[track_caller]
   pub fn add<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: K, v: V) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      // FIXME: retain?
+      let spine = ctx.spine.borrow();
       spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+    }))
+  }
+
+  #[track_caller]
+  pub fn get(&self, key: CellPtr) -> CellPtr {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      let kclk = spine._version(key).unwrap_or_else(|| Clock::default());
+      spine._lookup(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil())
+    }))
+  }
+
+  #[track_caller]
+  pub fn vget(&self, vkey: &[CellPtr]) -> Vec<CellPtr> {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let mut vval = Vec::with_capacity(vkey.len());
+      let spine = ctx.spine.borrow();
+      for &key in vkey.iter() {
+        let kclk = spine._version(key).unwrap_or_else(|| Clock::default());
+        let v = spine._lookup(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil());
+        vval.push(v);
+      }
+      vval
     }))
   }
 }
@@ -383,11 +444,15 @@ impl Debug for CellViewHandle {
 
 impl CellViewHandle {
   pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
-    unsafe { &*(from_raw_parts((x.raw_ as usize ^ VOID_MASK) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
+    let raw = x.raw_ as usize;
+    assert!(raw < VOID_MASK);
+    unsafe { &*(from_raw_parts((raw ^ VOID_MASK) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
   }
 
   pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
-    unsafe { &mut *(from_raw_parts_mut((x.raw_ as usize ^ VOID_MASK) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
+    let raw = x.raw_ as usize;
+    assert!(raw < VOID_MASK);
+    unsafe { &mut *(from_raw_parts_mut((raw ^ VOID_MASK) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
   }
 
   pub fn materialize(&self) -> CellPtr {
@@ -415,7 +480,9 @@ impl Debug for CellViewHandleEx {
 
 impl CellViewHandleEx {
   pub fn _from(x: CellPtr) -> CellViewHandleEx {
-    CellViewHandleEx((x.raw_ as usize) ^ VOID_MASK, 0)
+    let raw = x.raw_ as usize;
+    assert!(raw < VOID_MASK);
+    CellViewHandleEx(raw ^ VOID_MASK, 0)
   }
 
   pub fn materialize(&self) -> CellPtr {

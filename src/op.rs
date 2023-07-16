@@ -1541,7 +1541,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn cache(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      let mut spine = ctx.spine.borrow();
       spine.cache_aff(*self.borrow());
       //self
     }))
@@ -1550,7 +1550,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn cache_init(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      let mut spine = ctx.spine.borrow();
       spine.init_cache_mux(*self.borrow());
       //self
     }))
@@ -1582,7 +1582,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   /*#[track_caller]
   fn unsafe_unseal_init(self) -> Self {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      let mut spine = ctx.spine.borrow();
       spine.unseal_mux(*self.borrow());
       self
     }))
@@ -1599,7 +1599,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn mem_set_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      let mut spine = ctx.spine.borrow();
       spine.yield_set(*self.borrow(), Locus::Mem);
     }))
   }
@@ -1612,7 +1612,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn mem_init_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow_mut();
+      let mut spine = ctx.spine.borrow();
       spine.yield_init(*self.borrow(), Locus::Mem);
     }))
   }
@@ -1779,3 +1779,43 @@ pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
   // FIXME FIXME
   unimplemented!();
 }*/
+
+pub trait TypeOps: Borrow<CellType> {
+  #[track_caller]
+  fn zeros(&self) -> CellPtr {
+    let ty = self.borrow();
+    zeros(&ty.shape as &[_], ty.dtype)
+  }
+
+  #[track_caller]
+  fn ones(&self) -> CellPtr {
+    let ty = self.borrow();
+    ones(&ty.shape as &[_], ty.dtype)
+  }
+}
+
+pub trait MMapOps: Borrow<MCellPtr> {
+  #[track_caller]
+  fn vjp(&self) -> StableMap {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let allsrc = StableMap::new();
+      let sink = *self.borrow();
+      let spine = ctx.spine.borrow();
+      spine.adj_map(allsrc.as_ptr(), sink, &ctx.ctr, &ctx.thunkenv);
+      allsrc
+    }))
+  }
+
+  #[track_caller]
+  fn jvp(&self) -> StableMap {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let allsink = StableMap::new();
+      let src = *self.borrow();
+      let spine = ctx.spine.borrow();
+      spine.dual_map(allsink.as_ptr(), src, &ctx.ctr, &ctx.thunkenv);
+      allsink
+    }))
+  }
+}
+
+impl MMapOps for StableMap {}
