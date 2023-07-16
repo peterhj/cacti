@@ -1,10 +1,10 @@
-//use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, MSet, MMap, MValueRef};
+//use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, CellState};
 use crate::cell::*;
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
-use crate::spine::{SpineRet};
+use crate::spine::{SpineRet, SpineEntry, SpineEntryName};
 use crate::thunk::op::*;
 
 use futhark_syntax::*;
@@ -36,18 +36,122 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
       let rhs = *rhs.borrow();
       if TL_CTX.with(|ctx| {
         let mut success = false;
-        let mut thunkenv = ctx.thunkenv.borrow_mut();
-        if thunkenv.accumulate_in_place {
+        if ctx.thunkenv.borrow().accumulate_in_place {
           let spine = ctx.spine.borrow();
+          let base_clk = spine._counter();
           let mut this_clk = spine._version(this).unwrap();
           let rhs_clk = spine._version(rhs).unwrap();
           if rhs_clk.is_init_once() {
-            // FIXME: must update the spine.
-            // FIXME: should seal rhs.
-            this_clk = this_clk.init_or_update();
-            let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
-            assert!(thunkenv.update.insert((this, this_clk), tclo).is_none());
-            success = true;
+            this_clk = base_clk.max(this_clk).init_or_update();
+            let bp = spine.curp.get();
+            assert_eq!(bp, spine.log.borrow().len() as _);
+            let mut state: u8 = 0;
+            for sp in (0 .. bp).rev() {
+              let e_sp = spine.log.borrow()[sp as usize];
+              match (state, e_sp) {
+                (0, SpineEntry::Cache(y, ..)) |
+                (0, SpineEntry::YieldSet(y, ..)) |
+                (0, SpineEntry::YieldInit(y, ..)) |
+                (0, SpineEntry::Initialize(y, ..)) => {
+                  if y == rhs {
+                    break;
+                  }
+                }
+                (0, SpineEntry::Apply(y, yclk, th)) => {
+                  if y == rhs {
+                    assert_eq!(yclk, rhs_clk);
+                    spine.log.borrow_mut()[sp as usize] = match e_sp.name() {
+                      SpineEntryName::Initialize => {
+                        SpineEntry::Initialize(this, this_clk, th)
+                      }
+                      SpineEntryName::Apply => {
+                        SpineEntry::Apply(this, this_clk, th)
+                      }
+                      _ => unreachable!()
+                    };
+                    let mut cur_env = spine.cur_env.borrow_mut();
+                    let arg = cur_env.update.remove(&(rhs, rhs_clk)).unwrap();
+                    assert!(cur_env.update.insert((this, this_clk), arg).is_none());
+                    drop(cur_env);
+                    let mut thunkenv = ctx.thunkenv.borrow_mut();
+                    let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
+                    assert!(thunkenv.update.insert((this, this_clk), tclo).is_none());
+                    drop(thunkenv);
+                    state = 1;
+                  }
+                }
+                (0, SpineEntry::Accumulate(y, ..)) => {
+                  if y == rhs {
+                    panic!("bug");
+                  }
+                }
+                (0, SpineEntry::UnsafeWrite(y, ..)) => {
+                  if y == rhs {
+                    unimplemented!();
+                  }
+                }
+                (1, SpineEntry::Intro(y, yclk)) |
+                (1, SpineEntry::Uninit(y, yclk)) => {
+                  if y == rhs {
+                    assert_eq!(yclk, rhs_clk);
+                    spine.log.borrow_mut()[sp as usize] = match (this_clk.up, e_sp.name()) {
+                      (0, SpineEntryName::Intro) => {
+                        SpineEntry::Intro(this, this_clk)
+                      }
+                      (0, SpineEntryName::Uninit) => {
+                        SpineEntry::Uninit(this, this_clk)
+                      }
+                      (_, SpineEntryName::Intro) |
+                      (_, SpineEntryName::Uninit) => {
+                        SpineEntry::_Top
+                      }
+                      _ => unreachable!()
+                    };
+                    let mut cur_env = spine.cur_env.borrow_mut();
+                    match cur_env.state.get_mut(&rhs) {
+                      None => panic!("bug"),
+                      Some(state) => {
+                        // FIXME: sealing here is kinda hacky.
+                        state.flag.set_seal();
+                        state.flag.unset_intro();
+                        state.clk = state.clk.uninit();
+                      }
+                    }
+                    match cur_env.state.get_mut(&this) {
+                      None => {
+                        let mut state = CellState::default();
+                        state.flag.set_intro();
+                        state.clk = this_clk;
+                        cur_env.state.insert(this, state);
+                      }
+                      Some(state) => {
+                        state.flag.set_intro();
+                        //assert!(state.flag.intro());
+                        assert!(!state.flag.seal());
+                        state.clk = this_clk;
+                      }
+                    }
+                    drop(cur_env);
+                    // TODO
+                    state = 2;
+                    break;
+                  }
+                }
+                _ => {}
+              }
+            }
+            match state {
+              0 => {}
+              1 => panic!("bug"),
+              2 => {
+                // FIXME: should seal rhs.
+                /*
+                spine.seal(rhs);
+                */
+                success = true;
+              }
+              _ => unreachable!()
+            }
           }
         }
         success
@@ -1696,7 +1800,7 @@ pub trait CtlOps: Borrow<CellPtr> + Sized {
 
 impl<L: Borrow<CellPtr> + Sized> CtlOps for L {}
 
-impl MSet {
+/*impl MSet {
   #[track_caller]
   pub fn add<'x, X: Into<MValueRef<'x>>>(&self, x: X) {
     unimplemented!();
@@ -1716,7 +1820,7 @@ pub fn vjp(y_dy: &MMap, x: &MSet) -> MMap {
 
 pub fn jvp(y: &MSet, x_dx: &MMap) -> MMap {
   unimplemented!();
-}
+}*/
 
 #[track_caller]
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
@@ -1794,11 +1898,13 @@ pub trait TypeOps: Borrow<CellType> {
   }
 }
 
+impl TypeOps for CellType {}
+
 pub trait MMapOps: Borrow<MCellPtr> {
   #[track_caller]
-  fn vjp(&self) -> StableMap {
+  fn vjp(&self) -> CellMap {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let allsrc = StableMap::new();
+      let allsrc = CellMap::new();
       let sink = *self.borrow();
       let spine = ctx.spine.borrow();
       spine.adj_map(allsrc.as_ptr(), sink, &ctx.ctr, &ctx.thunkenv);
@@ -1807,9 +1913,9 @@ pub trait MMapOps: Borrow<MCellPtr> {
   }
 
   #[track_caller]
-  fn jvp(&self) -> StableMap {
+  fn jvp(&self) -> CellMap {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let allsink = StableMap::new();
+      let allsink = CellMap::new();
       let src = *self.borrow();
       let spine = ctx.spine.borrow();
       spine.dual_map(allsink.as_ptr(), src, &ctx.ctr, &ctx.thunkenv);
@@ -1818,4 +1924,12 @@ pub trait MMapOps: Borrow<MCellPtr> {
   }
 }
 
-impl MMapOps for StableMap {}
+impl MMapOps for CellMap {}
+
+pub fn vjp(allsrc: &CellMap, sink: &CellMap) {
+  unimplemented!();
+}
+
+pub fn jvp(allsink: &CellMap, src: &CellMap) {
+  unimplemented!();
+}

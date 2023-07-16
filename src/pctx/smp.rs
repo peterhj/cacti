@@ -2,22 +2,21 @@ use super::*;
 use crate::algo::{RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
-#[cfg(feature = "nvgpu")]
+/*#[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::{GpuOuterCell};
 #[cfg(feature = "nvgpu")]
 use cacti_gpu_cu_ffi::{cuda_mem_free_host, cuda_mem_alloc_host};
 #[cfg(feature = "nvgpu")]
-use cacti_gpu_cu_ffi::types::{CUDA_ERROR_OUT_OF_MEMORY, CUDA_ERROR_DEINITIALIZED};
+use cacti_gpu_cu_ffi::types::{CUDA_ERROR_OUT_OF_MEMORY, CUDA_ERROR_DEINITIALIZED};*/
 use cacti_smp_c_ffi::*;
 
 #[cfg(target_os = "linux")]
 use libc::{__errno_location};
 #[cfg(all(unix, not(target_os = "linux")))]
 use libc::{__errno as __errno_location};
-use libc::{ENOMEM, free, malloc};
+use libc::{ENOMEM, free, malloc, c_char, c_int, c_void};
 
 use std::cell::{Cell};
-use std::ffi::{c_void};
 //use std::rc::{Rc};
 
 #[repr(C)]
@@ -37,7 +36,7 @@ impl Drop for MemCell {
           free(self.ptr);
         }
       }
-      1 => {
+      /*1 => {
         #[cfg(feature = "nvgpu")]
         unsafe {
           match cuda_mem_free_host(self.ptr) {
@@ -46,7 +45,7 @@ impl Drop for MemCell {
             Err(_) => panic!("bug"),
           }
         }
-      }
+      }*/
       _ => unreachable!()
     }
   }
@@ -54,6 +53,7 @@ impl Drop for MemCell {
 
 impl MemCell {
   pub fn try_alloc(sz: usize) -> Result<MemCell, PMemErr> {
+    // FIXME: assure 64-bit ptr.
     assert!(sz <= 0x00ff_ffff_ffff_ffff);
     unsafe {
       let ptr = malloc(sz);
@@ -70,7 +70,7 @@ impl MemCell {
     }
   }
 
-  #[cfg(not(feature = "nvgpu"))]
+  /*#[cfg(not(feature = "nvgpu"))]
   pub fn try_alloc_page_locked(sz: usize) -> Result<MemCell, PMemErr> {
     unimplemented!();
   }
@@ -93,7 +93,7 @@ impl MemCell {
     }
     let mask = (sz << 8) | 1;
     Ok(MemCell{ptr, mask})
-  }
+  }*/
 
   pub fn as_reg(&self) -> MemReg {
     MemReg{
@@ -180,11 +180,42 @@ impl SmpPCtx {
     pl.push((PMach::Smp, Locus::Mem));
   }*/
 
-  pub fn try_mem_alloc(&self, sz: usize, pmset: PMachSet) -> Result<MemCell, PMemErr> {
+  /*pub fn try_mem_alloc(&self, sz: usize, pmset: PMachSet) -> Result<MemCell, PMemErr> {
     if pmset.contains(PMach::NvGpu) {
       MemCell::try_alloc_page_locked(sz)
     } else {
       MemCell::try_alloc(sz)
     }
+  }*/
+}
+
+pub extern "C" fn tl_pctx_smp_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize, raw_tag: *const c_char) -> c_int {
+  // FIXME
+  unimplemented!();
+  /*
+  assert!(!ptr.is_null());
+  unsafe {
+    let mem = malloc(sz);
+    if mem.is_null() {
+      return 1;
+    }
+    write(ptr, mem);
+    0
   }
+  */
+}
+
+pub extern "C" fn tl_pctx_smp_mem_free_hook(ptr: *mut c_void) -> c_int {
+  // FIXME
+  unimplemented!();
+  /*
+  assert!(!ptr.is_null());
+  unsafe {
+    free(ptr);
+  }
+  */
+}
+
+pub extern "C" fn tl_pctx_smp_mem_unify_hook(lhs_raw_tag: *mut c_char, rhs_raw_tag: *mut c_char) {
+  // FIXME
 }

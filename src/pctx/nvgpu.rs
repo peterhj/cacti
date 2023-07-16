@@ -8,11 +8,11 @@ use crate::ctx::*;
 use cacti_gpu_cu_ffi::*;
 use cacti_gpu_cu_ffi::types::*;
 
-use libc::{c_char};
+use libc::{c_char, c_int, c_void};
 
 use std::cell::{Cell, RefCell};
 use std::convert::{TryInto};
-use std::ffi::{CStr, c_void};
+use std::ffi::{CStr};
 use std::rc::{Rc, Weak};
 use std::ptr::{write};
 
@@ -664,6 +664,7 @@ impl InnerCell for NvGpuMemCell {
 
 pub struct NvGpuPageMap {
   pub page_tab: RefCell<HashMap<PAddr, Rc<NvGpuMemCell>>>,
+  pub page_idx: RefCell<HashMap<*mut c_void, PAddr>>,
   pub extrabuf: Rc<NvGpuMemCell>,
 }
 
@@ -677,16 +678,40 @@ impl NvGpuPageMap {
       Ok(mem) => mem
     };
     NvGpuPageMap{
+      page_idx: RefCell::new(HashMap::new()),
       page_tab: RefCell::new(HashMap::new()),
       extrabuf: Rc::new(mem),
     }
   }
 
-  /*pub fn try_alloc(&mut self, sz: usize) -> Result<PAddr, PMemErr> {
-  }*/
+  pub fn lookup(&self, addr: PAddr) -> Option<Rc<NvGpuMemCell>> {
+    self.page_tab.borrow().get(&addr).map(|cel| cel.clone())
+  }
+
+  pub fn rev_lookup(&self, ptr: *mut c_void) -> Option<PAddr> {
+    self.page_idx.borrow().get(&ptr).map(|&addr| addr)
+  }
+
+  pub fn try_alloc(&self, addr: PAddr, sz: usize) -> Result<Rc<NvGpuMemCell>, PMemErr> {
+    let cel = Rc::new(NvGpuMemCell::try_alloc(sz)?);
+    assert!(self.page_tab.borrow_mut().insert(addr, cel.clone()).is_none());
+    assert!(self.page_idx.borrow_mut().insert(cel.ptr, addr).is_none());
+    Ok(cel)
+  }
+
+  pub fn release(&self, addr: PAddr) -> Option<Rc<NvGpuMemCell>> {
+    let cel = self.page_tab.borrow_mut().remove(&addr);
+    match cel.as_ref() {
+      None => {}
+      Some(cel) => {
+        assert_eq!(self.page_idx.borrow_mut().remove(&cel.ptr), Some(addr));
+      }
+    }
+    cel
+  }
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 pub struct GpuInnerMemCell {
   pub off:  usize,
   pub sz:   usize,
@@ -703,7 +728,7 @@ impl GpuInnerMemCell {
       nextfree: Cell::new(usize::max_value()),
     }
   }
-}
+}*/
 
 #[derive(Clone, Copy, Debug)]
 pub enum NvGpuMemPoolReq {
@@ -868,7 +893,7 @@ impl GpuMemPool {
     }
   }
 
-  pub fn lookup_dptr(&self, query_dptr: u64) -> Option<(Region, Option<PAddr>)> {
+  pub fn rev_lookup(&self, query_dptr: u64) -> Option<(Region, Option<PAddr>)> {
     //println!("DEBUG: NvGpuMemPool::lookup_dptr: query dptr=0x{:016x}", query_dptr);
     //println!("DEBUG: NvGpuMemPool::lookup_dptr: front base=0x{:016x}", self.front_base);
     if query_dptr < self.front_base {
@@ -1210,7 +1235,84 @@ impl GpuMemPool {
   }
 }
 
-pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *const c_char) -> i32 {
+pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize, raw_tag: *const c_char) -> c_int {
+  assert!(!ptr.is_null());
+  let ctag = unsafe {
+    if raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(raw_tag))
+    }
+  };
+  println!("DEBUG: tl_pctx_nvgpu_mem_alloc_hook: sz={} ctag={:?}",
+      sz,
+      ctag.map(|ctag| safe_ascii(ctag.to_bytes())),
+  );
+  TL_PCTX.with(|pctx| {
+    let gpu = pctx.nvgpu.as_ref().unwrap();
+    let addr = pctx.ctr.fresh_addr();
+    match gpu.page_map.try_alloc(addr, sz) {
+      Err(PMemErr::Oom) => {
+        // FIXME FIXME: oom.
+        unimplemented!();
+      }
+      Err(_) => panic!("bug"),
+      Ok(cel) => {
+        unsafe {
+          write(ptr, cel.ptr);
+        }
+      }
+    }
+    0
+  })
+}
+
+pub extern "C" fn tl_pctx_nvgpu_mem_free_hook(ptr: *mut c_void) -> c_int {
+  TL_PCTX.try_with(|pctx| {
+    println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x}",
+        ptr as usize,
+    );
+    let gpu = pctx.nvgpu.as_ref().unwrap();
+    match gpu.page_map.rev_lookup(ptr) {
+      None => panic!("bug"),
+      Some(addr) => {
+        let cel = gpu.page_map.release(addr).unwrap();
+        println!("DEBUG: tl_pctx_nvgpu_mem_free_hook:   addr={:?} ptr=0x{:016x} size={}",
+            addr, cel.ptr as usize, InnerCell::size(&*cel),
+        );
+        assert_eq!(cel.ptr, ptr);
+      }
+    }
+    0
+  }).unwrap_or_else(|_| {
+    println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x} (pctx deinit)",
+        ptr as usize,
+    );
+    0
+  })
+}
+
+pub extern "C" fn tl_pctx_nvgpu_mem_unify_hook(lhs_raw_tag: *mut c_char, rhs_raw_tag: *mut c_char) {
+  let (lhs_ctag, rhs_ctag) = unsafe {
+    let lhs_ctag = if lhs_raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(lhs_raw_tag))
+    };
+    let rhs_ctag = if rhs_raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(rhs_raw_tag))
+    };
+    (lhs_ctag, rhs_ctag)
+  };
+  println!("DEBUG: tl_pctx_nvgpu_mem_unify_hook: ltag={:?} rtag={:?}",
+      lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
+      rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
+  );
+}
+
+pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *const c_char) -> c_int {
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
     /*println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} raw tag=0x{:016x}",
@@ -1263,13 +1365,13 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *co
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
+pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
   TL_PCTX.try_with(|pctx| {
     println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x}",
         dptr,
     );
     let gpu = pctx.nvgpu.as_ref().unwrap();
-    let p = match gpu.mem_pool.lookup_dptr(dptr) {
+    let p = match gpu.mem_pool.rev_lookup(dptr) {
       Some((_, Some(p))) => p,
       _ => panic!("bug"),
     };
@@ -1292,46 +1394,47 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> i32 {
 }
 
 pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag: *const c_char) {
+  let (lhs_ctag, rhs_ctag) = unsafe {
+    let lhs_ctag = if lhs_raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(lhs_raw_tag))
+    };
+    let rhs_ctag = if rhs_raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(rhs_raw_tag))
+    };
+    (lhs_ctag, rhs_ctag)
+  };
+  println!("DEBUG: tl_pctx_gpu_unify_hook: ltag={:?} rtag={:?}",
+      lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
+      rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
+  );
   TL_PCTX.try_with(|pctx| {
     /*println!("DEBUG: tl_pctx_gpu_unify_hook: raw ltag=0x{:016x} raw rtag=0x{:016x}",
         lhs_raw_tag as usize,
         rhs_raw_tag as usize,
     );*/
-    unsafe {
-      let lhs_ctag = if lhs_raw_tag.is_null() {
-        None
-      } else {
-        Some(CStr::from_ptr(lhs_raw_tag))
-      };
-      let rhs_ctag = if rhs_raw_tag.is_null() {
-        None
-      } else {
-        Some(CStr::from_ptr(rhs_raw_tag))
-      };
-      println!("DEBUG: tl_pctx_gpu_unify_hook: ltag={:?} rtag={:?}",
-          lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
-          rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
-      );
-      match (lhs_ctag.map(|c| c.to_bytes()), rhs_ctag.map(|c| c.to_bytes())) {
-        (None, None) => {}
-        (None, Some(tag)) |
-        (Some(tag), None) => {
-          let tag = TagUnifier::parse_tag(tag).unwrap();
-          let mut unify = pctx.tagunify.borrow_mut();
-          unify.find(tag);
-        }
-        (Some(ltag), Some(rtag)) => {
-          let ltag = TagUnifier::parse_tag(ltag).unwrap();
-          let rtag = TagUnifier::parse_tag(rtag).unwrap();
-          let mut unify = pctx.tagunify.borrow_mut();
-          unify.unify(ltag, rtag);
-        }
+    match (lhs_ctag.map(|c| c.to_bytes()), rhs_ctag.map(|c| c.to_bytes())) {
+      (None, None) => {}
+      (None, Some(tag)) |
+      (Some(tag), None) => {
+        let tag = TagUnifier::parse_tag(tag).unwrap();
+        let mut unify = pctx.tagunify.borrow_mut();
+        unify.find(tag);
+      }
+      (Some(ltag), Some(rtag)) => {
+        let ltag = TagUnifier::parse_tag(ltag).unwrap();
+        let rtag = TagUnifier::parse_tag(rtag).unwrap();
+        let mut unify = pctx.tagunify.borrow_mut();
+        unify.unify(ltag, rtag);
       }
     }
   }).unwrap_or_else(|_| ())
 }
 
-pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> i32 {
+pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> c_int {
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
     if sz > ALLOC_ALIGN {
@@ -1347,7 +1450,7 @@ pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> i
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_failarg_free_hook(_dptr: u64) -> i32 {
+pub extern "C" fn tl_pctx_gpu_failarg_free_hook(_dptr: u64) -> c_int {
   TL_PCTX.try_with(|_pctx| {
     // FIXME FIXME
     0

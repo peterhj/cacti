@@ -1769,7 +1769,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
-      match gpu.mem_pool.lookup_dptr(mem_dptr) {
+      match gpu.mem_pool.rev_lookup(mem_dptr) {
         None => {
           // FIXME FIXME
           panic!("bug");

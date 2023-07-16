@@ -288,44 +288,44 @@ impl MCellPtr {
   }
 }
 
-pub struct StableSet {
+pub struct CellSet {
   pub ptr_: MCellPtr,
 }
 
-impl Debug for StableSet {
+impl Debug for CellSet {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "StableSet({})", self.ptr_.raw_)
+    write!(f, "CellSet({})", self.ptr_.raw_)
   }
 }
 
-impl Borrow<MCellPtr> for StableSet {
+impl Borrow<MCellPtr> for CellSet {
   fn borrow(&self) -> &MCellPtr {
     &self.ptr_
   }
 }
 
-impl Clone for StableSet {
-  fn clone(&self) -> StableSet {
-    StableSet::from(self.ptr_)
+impl Clone for CellSet {
+  fn clone(&self) -> CellSet {
+    CellSet::from(self.ptr_)
   }
 }
 
-impl Drop for StableSet {
+impl Drop for CellSet {
   fn drop(&mut self) {
     ctx_release(self.ptr_._into_cel_ptr());
   }
 }
 
-impl From<MCellPtr> for StableSet {
-  fn from(ptr: MCellPtr) -> StableSet {
+impl From<MCellPtr> for CellSet {
+  fn from(ptr: MCellPtr) -> CellSet {
     ctx_retain(ptr._into_cel_ptr());
-    StableSet{ptr_: ptr}
+    CellSet{ptr_: ptr}
   }
 }
 
-impl StableSet {
+impl CellSet {
   #[track_caller]
-  pub fn new() -> StableSet {
+  pub fn new() -> CellSet {
     panick_wrap(|| {
       ctx_fresh_mset().into()
     })
@@ -345,44 +345,44 @@ impl StableSet {
   }
 }
 
-pub struct StableMap {
+pub struct CellMap {
   pub ptr_: MCellPtr,
 }
 
-impl Debug for StableMap {
+impl Debug for CellMap {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "StableMap({})", self.ptr_.raw_)
+    write!(f, "CellMap({})", self.ptr_.raw_)
   }
 }
 
-impl Borrow<MCellPtr> for StableMap {
+impl Borrow<MCellPtr> for CellMap {
   fn borrow(&self) -> &MCellPtr {
     &self.ptr_
   }
 }
 
-impl Clone for StableMap {
-  fn clone(&self) -> StableMap {
-    StableMap::from(self.ptr_)
+impl Clone for CellMap {
+  fn clone(&self) -> CellMap {
+    CellMap::from(self.ptr_)
   }
 }
 
-impl Drop for StableMap {
+impl Drop for CellMap {
   fn drop(&mut self) {
     ctx_release(self.ptr_._into_cel_ptr());
   }
 }
 
-impl From<MCellPtr> for StableMap {
-  fn from(ptr: MCellPtr) -> StableMap {
+impl From<MCellPtr> for CellMap {
+  fn from(ptr: MCellPtr) -> CellMap {
     ctx_retain(ptr._into_cel_ptr());
-    StableMap{ptr_: ptr}
+    CellMap{ptr_: ptr}
   }
 }
 
-impl StableMap {
+impl CellMap {
   #[track_caller]
-  pub fn new() -> StableMap {
+  pub fn new() -> CellMap {
     panick_wrap(|| {
       ctx_fresh_mmap().into()
     })
@@ -1353,6 +1353,12 @@ impl CellFlag {
   pub fn set_intro(&mut self) -> bool {
     let prev = self.intro();
     self.bits |= 1;
+    prev
+  }
+
+  pub fn unset_intro(&mut self) -> bool {
+    let prev = self.intro();
+    self.bits &= !1;
     prev
   }
 

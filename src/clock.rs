@@ -118,6 +118,12 @@ impl Default for Clock {
   }
 }
 
+impl From<TotalClock> for Clock {
+  fn from(tclk: TotalClock) -> Clock {
+    tclk.internal
+  }
+}
+
 impl From<Counter> for Clock {
   #[inline(always)]
   fn from(ctr: Counter) -> Clock {
@@ -187,8 +193,6 @@ impl Clock {
     }
     let next_up = self.up + 1;
     assert!(next_up > 0);
-    // FIXME: is this a vestige of final?
-    /*assert!(next_up != i32::max_value());*/
     Clock{rst: self.rst, up: next_up}
   }
 
@@ -206,6 +210,20 @@ impl Clock {
     assert!(self.up != u32::max_value());
     Clock{rst: self.rst, up: u32::max_value()}
   }*/
+
+  #[must_use]
+  pub fn max(self, rhs: Clock) -> Clock {
+    match self.partial_cmp(&rhs) {
+      None => {
+        panic!();
+      }
+      Some(Ordering::Less) => rhs,
+      Some(Ordering::Greater) => self,
+      Some(Ordering::Equal) => {
+        Clock{rst: self.rst, up: max(self.up, rhs.up)}
+      }
+    }
+  }
 
   pub fn partial_cmp_<Clk: Into<Clock>>(&self, r_clk: Clk) -> Option<Ordering> {
     self.partial_cmp(&r_clk.into())
@@ -225,6 +243,42 @@ impl PartialOrd for Clock {
           Some(self.up.cmp(&r_clk.up))
         }
       }
+    }
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[repr(transparent)]
+pub struct TotalClock {
+  pub internal: Clock,
+}
+
+impl Debug for TotalClock {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "TotalClock(rst={}, up={})", self.internal.rst, self.internal.up)
+  }
+}
+
+impl From<Clock> for TotalClock {
+  fn from(internal: Clock) -> TotalClock {
+    TotalClock{internal}
+  }
+}
+
+impl PartialOrd for TotalClock {
+  fn partial_cmp(&self, rhs: &TotalClock) -> Option<Ordering> {
+    Some(self.cmp(rhs))
+  }
+}
+
+impl Ord for TotalClock {
+  fn cmp(&self, rhs: &TotalClock) -> Ordering {
+    match self.internal.partial_cmp(&rhs.internal) {
+      None => {
+        println!("ERROR: TotalClock::cmp: Ord failure (lhs={:?} rhs={:?}", self, rhs);
+        panic!();
+      }
+      Some(o) => o
     }
   }
 }
