@@ -1,4 +1,4 @@
-use crate::algo::{HashMap, RevSortKey8, RevSortMap8};
+use crate::algo::{HashMap, HashSet, RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
 use crate::clock::*;
 use crate::ctx::*;
@@ -6,13 +6,14 @@ use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
+use crate::util::mmap::{MmapBuf};
 use crate::util::pickle::{TorchDtype};
 
 use smol_str::{SmolStr};
 
 use std::any::{Any};
 use std::borrow::{Borrow};
-use std::cell::{Cell};
+use std::cell::{Cell, RefCell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{forget, size_of, swap};
@@ -429,9 +430,30 @@ pub trait CellDeref {
   fn _deref(&self) -> CellPtr;
 }
 
-const VOID_MASK: usize = 0x8000_0000_0000_0000;
+const VOID_MAP_SIZE: usize = 0x1_0000_0000;
+const VOID_MAP_HI: usize = 0x8000_0000;
 
 enum _Void {}
+
+thread_local! {
+  static TL_HANDLE_TAB: RefCell<CellViewHandleTab> = RefCell::new(CellViewHandleTab::new());
+}
+
+struct CellViewHandleTab {
+  base: MmapBuf,
+  lock: HashSet<CellPtr>,
+  read: HashMap<CellPtr, u32>,
+}
+
+impl CellViewHandleTab {
+  pub fn new() -> CellViewHandleTab {
+    assert_eq!(VOID_MAP_SIZE, VOID_MAP_HI << 1);
+    let base = MmapBuf::new_noderef(VOID_MAP_SIZE).unwrap();
+    let lock = HashSet::new();
+    let read = HashMap::new();
+    CellViewHandleTab{base, lock, read}
+  }
+}
 
 #[repr(transparent)]
 pub struct CellViewHandle([_Void]);
@@ -442,17 +464,90 @@ impl Debug for CellViewHandle {
   }
 }
 
+impl Drop for CellViewHandle {
+  fn drop(&mut self) {
+    TL_HANDLE_TAB.with(|tab| {
+      let mut tab = tab.borrow_mut();
+      let base = tab.base.as_ptr() as usize;
+      let val = self.0.as_ptr() as usize;
+      let mut raw = val - base;
+      if (raw & VOID_MAP_HI) != 0 {
+        raw ^= VOID_MAP_HI;
+        let x = CellPtr::from_unchecked(raw as i32);
+        match tab.lock.remove(&x) {
+          false => {
+            panic!("ERROR: CellViewHandle::drop: expired mutable borrow");
+          }
+          true => {}
+        }
+      } else {
+        let x = CellPtr::from_unchecked(raw as i32);
+        match tab.read.get_mut(&x) {
+          None => {
+            panic!("ERROR: CellViewHandle::drop: expired immutable borrow");
+          }
+          Some(ref_ct) => {
+            *ref_ct -= 1;
+            if *ref_ct <= 0 {
+              assert_eq!(tab.read.remove(&x), Some(0));
+            }
+          }
+        }
+      }
+    });
+  }
+}
+
 impl CellViewHandle {
   pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
+    let base = TL_HANDLE_TAB.with(|tab| {
+      let mut tab = tab.borrow_mut();
+      match tab.lock.contains(&x) {
+        false => {}
+        true => {
+          panic!("ERROR: CellViewHandle::_from: existing mutable borrow");
+        }
+      }
+      match tab.read.get_mut(&x) {
+        None => {
+          tab.read.insert(x, 1);
+        }
+        Some(ref_ct) => {
+          *ref_ct += 1;
+        }
+      }
+      tab.base.as_ptr() as usize
+    });
     let raw = x.raw_ as usize;
-    assert!(raw < VOID_MASK);
-    unsafe { &*(from_raw_parts((raw ^ VOID_MASK) as *const i32 as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
+    assert!(raw < VOID_MAP_HI);
+    let val = base + raw;
+    unsafe { &*(from_raw_parts(val as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
   }
 
   pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
+    let base = TL_HANDLE_TAB.with(|tab| {
+      let mut tab = tab.borrow_mut();
+      match tab.read.get(&x) {
+        None => {}
+        Some(ref_ct) => {
+          assert!(*ref_ct > 0);
+          panic!("ERROR: CellViewHandle::_from_mut: existing immutable borrow");
+        }
+      }
+      match tab.lock.contains(&x) {
+        false => {
+          tab.lock.insert(x);
+        }
+        true => {
+          panic!("ERROR: CellViewHandle::_from_mut: double mutable borrow");
+        }
+      }
+      tab.base.as_ptr() as usize
+    });
     let raw = x.raw_ as usize;
-    assert!(raw < VOID_MASK);
-    unsafe { &mut *(from_raw_parts_mut((raw ^ VOID_MASK) as *mut i32 as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
+    assert!(raw < VOID_MAP_HI);
+    let val = base + (raw ^ VOID_MAP_HI);
+    unsafe { &mut *(from_raw_parts_mut(val as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
   }
 
   pub fn materialize(&self) -> CellPtr {
@@ -464,7 +559,21 @@ impl CellViewHandle {
 
 impl CellDeref for CellViewHandle {
   fn _deref(&self) -> CellPtr {
-    CellPtr::from_unchecked((self.0.as_ptr() as usize ^ VOID_MASK) as i32)
+    let base = TL_HANDLE_TAB.with(|tab| {
+      let tab = tab.borrow();
+      tab.base.as_ptr() as usize
+    });
+    //println!("DEBUG: CellViewHandle::_deref: base=0x{:016x}", base);
+    let val = self.0.as_ptr() as usize;
+    //println!("DEBUG: CellViewHandle::_deref: val =0x{:016x}", val);
+    let mut raw = val - base;
+    //println!("DEBUG: CellViewHandle::_deref: raw =0x{:016x}", raw);
+    if (raw & VOID_MAP_HI) != 0 {
+      raw ^= VOID_MAP_HI;
+    }
+    //println!("DEBUG: CellViewHandle::_deref: raw2=0x{:016x}", raw);
+    //println!("DEBUG: CellViewHandle::_deref: ptr ={}", raw as i32);
+    CellPtr::from_unchecked(raw as i32)
   }
 }
 
@@ -481,8 +590,8 @@ impl Debug for CellViewHandleEx {
 impl CellViewHandleEx {
   pub fn _from(x: CellPtr) -> CellViewHandleEx {
     let raw = x.raw_ as usize;
-    assert!(raw < VOID_MASK);
-    CellViewHandleEx(raw ^ VOID_MASK, 0)
+    assert!(raw < VOID_MAP_HI);
+    CellViewHandleEx(raw, 0)
   }
 
   pub fn materialize(&self) -> CellPtr {
@@ -494,7 +603,7 @@ impl CellViewHandleEx {
 
 impl CellDeref for CellViewHandleEx {
   fn _deref(&self) -> CellPtr {
-    CellPtr::from_unchecked((self.0 ^ VOID_MASK) as i32)
+    CellPtr::from_unchecked(self.0 as i32)
   }
 }
 

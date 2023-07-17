@@ -1,4 +1,10 @@
-#[cfg(unix)] use libc::{MAP_FAILED, MAP_ANON, MAP_PRIVATE, MAP_SHARED, PROT_READ, PROT_WRITE, mmap, munmap};
+#[cfg(unix)]
+use libc::{
+  PROT_NONE, PROT_READ, PROT_WRITE,
+  MAP_FAILED, MAP_ANON, MAP_PRIVATE, MAP_SHARED,
+  MAP_NORESERVE, MAP_HUGETLB,
+  mmap, munmap,
+};
 
 use std::ffi::{c_void};
 use std::fs::{File};
@@ -48,6 +54,16 @@ impl MmapBuf {
   }
 
   #[cfg(unix)]
+  pub fn new_noderef(size: usize) -> Result<MmapBuf, ()> {
+    let ptr = unsafe { mmap(null_mut(), size, PROT_NONE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE | MAP_HUGETLB, -1, 0) };
+    if ptr == MAP_FAILED {
+      return Err(());
+    }
+    assert!(!ptr.is_null());
+    Ok(MmapBuf{ptr, size})
+  }
+
+  #[cfg(unix)]
   pub fn from_file(f: &File) -> Result<MmapBuf, ()> {
     let size = f.metadata().unwrap().size();
     if size > usize::max_value() as u64 {
@@ -61,6 +77,10 @@ impl MmapBuf {
     }
     assert!(!ptr.is_null());
     Ok(MmapBuf{ptr, size})
+  }
+
+  pub fn as_ptr(&self) -> *mut c_void {
+    self.ptr
   }
 
   pub fn size_bytes(&self) -> usize {
