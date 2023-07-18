@@ -296,7 +296,7 @@ impl MCellPtr {
   }
 }
 
-pub struct CellSet {
+/*pub struct CellSet {
   pub ptr_: MCellPtr,
 }
 
@@ -351,7 +351,7 @@ impl CellSet {
       spine.add(self.ptr_, *x.borrow());
     }))
   }
-}
+}*/
 
 pub struct CellMap {
   pub ptr_: MCellPtr,

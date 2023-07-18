@@ -70,13 +70,17 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                         SpineEntry::Initialize(this, this_clk, th)
                       }
                       SpineEntryName::Apply => {
+                        println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Apply({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
                         SpineEntry::Apply(this, this_clk, th)
                       }
                       _ => unreachable!()
                     };
                     let mut cur_env = spine.cur_env.borrow_mut();
-                    let arg = cur_env.update.remove(&(rhs, rhs_clk)).unwrap();
-                    assert!(cur_env.update.insert((this, this_clk), arg).is_none());
+                    let this_root = cur_env._deref(this);
+                    let rhs_root = cur_env._deref(rhs);
+                    let (orhs, arg) = cur_env.update.remove(&(rhs_root, rhs_clk)).unwrap();
+                    assert_eq!(orhs, rhs);
+                    assert!(cur_env.update.insert((this_root, this_clk), (this, arg)).is_none());
                     drop(cur_env);
                     let mut thunkenv = ctx.thunkenv.borrow_mut();
                     let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
@@ -113,23 +117,24 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                       _ => unreachable!()
                     };
                     let mut cur_env = spine.cur_env.borrow_mut();
-                    match cur_env.state.get_mut(&rhs) {
+                    match cur_env._lookup_mut(rhs) {
                       None => panic!("bug"),
-                      Some(state) => {
+                      Some((_, state)) => {
                         // FIXME: sealing here is kinda hacky.
                         state.flag.set_seal();
                         state.flag.unset_intro();
                         state.clk = state.clk.uninit();
                       }
                     }
-                    match cur_env.state.get_mut(&this) {
+                    match cur_env._lookup_mut(this) {
                       None => {
+                        let this_root = cur_env._deref(this);
                         let mut state = CellState::default();
                         state.flag.set_intro();
                         state.clk = this_clk;
-                        cur_env.state.insert(this, state);
+                        assert!(cur_env.state.insert(this_root, state.into()).is_none());
                       }
-                      Some(state) => {
+                      Some((_, state)) => {
                         state.flag.set_intro();
                         //assert!(state.flag.intro());
                         assert!(!state.flag.seal());

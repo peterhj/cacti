@@ -210,24 +210,52 @@ pub type SpineCellState = CellState;
   pub clk:      Clock,
 }*/
 
+#[derive(Clone, Debug)]
+pub enum SpineEnvEntry {
+  State(SpineCellState),
+  Alias(CellPtr),
+}
+
+impl From<SpineCellState> for SpineEnvEntry {
+  fn from(state: SpineCellState) -> SpineEnvEntry {
+    SpineEnvEntry::State(state)
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SpineEnvMapEntry {
+  Value(CellPtr, Clock),
+  Alias(CellPtr),
+}
+
+#[derive(Clone, Debug)]
+pub enum SpineEnvMapEntry2 {
+  Value(CellPtr, Vec<(Clock, Clock)>),
+  Alias(CellPtr),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum SpineEnvGet {
+  Value(CellPtr, Clock),
+  ReqAlias(CellPtr, CellPtr),
+}
+
 #[derive(Clone, Default, Debug)]
 pub struct SpineEnv {
   // TODO TODO
   pub ctr:      Counter,
-  pub alias:    HashMap<CellPtr, CellPtr>,
+  //pub alias:    HashMap<CellPtr, CellPtr>,
   //pub aroot:    RefCell<HashMap<CellPtr, CellPtr>>,
-  pub state:    HashMap<CellPtr, SpineCellState>,
+  //pub state:    HashMap<CellPtr, SpineCellState>,
+  pub state:    HashMap<CellPtr, SpineEnvEntry>,
   // FIXME
-  //pub set:      HashMap<CellPtr, SpineCellSet>,
-  //pub map:      HashMap<CellPtr, SpineCellMap>,
-  //pub set:      BTreeMap<(MCellPtr, CellPtr), Clock>,
   pub set:      BTreeSet<(MCellPtr, CellPtr, TotalClock)>,
-  //pub map:      BTreeMap<(MCellPtr, CellPtr), (Clock, CellPtr, Clock)>,
-  pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), (CellPtr, Clock)>,
-  //pub aliases:  HashMap<(CellPtr, Clock), HashSet<CellPtr>>,
-  //pub alias_of: HashMap<CellPtr, (CellPtr, Clock)>,
+  //pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), (CellPtr, Clock)>,
+  // FIXME: alias-consistent map.
+  pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), SpineEnvMapEntry>,
+  //pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
   pub arg:      Vec<(CellPtr, Clock)>,
-  pub update:   HashMap<(CellPtr, Clock), Vec<(CellPtr, Clock)>>,
+  pub update:   HashMap<(CellPtr, Clock), (CellPtr, Vec<(CellPtr, Clock)>)>,
   /*pub iapply:   HashMap<CellPtr, (u32, ThunkPtr, Clock)>,
   pub apply_:   HashMap<CellPtr, Vec<(u32, ThunkPtr, Clock)>>,
   pub bwd:      HashMap<CellPtr, Clock>,
@@ -239,7 +267,7 @@ impl SpineEnv {
   pub fn reset(&mut self, ctr: Counter) {
     println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr);
     self.ctr = ctr;
-    self.alias.clear();
+    //self.alias.clear();
     self.state.clear();
     self.set.clear();
     self.map.clear();
@@ -254,24 +282,69 @@ impl SpineEnv {
   pub fn _deref(&self, query: CellPtr) -> CellPtr {
     let mut cursor = query;
     loop {
-      match self.alias.get(&cursor) {
+      /*match self.alias.get(&cursor) {
         None => return cursor,
         Some(&next) => {
           cursor = next;
         }
+      }*/
+      match self.state.get(&cursor) {
+        Some(&SpineEnvEntry::Alias(next)) => {
+          cursor = next;
+        }
+        _ => return cursor,
       }
     }
   }
 
-  pub fn _lookup(&self, x: CellPtr) -> Option<&SpineCellState> {
+  pub fn _lookup(&self, x: CellPtr) -> Option<(CellPtr, &SpineCellState)> {
     let root = self._deref(x);
-    self.state.get(&root)
+    //self.state.get(&root).map(|state| (root, state))
+    match self.state.get(&root) {
+      None => None,
+      Some(&SpineEnvEntry::State(ref state)) => Some((root, state)),
+      _ => panic!("bug")
+    }
   }
 
-  pub fn _lookup_mut(&mut self, x: CellPtr) -> Option<&mut SpineCellState> {
+  pub fn _lookup_mut(&mut self, x: CellPtr) -> Option<(CellPtr, &mut SpineCellState)> {
     let root = self._deref(x);
-    self.state.get_mut(&root)
+    //self.state.get_mut(&root).map(|state| (root, state))
+    match self.state.get_mut(&root) {
+      None => None,
+      Some(&mut SpineEnvEntry::State(ref mut state)) => Some((root, state)),
+      _ => panic!("bug")
+    }
   }
+
+  //pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {}
+  pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<SpineEnvGet> {
+    let kroot = self._deref(k);
+    if k != kroot {
+      match (self.map.get(&(mx, k, kclk.into())), self.map.get(&(mx, kroot, kclk.into()))) {
+        (None, None) => None,
+        (None, Some(&SpineEnvMapEntry::Value(vroot, _))) => {
+          Some(SpineEnvGet::ReqAlias(kroot, vroot))
+        }
+        (Some(&SpineEnvMapEntry::Alias(v)), Some(&SpineEnvMapEntry::Value(vroot, vclk))) => {
+          assert_eq!(self._deref(v), vroot);
+          Some(SpineEnvGet::Value(v, vclk.into()))
+        }
+        _ => panic!("bug")
+      }
+    } else {
+      match self.map.get(&(mx, k, kclk.into())) {
+        None => None,
+        Some(&SpineEnvMapEntry::Value(v, vclk)) => {
+          Some(SpineEnvGet::Value(v, vclk.into()))
+        }
+        _ => panic!("bug")
+      }
+    }
+  }
+
+  /*pub fn _add2(&self, mx: MCellPtr, k: CellPtr, kclk: Clock, v: CellPtr, vclk: Clock) {
+  }*/
 
   pub fn step(this: &RefCell<SpineEnv>, sp: u32, curp: &Cell<u32>, log: &RefCell<Vec<SpineEntry>>, ctr: Option<&CtxCtr>, thunkenv: Option<&RefCell<CtxThunkEnv>>) {
     // FIXME FIXME
@@ -285,44 +358,61 @@ impl SpineEnv {
         unimplemented!();
       }
       SpineEntry::Add(mx, x, _xclk) => {
-        let mut self_ = this.borrow_mut();
+        // FIXME FIXME
+        unimplemented!();
+        /*let mut self_ = this.borrow_mut();
         let xclk = match self_._lookup(x) {
           //None => panic!("bug"),
           None => Clock::default(),
-          Some(state) => state.clk
+          Some((_, state)) => state.clk
         };
-        /*match self_.set.insert((mx, x), xclk) {
-          None => {}
-          Some(oxclk) => {
-            assert!(oxclk <= xclk);
-          }
-        }*/
         let _ = self_.set.insert((mx, x, xclk.into()));
-        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, x, xclk);
+        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, x, xclk);*/
       }
       SpineEntry::Add2(mx, k, _kclk, v, _vclk) => {
         let mut self_ = this.borrow_mut();
+        let kroot = self_._deref(k);
         let kclk = match self_._lookup(k) {
           //None => panic!("bug"),
           None => Clock::default(),
-          Some(state) => state.clk
+          Some((_, state)) => state.clk
         };
+        let vroot = self_._deref(v);
         let vclk = match self_._lookup(v) {
           //None => panic!("bug"),
           None => Clock::default(),
-          Some(state) => state.clk
+          Some((_, state)) => state.clk
         };
-        //match self_.map.insert((mx, k), (kclk, v, vclk)) {}
-        match self_.map.insert((mx, k, kclk.into()), (v, vclk)) {
-          None => {}
-          //Some((okclk, ov, ovclk)) => {}
-          Some((ov, ovclk)) => {
-            //assert!(okclk <= kclk);
-            assert_eq!(ov, v);
-            // FIXME
-            //if okclk == kclk {
-            assert!(ovclk <= vclk);
-            //}
+        if k != kroot {
+          assert!(v != vroot);
+          match self_.map.insert((mx, kroot, kclk.into()), SpineEnvMapEntry::Value(vroot, vclk)) {
+            None => {}
+            Some(SpineEnvMapEntry::Value(ovroot, ovclk)) => {
+              assert_eq!(ovroot, vroot);
+              if !(ovclk <= vclk) {
+                println!("DEBUG: SpineEnv::step: Add2 mx={:?} k={:?} v={:?}", mx, k, v);
+                println!("DEBUG: SpineEnv::step:   kroot={:?} kclk={:?}", kroot, kclk);
+                println!("DEBUG: SpineEnv::step:   vroot={:?} vclk={:?} ovclk={:?}", vroot, vclk, ovclk);
+              }
+              assert!(ovclk <= vclk);
+            }
+            _ => panic!("bug")
+          }
+          match self_.map.insert((mx, k, kclk.into()), SpineEnvMapEntry::Alias(v)) {
+            None => {}
+            Some(SpineEnvMapEntry::Alias(ov)) => {
+              assert_eq!(ov, v);
+            }
+            _ => panic!("bug")
+          }
+        } else {
+          match self_.map.insert((mx, k, kclk.into()), SpineEnvMapEntry::Value(v, vclk)) {
+            None => {}
+            Some(SpineEnvMapEntry::Value(ov, ovclk)) => {
+              assert_eq!(ov, v);
+              assert!(ovclk <= vclk);
+            }
+            _ => panic!("bug")
           }
         }
         log.borrow_mut()[sp as usize] = SpineEntry::Add2(mx, k, kclk, v, vclk);
@@ -391,22 +481,23 @@ impl SpineEnv {
                 }
               }
               let self_ = this.borrow();
-              //match self_.map.get(&(sink, y)).or_else(|| self_.map.get(&(allsrc, y))) {}
-              match self_.map.get(&(sink, y, yclk.into()))
-                    .or_else(|| self_.map.get(&(allsrc, y, yclk.into())))
+              let yroot = self_._deref(y);
+              // FIXME
+              match self_._get(sink, y, yclk)
+                    .or_else(|| self_._get(allsrc, y, yclk))
               {
                 None => {}
-                //Some(&(oyclk, dy, dyclk)) => {}
-                Some(&(dy, _dyclk)) => {
-                  /*if !(yclk == oyclk) {
-                    unimplemented!();
-                  }*/
-                  match self_.update.get(&(y, yclk.into())) {
+                Some(SpineEnvGet::ReqAlias(..)) => {
+                  // FIXME
+                  panic!("bug");
+                }
+                Some(SpineEnvGet::Value(dy, _dyclk)) => {
+                  match self_.update.get(&(yroot, yclk.into())) {
                     None => panic!("bug"),
-                    Some(arg) => {
-                      println!("DEBUG: SpineEnv::step: AdjMap:   arg={:?}", arg);
+                    Some(&(y_ref, ref arg)) => {
+                      println!("DEBUG: SpineEnv::step: AdjMap:   yroot={:?} y_ref={:?} arg={:?}", yroot, y_ref, arg);
                       let arg = arg.clone();
-                      let mut arg_adj = Vec::with_capacity(arg.len());
+                      let mut arg_adj: Vec<CellPtr> = Vec::with_capacity(arg.len());
                       drop(self_);
                       {
                         //let ctr = ctr.unwrap();
@@ -414,9 +505,13 @@ impl SpineEnv {
                           // FIXME: alias semantics.
                           let self_ = this.borrow();
                           let dx =
-                              self_.map.get(&(sink, x, xclk.into()))
-                              .or_else(|| self_.map.get(&(allsrc, x, xclk.into())))
-                              .map(|&(dx, _)| dx)
+                              self_._get(sink, x, xclk.into())
+                              .or_else(|| self_._get(allsrc, x, xclk.into()))
+                              //.map(|&(dx, _)| dx)
+                              .and_then(|get| match get {
+                                SpineEnvGet::Value(dx, _) => Some(dx),
+                                SpineEnvGet::ReqAlias(..) => None
+                              })
                               /*.unwrap_or_else(|| {
                                 let x_ty = ctx_lookup_type(x);
                                 ctx_insert(x_ty)
@@ -438,9 +533,13 @@ impl SpineEnv {
                                       drop(env);
                                       let self_ = this.borrow();
                                       let dxroot =
-                                          self_.map.get(&(sink, xroot, xroot_clk.into()))
-                                          .or_else(|| self_.map.get(&(allsrc, xroot, xroot_clk.into())))
-                                          .map(|&(dx, _)| dx)
+                                          self_._get(sink, xroot, xroot_clk.into())
+                                          .or_else(|| self_._get(allsrc, xroot, xroot_clk.into()))
+                                          //.map(|&(dx, _)| dx)
+                                          .and_then(|get| match get {
+                                            SpineEnvGet::Value(dx, _) => Some(dx),
+                                            SpineEnvGet::ReqAlias(..) => None
+                                          })
                                           .unwrap_or_else(|| {
                                             drop(self_);
                                             let xroot_ty = match ctx.env.borrow().lookup_ref(xroot) {
@@ -453,7 +552,7 @@ impl SpineEnv {
                                             ctx.env.borrow_mut().insert_top(dxroot, xroot_ty);
                                             dxroot
                                           });
-                                      {
+                                      /*{
                                         let sp = {
                                           let sp = curp.get();
                                           curp.set(sp + 1);
@@ -462,7 +561,7 @@ impl SpineEnv {
                                           sp
                                         };
                                         SpineEnv::step(this, sp, curp, log, ctr, thunkenv);
-                                      }
+                                      }*/
                                       //ctx_alias(dxroot, x_ty)
                                       let dx = ctr.unwrap().fresh_cel();
                                       println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty);
@@ -504,10 +603,12 @@ impl SpineEnv {
                           Some(te) => {
                             let pthunk = te.pthunk.clone();
                             drop(thunkenv);
+                            println!("DEBUG: SpineEnv::step: AdjMap:   pop adj: th={:?} {:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?}",
+                                th, pthunk.spec_.debug_name(), &arg, y, yclk, dy, &arg_adj);
                             match pthunk.spec_.pop_adj(&arg, y, yclk, dy, &mut arg_adj) {
                               Err(_) => {
                                 println!("ERROR: SpineEnv::step: adj failure ({:?} th={:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?})",
-                                    e_sp.name(), th, &arg, y, yclk, dy, &arg_adj);
+                                    e.name(), th, &arg, y, yclk, dy, &arg_adj);
                                 panic!();
                               }
                               Ok(_) => {}
@@ -536,6 +637,9 @@ impl SpineEnv {
               }
             }
             SpineEntry::Accumulate(y, yclk, th) => {
+              // TODO TODO
+              unimplemented!();
+              /*
               let self_ = this.borrow();
               match self_.map.get(&(sink, y, yclk.into()))
                     .or_else(|| self_.map.get(&(allsrc, y, yclk.into())))
@@ -548,7 +652,7 @@ impl SpineEnv {
                     let self_ = this.borrow();
                     match self_.update.get(&(y, yclk.into())) {
                       None => panic!("bug"),
-                      Some(arg) => {
+                      Some(&(_, ref arg)) => {
                         let arg = arg.clone();
                         let mut arg_adj = Vec::with_capacity(arg.len());
                         {
@@ -609,6 +713,7 @@ impl SpineEnv {
                   }
                 }
               }
+              */
             }
             SpineEntry::UnsafeWrite(y, yclk, th) => {
               println!("ERROR: SpineEnv::step: cannot differentiate through UnsafeWrite (y={:?} yclk={:?} th={:?})",
@@ -640,14 +745,14 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default());
+            self_.state.insert(x, CellState::default().into());
           }
           _ => {}
         }
         let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -683,14 +788,14 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default());
+            self_.state.insert(x, CellState::default().into());
           }
           _ => {}
         }
         let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -709,7 +814,7 @@ impl SpineEnv {
         let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -728,14 +833,14 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default());
+            self_.state.insert(x, CellState::default().into());
           }
           _ => {}
         }
         let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -770,14 +875,14 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default());
+            self_.state.insert(x, CellState::default().into());
           }
           _ => {}
         }
         let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -805,16 +910,24 @@ impl SpineEnv {
             self_.state.insert(x, state);
           }
         }*/
-        assert!(self_.alias.insert(x, og).is_none());
+        //assert!(self_.alias.insert(x, og).is_none());
+        match self_.state.get(&x) {
+          None => {
+            self_.state.insert(x, SpineEnvEntry::Alias(og));
+          }
+          Some(_) => {
+            panic!("bug");
+          }
+        }
       }
       SpineEntry::Snapshot(x, og) => {
         let mut self_ = this.borrow_mut();
         // FIXME FIXME
         match self_._lookup(og) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             let state = state.clone();
-            self_.state.insert(x, state);
+            self_.state.insert(x, state.into());
           }
         }
       }
@@ -825,7 +938,7 @@ impl SpineEnv {
             //println!("DEBUG: PushSeal: x={:?} spine env={:?}", x, self);
             panic!("bug");
           }
-          Some(state) => {
+          Some((_, state)) => {
             assert!(state.flag.intro());
             // NB: late/lazy idempotent seal.
             /*assert!(!state.flag.seal());*/
@@ -842,7 +955,7 @@ impl SpineEnv {
         //let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((xroot, state)) => {
             assert_eq!(state.mode, CellMode::_Top);
             assert!(!state.flag.intro());
             assert!(!state.flag.seal());
@@ -857,7 +970,7 @@ impl SpineEnv {
             drop(state);
             let mut arg = Vec::new();
             swap(&mut self_.arg, &mut arg);
-            assert!(self_.update.insert((x, next_clk), arg).is_none());
+            assert!(self_.update.insert((xroot, next_clk), (x, arg)).is_none());
             log.borrow_mut()[sp as usize] = SpineEntry::Initialize(x, next_clk, ith);
           }
         }
@@ -867,7 +980,7 @@ impl SpineEnv {
         //let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((xroot, state)) => {
             assert_eq!(state.mode, CellMode::Aff);
             assert!(state.flag.intro());
             assert!(!state.flag.seal());
@@ -892,7 +1005,7 @@ impl SpineEnv {
             }*/
             let mut arg = Vec::new();
             swap(&mut self_.arg, &mut arg);
-            assert!(self_.update.insert((x, next_clk), arg).is_none());
+            assert!(self_.update.insert((xroot, next_clk), (x, arg)).is_none());
             /*let arg_ = arg.clone();
             if let Some(oarg) = self_.update.insert(th, arg) {
               println!("DEBUG: SpineEnv::step: Apply: x={:?} xclk={:?} th={:?} arg={:?} oarg={:?}",
@@ -908,7 +1021,7 @@ impl SpineEnv {
         //let base_clk: Clock = self_.ctr.into();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((xroot, state)) => {
             assert_eq!(state.mode, CellMode::Init);
             assert!(state.flag.intro());
             assert!(!state.flag.seal());
@@ -931,7 +1044,7 @@ impl SpineEnv {
             }*/
             let mut arg = Vec::new();
             swap(&mut self_.arg, &mut arg);
-            assert!(self_.update.insert((x, next_clk), arg).is_none());
+            assert!(self_.update.insert((xroot, next_clk), (x, arg)).is_none());
             log.borrow_mut()[sp as usize] = SpineEntry::Accumulate(x, next_clk, th);
           }
         }
@@ -943,7 +1056,7 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             /*assert!(state.mode != CellMode::_Top);*/
             assert!(state.flag.intro());
             // NB: idempotent seal.
@@ -956,7 +1069,7 @@ impl SpineEnv {
         let mut self_ = this.borrow_mut();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some(state) => {
+          Some((_, state)) => {
             /*assert!(state.mode != CellMode::_Top);*/
             // NB: idempotent unseal.
             /*assert!(state.flag.seal());*/
@@ -1233,30 +1346,47 @@ impl Spine {
     self.cur_env.borrow().ctr.into()
   }
 
-  pub fn _deref(&self, x: CellPtr) -> CellPtr {
-    self.cur_env.borrow()._deref(x)
+  pub fn _deref(&self, query: CellPtr) -> CellPtr {
+    self.cur_env.borrow()._deref(query)
   }
 
   pub fn _version(&self, query: CellPtr) -> Option<Clock> {
     let cur_env = self.cur_env.borrow();
-    let root = cur_env._deref(query);
-    match cur_env.state.get(&root) {
+    match cur_env._lookup(query) {
       None => None,
-      Some(state) => Some(state.clk)
+      Some((_, state)) => Some(state.clk)
     }
   }
 
   pub fn _get(&self, mm: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {
-    match self.cur_env.borrow().map.get(&(mm, k, kclk.into())) {
+    let cur_env = self.cur_env.borrow();
+    match cur_env.map.get(&(mm, k, kclk.into())) {
       None => None,
       //Some(&(okclk, v, vclk)) => {}
-      Some(&(v, vclk)) => {
+      /*Some(&(v, vclk)) => {
         /*if kclk != okclk {
           println!("DEBUG: Spine::_get: mm={:?} k={:?} kclk={:?} okclk={:?} v={:?} vclk={:?}",
               mm, k, kclk, okclk, v, vclk);
           panic!("bug");
         }*/
         Some((v, vclk.into()))
+      }*/
+      Some(&SpineEnvMapEntry::Value(v, vclk)) => {
+        Some((v, vclk.into()))
+      }
+      Some(&SpineEnvMapEntry::Alias(v)) => {
+        let kroot = cur_env._deref(k);
+        assert!(k != kroot);
+        let vroot = cur_env._deref(v);
+        assert!(v != vroot);
+        match cur_env.map.get(&(mm, kroot, kclk.into())) {
+          None => panic!("bug"),
+          Some(&SpineEnvMapEntry::Value(ovroot, vclk)) => {
+            assert_eq!(ovroot, vroot);
+            Some((v, vclk.into()))
+          }
+          _ => panic!("bug"),
+        }
       }
     }
   }

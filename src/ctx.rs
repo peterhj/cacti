@@ -567,7 +567,7 @@ pub fn ctx_opaque(og: CellPtr) -> CellPtr {
   })
 }
 
-pub fn ctx_init_zeros(ty: CellType) -> CellPtr {
+/*pub fn ctx_init_zeros(ty: CellType) -> CellPtr {
   match ty.dtype {
     Dtype::Fp32 => {
       let value = 0.0_f32;
@@ -604,7 +604,7 @@ pub fn ctx_set_ones(ty: CellType) -> CellPtr {
     }
     _ => unimplemented!()
   }
-}
+}*/
 
 pub fn ctx_clean_arg() -> bool {
   TL_CTX.with(|ctx| {
@@ -618,13 +618,24 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
     match ctx.env.borrow().lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
-        let xclk = match ctx.spine.borrow()._version(x) {
+        let spine = ctx.spine.borrow();
+        let xclk = match spine._version(x) {
           None => {
             println!("DEBUG: ctx_push_cell_arg: no spine version: x={:?}", x);
+            let cur_env = spine.cur_env.borrow();
+            let xroot = cur_env._deref(x);
+            println!("DEBUG: ctx_push_cell_arg:   xroot={:?} state={:?}",
+                xroot, cur_env.state.get(&xroot));
+            let query = CellPtr::from_unchecked(2401);
+            /*println!("DEBUG: ctx_push_cell_arg:   query={:?} state={:?} alias={:?}",
+                query, cur_env.state.get(&query), cur_env.alias.get(&query));*/
+            println!("DEBUG: ctx_push_cell_arg:   query={:?} state={:?}",
+                query, cur_env.state.get(&query));
             panic!("bug");
           }
           Some(xclk) => xclk
         };
+        drop(spine);
         if xclk.is_nil() {
           println!("ERROR: ctx_push_cell_arg: tried to push an uninitialized thunk argument: {:?}", x);
           panic!();
