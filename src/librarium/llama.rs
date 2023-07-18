@@ -172,6 +172,26 @@ impl Llama {
     matches.inv()
   }
 
+  pub fn param(&self) -> Vec<StableCell> {
+    let mut param = Vec::new();
+    // FIXME: 0-th embed requires zero grad.
+    param.push(self.embed.clone());
+    for layer in self.layers.iter() {
+      param.push(layer.pre_norm.clone());
+      param.push(layer.q.clone());
+      param.push(layer.k.clone());
+      param.push(layer.v.clone());
+      param.push(layer.o.clone());
+      param.push(layer.post_norm.clone());
+      param.push(layer.gate.clone());
+      param.push(layer.up.clone());
+      param.push(layer.down.clone());
+    }
+    param.push(self.head_norm.clone());
+    param.push(self.lm_head.clone());
+    param
+  }
+
   pub fn make_input(&self) -> LanguageModelIn {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;

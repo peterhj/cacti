@@ -108,7 +108,11 @@ pub struct Clock {
 
 impl Debug for Clock {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "Clock(rst={}, up={})", self.rst, self.up)
+    if self.up == i32::min_value() {
+      write!(f, "Clock(rst={}, up=UNINIT)", self.rst)
+    } else {
+      write!(f, "Clock(rst={}, up={})", self.rst, self.up)
+    }
   }
 }
 
@@ -255,7 +259,11 @@ pub struct TotalClock {
 
 impl Debug for TotalClock {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "TotalClock(rst={}, up={})", self.internal.rst, self.internal.up)
+    if self.internal.up == i32::min_value() {
+      write!(f, "TotalClock(rst={}, up=UNINIT)", self.internal.rst)
+    } else {
+      write!(f, "TotalClock(rst={}, up={})", self.internal.rst, self.internal.up)
+    }
   }
 }
 

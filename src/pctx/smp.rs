@@ -175,6 +175,11 @@ impl SmpPCtx {
     }
   }
 
+  pub fn phy_core_ct(&self) -> u32 {
+    // FIXME
+    1
+  }
+
   /*pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {
     lp.push((Locus::Mem, PMach::Smp));
     pl.push((PMach::Smp, Locus::Mem));

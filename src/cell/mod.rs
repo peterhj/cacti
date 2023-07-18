@@ -1,5 +1,6 @@
 use crate::algo::{HashMap, HashSet, RevSortKey8, RevSortMap8};
 use crate::algo::fp::*;
+use crate::algo::int::*;
 use crate::clock::*;
 use crate::ctx::*;
 use crate::panick::*;
@@ -148,6 +149,12 @@ impl Clone for StableCell {
 impl Drop for StableCell {
   fn drop(&mut self) {
     ctx_release(self.ptr_);
+  }
+}
+
+impl From<CellType> for StableCell {
+  fn from(ty: CellType) -> StableCell {
+    StableCell::array(ty.shape, ty.dtype)
   }
 }
 
@@ -313,13 +320,13 @@ impl Clone for CellSet {
 
 impl Drop for CellSet {
   fn drop(&mut self) {
-    ctx_release(self.ptr_._into_cel_ptr());
+    //ctx_release(self.ptr_._into_cel_ptr());
   }
 }
 
 impl From<MCellPtr> for CellSet {
   fn from(ptr: MCellPtr) -> CellSet {
-    ctx_retain(ptr._into_cel_ptr());
+    //ctx_retain(ptr._into_cel_ptr());
     CellSet{ptr_: ptr}
   }
 }
@@ -370,13 +377,13 @@ impl Clone for CellMap {
 
 impl Drop for CellMap {
   fn drop(&mut self) {
-    ctx_release(self.ptr_._into_cel_ptr());
+    //ctx_release(self.ptr_._into_cel_ptr());
   }
 }
 
 impl From<MCellPtr> for CellMap {
   fn from(ptr: MCellPtr) -> CellMap {
-    ctx_retain(ptr._into_cel_ptr());
+    //ctx_retain(ptr._into_cel_ptr());
     CellMap{ptr_: ptr}
   }
 }
@@ -396,9 +403,18 @@ impl CellMap {
   #[track_caller]
   pub fn add<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: K, v: V) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      // FIXME: retain?
       let spine = ctx.spine.borrow();
       spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+    }))
+  }
+
+  #[track_caller]
+  pub fn vadd<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: &[K], v: &[V]) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      for (k, v) in k.iter().zip(v.iter()) {
+        spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+      }
     }))
   }
 
@@ -407,7 +423,7 @@ impl CellMap {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       let kclk = spine._version(key).unwrap_or_else(|| Clock::default());
-      spine._lookup(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil())
+      spine._get(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil())
     }))
   }
 
@@ -418,7 +434,7 @@ impl CellMap {
       let spine = ctx.spine.borrow();
       for &key in vkey.iter() {
         let kclk = spine._version(key).unwrap_or_else(|| Clock::default());
-        let v = spine._lookup(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil());
+        let v = spine._get(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil());
         vval.push(v);
       }
       vval
@@ -780,6 +796,14 @@ pub enum ScalarVal_ {
   F64(TotalOrd<f64>),
   F32(TotalOrd<f32>),
   F16(TotalOrd<f16>),
+  I64(i64),
+  I32(i32),
+  I16(i16),
+  I8(i8),
+  U64(u64),
+  U32(u32),
+  U16(u16),
+  U8(u8),
   Bot,
   // TODO
 }
@@ -787,9 +811,45 @@ pub enum ScalarVal_ {
 impl ScalarVal_ {
   pub fn zero(dtype: Dtype) -> ScalarVal_ {
     match dtype {
-      Dtype::Fp64 => ScalarVal_::F64(f64::zero().into()),
+      /*Dtype::Fp64 => ScalarVal_::F64(f64::zero().into()),
       Dtype::Fp32 => ScalarVal_::F32(f32::zero().into()),
       Dtype::Fp16 => ScalarVal_::F16(f16::zero().into()),
+      Dtype::Int64 => ScalarVal_::I64(i64::zero().into()),
+      Dtype::Int32 => ScalarVal_::I32(i32::zero().into()),
+      Dtype::Int16 => ScalarVal_::I16(i16::zero().into()),
+      Dtype::Int8 => ScalarVal_::I8(i8::zero().into()),
+      Dtype::UInt64 => ScalarVal_::U64(u64::zero().into()),
+      Dtype::UInt32 => ScalarVal_::U32(u32::zero().into()),
+      Dtype::UInt16 => ScalarVal_::U16(u16::zero().into()),
+      Dtype::UInt8 => ScalarVal_::U8(u8::zero().into()),*/
+      Dtype::Fp64 => ScalarVal_::F64(<f64 as FpConstExt>::zero().into()),
+      Dtype::Fp32 => ScalarVal_::F32(<f32 as FpConstExt>::zero().into()),
+      Dtype::Fp16 => ScalarVal_::F16(<f16 as FpConstExt>::zero().into()),
+      Dtype::Int64 => ScalarVal_::I64(<i64 as UintConstExt>::zero().into()),
+      Dtype::Int32 => ScalarVal_::I32(<i32 as UintConstExt>::zero().into()),
+      Dtype::Int16 => ScalarVal_::I16(<i16 as UintConstExt>::zero().into()),
+      Dtype::Int8 => ScalarVal_::I8(<i8 as UintConstExt>::zero().into()),
+      Dtype::UInt64 => ScalarVal_::U64(<u64 as UintConstExt>::zero().into()),
+      Dtype::UInt32 => ScalarVal_::U32(<u32 as UintConstExt>::zero().into()),
+      Dtype::UInt16 => ScalarVal_::U16(<u16 as UintConstExt>::zero().into()),
+      Dtype::UInt8 => ScalarVal_::U8(<u8 as UintConstExt>::zero().into()),
+      _ => unimplemented!()
+    }
+  }
+
+  pub fn one(dtype: Dtype) -> ScalarVal_ {
+    match dtype {
+      Dtype::Fp64 => ScalarVal_::F64(<f64 as FpConstExt>::one().into()),
+      Dtype::Fp32 => ScalarVal_::F32(<f32 as FpConstExt>::one().into()),
+      Dtype::Fp16 => ScalarVal_::F16(<f16 as FpConstExt>::one().into()),
+      Dtype::Int64 => ScalarVal_::I64(<i64 as UintConstExt>::one().into()),
+      Dtype::Int32 => ScalarVal_::I32(<i32 as UintConstExt>::one().into()),
+      Dtype::Int16 => ScalarVal_::I16(<i16 as UintConstExt>::one().into()),
+      Dtype::Int8 => ScalarVal_::I8(<i8 as UintConstExt>::one().into()),
+      Dtype::UInt64 => ScalarVal_::U64(<u64 as UintConstExt>::one().into()),
+      Dtype::UInt32 => ScalarVal_::U32(<u32 as UintConstExt>::one().into()),
+      Dtype::UInt16 => ScalarVal_::U16(<u16 as UintConstExt>::one().into()),
+      Dtype::UInt8 => ScalarVal_::U8(<u8 as UintConstExt>::one().into()),
       _ => unimplemented!()
     }
   }

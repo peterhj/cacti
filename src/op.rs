@@ -32,17 +32,22 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
   #[track_caller]
   fn add_assign(&mut self, rhs: R) {
     panick_wrap(|| {
+      // FIXME: alias semantics.
       let this = *self;
       let rhs = *rhs.borrow();
       if TL_CTX.with(|ctx| {
         let mut success = false;
-        if ctx.thunkenv.borrow().accumulate_in_place {
+        if ctx.thunkenv.borrow().accumulate_in_place.get() {
           let spine = ctx.spine.borrow();
           let base_clk = spine._counter();
-          let mut this_clk = spine._version(this).unwrap();
+          let mut this_clk = spine._version(this).unwrap_or_else(|| Clock::default());
           let rhs_clk = spine._version(rhs).unwrap();
           if rhs_clk.is_init_once() {
-            this_clk = base_clk.max(this_clk).init_or_update();
+            if ctx.thunkenv.borrow().assume_uninit_zero.get() {
+              this_clk = base_clk.max(this_clk).init_or_update();
+            } else {
+              this_clk = base_clk.max(this_clk).update();
+            }
             let bp = spine.curp.get();
             assert_eq!(bp, spine.log.borrow().len() as _);
             let mut state: u8 = 0;
@@ -93,7 +98,7 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                 (1, SpineEntry::Intro(y, yclk)) |
                 (1, SpineEntry::Uninit(y, yclk)) => {
                   if y == rhs {
-                    assert_eq!(yclk, rhs_clk);
+                    //assert_eq!(yclk, rhs_clk);
                     spine.log.borrow_mut()[sp as usize] = match (this_clk.up, e_sp.name()) {
                       (0, SpineEntryName::Intro) => {
                         SpineEntry::Intro(this, this_clk)
@@ -1415,23 +1420,23 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
 impl<P: Borrow<CellPtr>> MathUnaryOps for P {}
 
 pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
-  // FIXME
-  unimplemented!();
-  /*panick_wrap(|| {
-    let ty = CellType{shape: shape.into(), dtype: dtype.into()};
+  panick_wrap(|| {
+    let dtype = dtype.into();
+    let ty = CellType{shape: shape.into(), dtype};
     assert!(ctx_clean_arg());
-    ctx_pop_thunk_(SetScalarFutThunkSpec{val: zero()}, ty)
-  })*/
+    let val = ScalarVal_::zero(dtype);
+    ctx_pop_thunk_(SetScalarFutThunkSpec{val}, ty)
+  })
 }
 
 pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
-  // FIXME
-  unimplemented!();
-  /*panick_wrap(|| {
-    let ty = CellType{shape: shape.into(), dtype: dtype.into()};
+  panick_wrap(|| {
+    let dtype = dtype.into();
+    let ty = CellType{shape: shape.into(), dtype};
     assert!(ctx_clean_arg());
-    ctx_pop_thunk_(SetScalarFutThunkSpec{val: one()}, ty)
-  })*/
+    let val = ScalarVal_::one(dtype);
+    ctx_pop_thunk_(SetScalarFutThunkSpec{val}, ty)
+  })
 }
 
 pub fn iota(len: i64) -> CellPtr {
@@ -1927,9 +1932,15 @@ pub trait MMapOps: Borrow<MCellPtr> {
 impl MMapOps for CellMap {}
 
 pub fn vjp(allsrc: &CellMap, sink: &CellMap) {
-  unimplemented!();
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let spine = ctx.spine.borrow();
+    spine.adj_map(allsrc.as_ptr(), sink.as_ptr(), &ctx.ctr, &ctx.thunkenv);
+  }))
 }
 
 pub fn jvp(allsink: &CellMap, src: &CellMap) {
-  unimplemented!();
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let spine = ctx.spine.borrow();
+    spine.dual_map(allsink.as_ptr(), src.as_ptr(), &ctx.ctr, &ctx.thunkenv);
+  }))
 }

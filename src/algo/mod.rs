@@ -6,7 +6,7 @@ use std::mem::{swap};
 
 pub mod fp;
 pub mod hash;
-//pub mod int;
+pub mod int;
 pub mod str;
 pub mod sync;
 

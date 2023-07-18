@@ -144,10 +144,8 @@ impl FutharkThunkSpec for IotaFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-//pub struct SetScalarFutThunkSpec<T> { pub val: T }
 pub struct SetScalarFutThunkSpec { pub val: ScalarVal_ }
 
-//impl<T: DtypeExt + Copy + Eq + Any> FutharkThunkSpec for SetScalarFutThunkSpec<T> {}
 impl FutharkThunkSpec for SetScalarFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
     Some("futhark.set_scalar")
@@ -165,16 +163,10 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
   }
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    //Ok(Dim{ndim: 0, dtype: T::dtype()})
-    //let dtype = self.val.dtype();
-    //Ok(Dim{ndim: 0, dtype})
     Err(ThunkDimErr::Nondeterm)
   }
 
   fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    //Ok(CellType{shape: Vec::new(), dtype: T::dtype()})
-    //let dtype = self.val.dtype();
-    //Ok(CellType{shape: Vec::new(), dtype})
     Err(ThunkTypeErr::Nondeterm)
   }
 
@@ -183,14 +175,16 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
   }*/
 
   fn gen_futhark(&self, abi: &mut FutAbi, _arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
-    // FIXME FIXME: rank polymorphic.
+    /*// FIXME FIXME: rank polymorphic.
     //let fmt = FutharkNumFormatter::default();
     let mut code = FutharkThunkCode::default();
     // FIXME FIXME: futhark treats actual scalars as simply pointers to cpu mem.
     /*body:     vec![format!("let {{%0}} = [{}] in", fmt.format(&self.val))],*/
     //code.body.push(format!("let {{%0}} = {} in", fmt.format(&self.val)));
     code.append(format!(r"let {{%0}} = {} in", self.val.format_futhark()));
-    code.into()
+    code.into()*/
+    abi.push_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    FutharkThunkCode::nd_replicate(out[0], format!(r"{}", self.val.format_futhark()))
   }
 }
 
@@ -226,6 +220,12 @@ impl FutharkThunkSpec for CastFutThunkSpec {
     FutharkThunkCode::nd_map(arg[0], format!(r"\u -> {}.{} u",
                                              self.new_dtype.format_futhark(),
                                              arg[0].dtype.format_futhark()))
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
+    let x_ty = arg[0].0.type_();
+    arg_adj[0] += out_adj.cast(x_ty.dtype);
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -2504,11 +2504,13 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     let x_ty = x.type_();
     let x_nd = x_ty.ndim() as usize;
     let inner_len = x_ty.shape[x_nd - 1];
+    let mut dy_shape = x_ty.shape.clone();
+    dy_shape[x_nd - 1] = 1;
     let dtype = x_ty.dtype;
     let y = x.inner_softmax();
     let rank = arg[1].0;
     let target = rank.inner_one_hot(inner_len, dtype);
-    arg_adj[0] += out_adj * (y - target);
+    arg_adj[0] += out_adj.new_shape(dy_shape) * (y - target);
     Ok(FutharkThunkAdj::Spec)
   }
 }

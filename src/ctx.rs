@@ -22,7 +22,7 @@ thread_local! {
   pub static TL_CTX: Ctx = {
     let mut ctx = Ctx::new();
     TL_CTX_CFG.with(|cfg| cfg._seal.set(true));
-    ctx.thunkenv.borrow_mut()._set_accumulate_in_place(true);
+    /*ctx.thunkenv.borrow_mut()._set_accumulate_in_place(false);*/
     ctx
   };
 }
@@ -269,11 +269,11 @@ pub fn ctx_init_gpu(dev: i32) {
   })
 }*/
 
-pub fn ctx_fresh() -> CellPtr {
+/*pub fn ctx_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
     ctx.ctr.fresh_cel()
   })
-}
+}*/
 
 /*pub fn ctx_tmp_fresh() -> CellPtr {
   TL_CTX.with(|ctx| {
@@ -406,9 +406,24 @@ pub fn ctx_fresh_mmap() -> MCellPtr {
 pub fn ctx_insert(ty: CellType) -> CellPtr {
   TL_CTX.with(|ctx| {
     let x = ctx.ctr.fresh_cel();
-    //let cel = PCell::new(x, ty.clone());
-    ctx.env.borrow_mut().insert_top(x, ty, /*cel*/);
+    ctx.env.borrow_mut().insert_top(x, ty);
     x
+  })
+}
+
+pub fn ctx_alias(og: CellPtr, new_ty: CellType) -> CellPtr {
+  TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    match env.lookup_ref(og) {
+      None => panic!("bug"),
+      Some(_e) => {
+        let x = ctx.ctr.fresh_cel();
+        env.insert_alias(x, new_ty, og);
+        let spine = ctx.spine.borrow();
+        spine.alias(x, og);
+        x
+      }
+    }
   })
 }
 
@@ -603,7 +618,13 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
     match ctx.env.borrow().lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => {
-        let xclk = ctx.spine.borrow()._version(x).unwrap();
+        let xclk = match ctx.spine.borrow()._version(x) {
+          None => {
+            println!("DEBUG: ctx_push_cell_arg: no spine version: x={:?}", x);
+            panic!("bug");
+          }
+          Some(xclk) => xclk
+        };
         if xclk.is_nil() {
           println!("ERROR: ctx_push_cell_arg: tried to push an uninitialized thunk argument: {:?}", x);
           panic!();
@@ -630,14 +651,18 @@ pub fn ctx_pop_thunk<Th: ThunkSpec_ + 'static>(th: Th) -> CellPtr {
     // FIXME FIXME: multiple arity out.
     let odim = match th.out_dim(&dims) {
       Err(_) => {
-        println!("ERROR: thunk apply dim error: {:?}", &dims);
+        println!("ERROR: thunk apply dim error: name={:?}", th.debug_name());
+        println!("ERROR: thunk apply dim error: dims={:?}", &dims);
+        println!("ERROR: thunk apply dim error: tys_={:?}", &tys_);
         panic!();
       }
       Ok(dim) => dim
     };
     let oty_ = match th.out_ty_(&tys_) {
       Err(_) => {
-        println!("ERROR: thunk apply type error: {:?}", &tys_);
+        println!("ERROR: thunk apply type error: name={:?}", th.debug_name());
+        println!("ERROR: thunk apply type error: dims={:?}", &dims);
+        println!("ERROR: thunk apply type error: tys_={:?}", &tys_);
         panic!();
       }
       Ok(ty_) => ty_
@@ -863,7 +888,7 @@ impl CtxCtr {
 }
 
 pub struct ThunkEnvEntry {
-  pub pthunk:   PThunk,
+  pub pthunk:   Rc<PThunk>,
 }
 
 #[derive(Debug)]
@@ -878,7 +903,8 @@ pub struct CtxThunkEnv {
   pub thunkidx: HashMap<(u16, u16, Vec<Dim>, ThunkKey, ), ThunkPtr>,
   pub update:   HashMap<(CellPtr, Clock), ThunkClosure>,
   pub arg:      Vec<(CellPtr, Clock)>,
-  pub accumulate_in_place: bool,
+  pub accumulate_in_place: Cell<bool>,
+  pub assume_uninit_zero: Cell<bool>,
 }
 
 impl CtxThunkEnv {
@@ -887,8 +913,12 @@ impl CtxThunkEnv {
     //self.update.clear();
   }
 
-  pub fn _set_accumulate_in_place(&mut self, flag: bool) {
-    self.accumulate_in_place = flag;
+  pub fn _set_accumulate_in_place(&self, flag: bool) {
+    self.accumulate_in_place.set(flag);
+  }
+
+  pub fn _set_assume_uninit_zero(&self, flag: bool) {
+    self.assume_uninit_zero.set(flag);
   }
 
   pub fn update(&mut self, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>) {
@@ -928,7 +958,7 @@ impl CtxThunkEnv {
       /*let mut arg = Vec::new();
       swap(&mut arg, &mut *ctx.arg.borrow_mut());
       assert_eq!(arg.len(), ar_in as usize);*/
-      let pthunk = PThunk::new(tp, spec_dim.clone(), (tk.0).clone());
+      let pthunk = Rc::new(PThunk::new(tp, spec_dim.clone(), (tk.0).clone()));
       let te = ThunkEnvEntry{/*arg,*/ pthunk};
       self.thunkidx.insert((ar_in, ar_out, spec_dim, tk, ), tp);
       self.thunktab.insert(tp, te);
@@ -1175,6 +1205,7 @@ pub struct CellEnvEntry {
 }
 
 pub struct CellEnvEntryRef<'a> {
+  pub root:     CellPtr,
   pub stablect: &'a Cell<u32>,
   //pub snapshot: &'a Cell<u32>,
   pub ty:       &'a CellType,
@@ -1355,7 +1386,7 @@ impl CtxEnv {
   pub fn lookup_ref(&self, x: CellPtr) -> Option<CellEnvEntryRef> {
     let query = x;
     let ty = match self.celtab.get(&query) {
-      None => panic!("bug"),
+      None => panic!("bug: CtxEnv::lookup_ref: missing query={:?}", query),
       Some(e) => {
         match &e.cel_ {
           &Cell_::Top(.., optr) => {
@@ -1378,6 +1409,7 @@ impl CtxEnv {
           &Cell_::Phy(..) |
           &Cell_::Cow(..) => {
             return Some(CellEnvEntryRef{
+              root: query,
               stablect: &e.stablect,
               //snapshot: &e.snapshot,
               ty: &e.ty,
@@ -1417,6 +1449,7 @@ impl CtxEnv {
           assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
         }
         Some(CellEnvEntryRef{
+          root,
           stablect: &e.stablect,
           //snapshot: &e.snapshot,
           ty,

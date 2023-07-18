@@ -9,7 +9,7 @@ use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell};
 use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier};
 #[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
-//use crate::pctx::smp::*;
+use crate::pctx::smp::*;
 //use crate::spine::{Spine};
 use crate::util::time::{Stopwatch};
 use cacti_cfg_env::*;
@@ -24,6 +24,7 @@ use futhark_ffi::{
   Stage as FutStage,
   Object as FutObject,
   ObjectExt,
+  bindings::ObjectFFI,
   Backend as FutBackend,
   MulticoreBackend,
   Abi as FutAbi,
@@ -479,6 +480,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     match FutharkThunkSpec::pop_adj(self, arg, out, out_clk, out_adj, arg_adj) {
       Ok(FutharkThunkAdj::Auto) => {
         // FIXME
+        println!("DEBUG: FutharkThunkSpec::pop_adj: auto adj not implemented: name={:?}", self.debug_name());
         unimplemented!();
       }
       Ok(FutharkThunkAdj::Spec) => Ok(()),
@@ -580,22 +582,29 @@ impl FutharkThunkCode {
       }
       1 => {
         self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
         self.append(format!(r"let {{%0}} = replicate {{%0.s[0]}} ({}) in", val));
       }
       2 => {
         self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
         self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}}) ({}) in", val));
-        self.append(format!(r"let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
+        //self.append(format!(r"let {{%0}} = unflatten {{%0.s[0]}} {{%0.s[1]}} t0 in"));
+        self.append(format!(r"let {{%0}} = unflatten t0 in"));
       }
       3 => {
         self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
         self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}}) ({}) in", val));
-        self.append(format!(r"let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
+        //self.append(format!(r"let {{%0}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} t0 in"));
+        self.append(format!(r"let {{%0}} = unflatten_3d t0 in"));
       }
       4 => {
         self.cfg.emit_out0_shape = true;
+        self.cfg.emit_out0_shape_param = true;
         self.append(format!(r"let t0 = replicate ({{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}) ({}) in", val));
-        self.append(format!(r"let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
+        //self.append(format!(r"let {{%0}} = unflatten_4d {{%0.s[0]}} {{%0.s[1]}} {{%0.s[2]}} {{%0.s[3]}} t0 in"));
+        self.append(format!(r"let {{%0}} = unflatten_4d t0 in"));
       }
       _ => {
         println!("WARNING: FutharkThunkCode::nd_replicate: not implemented: {:?}", out0);
@@ -925,20 +934,12 @@ pub trait FutharkThunkImpl_<B: FutBackend> {
 }
 
 pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
-  /*pub arityin:  u16,
-  pub arityout: u16,*/
   pub abi:      FutAbi,
   pub param:    Vec<FutAbiScalar>,
   pub spec_dim: Vec<Dim>,
   pub code:     FutharkThunkCode,
   pub name:     Option<&'static str>,
   pub source:   RefCell<String>,
-  // FIXME FIXME
-  //pub object:   RefCell<Option<FutObject<B>>>,
-  //pub consts:   RefCell<Vec<(PAddr, StableCell)>>,
-  //pub modekeys: RefCell<Vec<SortKey8<ThunkMode>>>,
-  //pub object:   RefCell<SortMap8<ThunkMode, FutObject<B>>>,
-  //pub consts:   RefCell<SortMap8<ThunkMode, Vec<(PAddr, StableCell)>>>,
   pub objects:  RefCell<SortMap8<ThunkMode, FutharkThunkObject<B>>>,
 }
 
@@ -946,10 +947,37 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
   fn _dropck(&mut self) {
   }
 
-  unsafe fn _setup_object(_obj: &mut FutObject<MulticoreBackend>) {
+  unsafe fn _setup_object(obj: &mut FutObject<MulticoreBackend>) {
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_setup_object: cfg...");
+    obj.new_config();
+    assert!(!obj.cfg.is_null());
+    TL_PCTX.with(|pctx| {
+      // FIXME: proper pctx multiplexing.
+      let mut override_smp = false;
+      #[cfg(feature = "nvgpu")]
+      if pctx.nvgpu.is_some() {
+        (obj.ffi.base().ctx_cfg_set_mem_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_alloc_hook as *const c_void as _);
+        (obj.ffi.base().ctx_cfg_set_mem_free.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_free_hook as *const c_void as _);
+        (obj.ffi.base().ctx_cfg_set_mem_unify.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_unify_hook as *const c_void as _);
+        override_smp = true;
+      }
+      if !override_smp {
+        (obj.ffi.base().ctx_cfg_set_mem_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_smp_mem_alloc_hook as *const c_void as _);
+        (obj.ffi.base().ctx_cfg_set_mem_free.as_ref().unwrap())(obj.cfg, tl_pctx_smp_mem_free_hook as *const c_void as _);
+        (obj.ffi.base().ctx_cfg_set_mem_unify.as_ref().unwrap())(obj.cfg, tl_pctx_smp_mem_unify_hook as *const c_void as _);
+      }
+      obj.set_num_threads(pctx.smp.phy_core_ct() as _);
+    });
+    // TODO
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_setup_object: cfg done");
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_setup_object: ctx...");
+    obj.new_context();
+    assert!(!obj.ctx.is_null());
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_setup_object: ctx done");
   }
 
   fn _build_object(_ctr: &CtxCtr, _env: &mut CtxEnv, _config: &FutConfig, _name: Option<&str>, _source: &str, _rst: Counter) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
+    // FIXME FIXME
     None
   }
 }
@@ -957,13 +985,13 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
 #[cfg(feature = "nvgpu")]
 impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
   fn _dropck(&mut self) {
-    assert!(LIBCUDA._inner.is_some());
+    /*assert!(LIBCUDA._inner.is_some());
     assert!(LIBCUDART._inner.is_some());
-    assert!(LIBNVRTC._inner.is_some());
+    assert!(LIBNVRTC._inner.is_some());*/
   }
 
   unsafe fn _setup_object(obj: &mut FutObject<CudaBackend>) {
-    println!("DEBUG: FutharkThunkImpl::_setup_object: cfg...");
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: cfg...");
     obj.new_config();
     assert!(!obj.cfg.is_null());
     TL_PCTX.with(|pctx| {
@@ -972,6 +1000,9 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       obj.set_setup_device(gpu.dev());
       obj.set_setup_stream(gpu.compute.as_ptr() as *mut _);
     });
+    (obj.ffi.base().ctx_cfg_set_mem_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_alloc_hook as *const c_void as _);
+    (obj.ffi.base().ctx_cfg_set_mem_free.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_free_hook as *const c_void as _);
+    (obj.ffi.base().ctx_cfg_set_mem_unify.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_unify_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_alloc_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_free_hook as *const c_void as _);
     (obj.ffi.ctx_cfg_set_gpu_unify.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_unify_hook as *const c_void as _);
@@ -1017,16 +1048,16 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     (obj.ffi.ctx_cfg_set_cuModuleGetFunction.as_ref().unwrap())(obj.cfg, LIBCUDA.cuModuleGetFunction.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuFuncGetAttribute.as_ref().unwrap())(obj.cfg, LIBCUDA.cuFuncGetAttribute.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuLaunchKernel.as_ref().unwrap())(obj.cfg, LIBCUDA.cuLaunchKernel.as_ref().unwrap().as_ptr() as _);
-    // TODO TODO
-    println!("DEBUG: FutharkThunkImpl::_setup_object: cfg done");
-    println!("DEBUG: FutharkThunkImpl::_setup_object: ctx...");
+    // TODO
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: cfg done");
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: ctx...");
     obj.new_context();
     assert!(!obj.ctx.is_null());
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
     });
-    println!("DEBUG: FutharkThunkImpl::_setup_object: ctx done");
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: ctx done");
   }
 
   fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, name: Option<&str>, source: &str, rst: Counter) -> Option<(FutObject<CudaBackend>, Vec<(PAddr, StableCell)>)> {
@@ -1075,17 +1106,13 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
               None => panic!("bug"),
               Some(reg) => reg.locus()
             };
-            // FIXME: check that this const clock definition is correct.
-            /*let mut clk: Clock = TL_CTX.with(|ctx| {
-              ctx.spine.borrow().ctr.into()
-            });*/
-            let mut xclk: Clock = rst.into();
-            xclk = xclk.init_once();
+            let base_clk: Clock = rst.into();
+            let xclk = base_clk.init_once();
             pcel.push_new_replica(x, xclk, locus, pmach, p);
             env.insert_phy(x, ty, pcel);
           });
           consts.push((p, StableCell::retain(env, x)));
-          // FIXME FIXME: what else?
+          // FIXME: what else?
         }
         if consts.len() > 0 {
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: consts={:?}", consts);
@@ -1098,9 +1125,6 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
 
 impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   fn drop(&mut self) {
-    //*self.object.borrow_mut() = None;
-    /*self.object.borrow_mut().clear();
-    self.consts.borrow_mut().clear();*/
     self.objects.borrow_mut().clear();
     /*// FIXME FIXME: in case of custom dropck that takes &mut CtxEnv.
     let mut consts = Vec::new();
@@ -1573,6 +1597,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     let mut out_ty_ = Vec::with_capacity(self.abi.arityout as usize);
     for k in 0 .. self.abi.arityout as usize {
       match spec_.out_ty_(&arg_ty_) {
+        Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
         Err(_) => panic!("bug"),
         Ok(ty_) => {
           if !(mode == ThunkMode::Apply1 && k == 0) {
@@ -1640,10 +1665,18 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     //param.resize(np, FutAbiScalar::Empty);
     //spec_.set_param(&mut param);
     if np == 0 && self.param.len() == 0 {
+    } else if np == 1 && self.param.len() == 0 {
+      // FIXME FIXME: hack.
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
     } else if np == 2 && self.param.len() == 0 {
       // FIXME FIXME: hack.
       param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
       param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
+    } else if np == 3 && self.param.len() == 0 {
+      // FIXME FIXME: hack.
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[2]));
     } else if np == 4 && self.param.len() == 0 {
       // FIXME FIXME: hack.
       param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
