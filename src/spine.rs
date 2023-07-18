@@ -249,11 +249,11 @@ pub struct SpineEnv {
   //pub state:    HashMap<CellPtr, SpineCellState>,
   pub state:    HashMap<CellPtr, SpineEnvEntry>,
   // FIXME
-  pub set:      BTreeSet<(MCellPtr, CellPtr, TotalClock)>,
+  //pub set:      BTreeSet<(MCellPtr, CellPtr, TotalClock)>,
   //pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), (CellPtr, Clock)>,
   // FIXME: alias-consistent map.
-  pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), SpineEnvMapEntry>,
-  //pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
+  //pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), SpineEnvMapEntry>,
+  pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
   pub arg:      Vec<(CellPtr, Clock)>,
   pub update:   HashMap<(CellPtr, Clock), (CellPtr, Vec<(CellPtr, Clock)>)>,
   /*pub iapply:   HashMap<CellPtr, (u32, ThunkPtr, Clock)>,
@@ -269,7 +269,7 @@ impl SpineEnv {
     self.ctr = ctr;
     //self.alias.clear();
     self.state.clear();
-    self.set.clear();
+    //self.set.clear();
     self.map.clear();
     self.arg.clear();
     self.update.clear();
@@ -317,7 +317,7 @@ impl SpineEnv {
     }
   }
 
-  //pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {}
+  /*//pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {}
   pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<SpineEnvGet> {
     let kroot = self._deref(k);
     if k != kroot {
@@ -341,10 +341,44 @@ impl SpineEnv {
         _ => panic!("bug")
       }
     }
-  }
-
-  /*pub fn _add2(&self, mx: MCellPtr, k: CellPtr, kclk: Clock, v: CellPtr, vclk: Clock) {
   }*/
+
+  pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<SpineEnvGet> {
+    let kroot = self._deref(k);
+    if k != kroot {
+      match (self.map.get(&(mx, k)), self.map.get(&(mx, kroot))) {
+        (None, None) => None,
+        (None, Some(&SpineEnvMapEntry2::Value(vroot, _))) => {
+          Some(SpineEnvGet::ReqAlias(kroot, vroot))
+        }
+        (Some(&SpineEnvMapEntry2::Alias(v)), Some(&SpineEnvMapEntry2::Value(vroot, ref kvclk))) => {
+          assert_eq!(self._deref(v), vroot);
+          // FIXME: binary search.
+          for &(okclk, vclk) in kvclk.iter().rev() {
+            if okclk == kclk {
+              return Some(SpineEnvGet::Value(v, vclk));
+            }
+          }
+          unreachable!();
+        }
+        _ => panic!("bug")
+      }
+    } else {
+      match self.map.get(&(mx, k)) {
+        None => None,
+        Some(&SpineEnvMapEntry2::Value(v, ref kvclk)) => {
+          // FIXME: binary search.
+          for &(okclk, vclk) in kvclk.iter().rev() {
+            if okclk == kclk {
+              return Some(SpineEnvGet::Value(v, vclk));
+            }
+          }
+          unreachable!();
+        }
+        _ => panic!("bug")
+      }
+    }
+  }
 
   pub fn step(this: &RefCell<SpineEnv>, sp: u32, curp: &Cell<u32>, log: &RefCell<Vec<SpineEntry>>, ctr: Option<&CtxCtr>, thunkenv: Option<&RefCell<CtxThunkEnv>>) {
     // FIXME FIXME
@@ -383,7 +417,7 @@ impl SpineEnv {
           None => Clock::default(),
           Some((_, state)) => state.clk
         };
-        if k != kroot {
+        /*if k != kroot {
           assert!(v != vroot);
           match self_.map.insert((mx, kroot, kclk.into()), SpineEnvMapEntry::Value(vroot, vclk)) {
             None => {}
@@ -414,16 +448,60 @@ impl SpineEnv {
             }
             _ => panic!("bug")
           }
+        }*/
+        if k != kroot {
+          assert!(v != vroot);
+          match self_.map.get_mut(&(mx, kroot)) {
+            None => {
+              let mut kvclk = Vec::new();
+              kvclk.push((kclk, vclk));
+              self_.map.insert((mx, kroot), SpineEnvMapEntry2::Value(vroot, kvclk));
+            }
+            Some(&mut SpineEnvMapEntry2::Value(ovroot, ref mut kvclk)) => {
+              assert_eq!(ovroot, vroot);
+              let (okclk, ovclk) = kvclk[kvclk.len() - 1];
+              assert!(okclk <= kclk);
+              assert!(ovclk <= vclk);
+              kvclk.push((kclk, vclk));
+            }
+            _ => panic!("bug")
+          }
+          match self_.map.insert((mx, k), SpineEnvMapEntry2::Alias(v)) {
+            None => {}
+            Some(SpineEnvMapEntry2::Alias(ov)) => {
+              assert_eq!(ov, v);
+            }
+            _ => panic!("bug")
+          }
+        } else {
+          assert_eq!(v, vroot);
+          match self_.map.get_mut(&(mx, k)) {
+            None => {
+              let mut kvclk = Vec::new();
+              kvclk.push((kclk, vclk));
+              self_.map.insert((mx, k), SpineEnvMapEntry2::Value(v, kvclk));
+            }
+            Some(&mut SpineEnvMapEntry2::Value(ov, ref mut kvclk)) => {
+              assert_eq!(ov, v);
+              let (okclk, ovclk) = kvclk[kvclk.len() - 1];
+              assert!(okclk <= kclk);
+              assert!(ovclk <= vclk);
+              kvclk.push((kclk, vclk));
+            }
+            _ => panic!("bug")
+          }
         }
         log.borrow_mut()[sp as usize] = SpineEntry::Add2(mx, k, kclk, v, vclk);
       }
       SpineEntry::AdjMap(allsrc, sink) => {
         let self_ = this.borrow();
-        match self_.map.range(&(sink, CellPtr::nil(), TotalClock::default()) .. ).next() {
+        //match self_.map.range(&(sink, CellPtr::nil(), TotalClock::default()) .. ).next() {}
+        match self_.map.range(&(sink, CellPtr::nil()) .. ).next() {
           None => {
             return;
           }
-          Some((&(mx, _, _), _)) => {
+          //Some((&(mx, _, _), _)) => {}
+          Some((&(mx, _), _)) => {
             if mx > sink {
               return;
             }
@@ -1358,7 +1436,7 @@ impl Spine {
     }
   }
 
-  pub fn _get(&self, mm: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {
+  /*pub fn _get(&self, mm: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {
     let cur_env = self.cur_env.borrow();
     match cur_env.map.get(&(mm, k, kclk.into())) {
       None => None,
@@ -1384,6 +1462,42 @@ impl Spine {
           Some(&SpineEnvMapEntry::Value(ovroot, vclk)) => {
             assert_eq!(ovroot, vroot);
             Some((v, vclk.into()))
+          }
+          _ => panic!("bug"),
+        }
+      }
+    }
+  }*/
+
+  pub fn _get(&self, mm: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {
+    let cur_env = self.cur_env.borrow();
+    match cur_env.map.get(&(mm, k)) {
+      None => None,
+      Some(&SpineEnvMapEntry2::Value(v, ref kvclk)) => {
+        // FIXME: binary search.
+        for &(okclk, vclk) in kvclk.iter().rev() {
+          if okclk == kclk {
+            return Some((v, vclk));
+          }
+        }
+        unreachable!();
+      }
+      Some(&SpineEnvMapEntry2::Alias(v)) => {
+        let kroot = cur_env._deref(k);
+        assert!(k != kroot);
+        let vroot = cur_env._deref(v);
+        assert!(v != vroot);
+        match cur_env.map.get(&(mm, kroot)) {
+          None => panic!("bug"),
+          Some(&SpineEnvMapEntry2::Value(ovroot, ref kvclk)) => {
+            assert_eq!(ovroot, vroot);
+            // FIXME: binary search.
+            for &(okclk, vclk) in kvclk.iter().rev() {
+              if okclk == kclk {
+                return Some((v, vclk));
+              }
+            }
+            unreachable!();
           }
           _ => panic!("bug"),
         }
