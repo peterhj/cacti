@@ -7,7 +7,7 @@ use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::{SpineRet, SpineEntry, SpineEntryName};
 use crate::thunk::op::*;
 
-use futhark_syntax::*;
+//use futhark_syntax::*;
 
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
@@ -38,10 +38,19 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
       if TL_CTX.with(|ctx| {
         let mut success = false;
         if ctx.thunkenv.borrow().accumulate_in_place.get() {
+          //println!("DEBUG: AddAssign::add_assign: try: enter: this={:?} rhs={:?}", this, rhs);
           let spine = ctx.spine.borrow();
+          let (this_root, rhs_root) = {
+            let cur_env = spine.cur_env.borrow();
+            let this_root = cur_env._deref(this);
+            let rhs_root = cur_env._deref(rhs);
+            (this_root, rhs_root)
+          };
+          //println!("DEBUG: AddAssign::add_assign: try:   this root={:?} rhs root={:?}", this_root, rhs_root);
           let base_clk = spine._counter();
           let mut this_clk = spine._version(this).unwrap_or_else(|| Clock::default());
           let rhs_clk = spine._version(rhs).unwrap();
+          //println!("DEBUG: AddAssign::add_assign: try:   this clk ={:?} rhs clk ={:?} init once? {:?}", this_clk, rhs_clk, rhs_clk.is_init_once());
           if rhs_clk.is_init_once() {
             if ctx.thunkenv.borrow().assume_uninit_zero.get() {
               this_clk = base_clk.max(this_clk).init_or_update();
@@ -58,50 +67,99 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                 (0, SpineEntry::YieldSet(y, ..)) |
                 (0, SpineEntry::YieldInit(y, ..)) |
                 (0, SpineEntry::Initialize(y, ..)) => {
-                  if y == rhs {
+                  let yroot = spine.cur_env.borrow()._deref(y);
+                  if yroot == rhs_root {
+                    //println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name());
                     break;
                   }
                 }
                 (0, SpineEntry::Apply(y, yclk, th)) => {
-                  if y == rhs {
+                  let yroot = spine.cur_env.borrow()._deref(y);
+                  if yroot == rhs_root {
+                    //println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name());
                     assert_eq!(yclk, rhs_clk);
+                    // FIXME FIXME: the rewriting below could use some fixing up.
                     spine.log.borrow_mut()[sp as usize] = match e_sp.name() {
                       SpineEntryName::Initialize => {
                         SpineEntry::Initialize(this, this_clk, th)
                       }
                       SpineEntryName::Apply => {
-                        println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Apply({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
-                        SpineEntry::Apply(this, this_clk, th)
+                        if this_clk.is_update() {
+                          println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Accumulate({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
+                          SpineEntry::Accumulate(this, this_clk, th)
+                        } else if this_clk.is_init_once() {
+                          println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Apply({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
+                          SpineEntry::Apply(this, this_clk, th)
+                        } else {
+                          unreachable!();
+                        }
                       }
                       _ => unreachable!()
                     };
                     let mut cur_env = spine.cur_env.borrow_mut();
-                    let this_root = cur_env._deref(this);
-                    let rhs_root = cur_env._deref(rhs);
+                    match cur_env._lookup_mut(rhs) {
+                      None => panic!("bug"),
+                      Some((_, state)) => {
+                        // FIXME: sealing here is kinda hacky.
+                        state.flag.set_seal();
+                        //state.flag.unset_intro();
+                        assert!(!state.clk.is_uninit());
+                        state.clk = state.clk.uninit();
+                      }
+                    }
+                    match cur_env._lookup_mut(this) {
+                      None => {
+                        //let this_root = cur_env._deref(this);
+                        let mut state = CellState::default();
+                        //state.flag.set_intro();
+                        assert!(this_clk.is_init_once());
+                        assert!(state.clk < this_clk);
+                        state.clk = this_clk;
+                        assert!(cur_env.state.insert(this_root, state.into()).is_none());
+                      }
+                      Some((_, state)) => {
+                        //state.flag.set_intro();
+                        //assert!(state.flag.intro());
+                        assert!(!state.flag.seal());
+                        assert!(this_clk.is_update());
+                        assert!(state.clk < this_clk);
+                        state.clk = this_clk;
+                      }
+                    }
+                    //let this_root = cur_env._deref(this);
+                    //let rhs_root = cur_env._deref(rhs);
                     let (orhs, arg) = cur_env.update.remove(&(rhs_root, rhs_clk)).unwrap();
-                    assert_eq!(orhs, rhs);
+                    //assert_eq!(orhs, rhs);
                     assert!(cur_env.update.insert((this_root, this_clk), (this, arg)).is_none());
                     drop(cur_env);
+                    // FIXME
                     let mut thunkenv = ctx.thunkenv.borrow_mut();
-                    let tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
-                    assert!(thunkenv.update.insert((this, this_clk), tclo).is_none());
+                    let mut tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
+                    //assert_eq!(tclo.out, rhs);
+                    tclo.out = this;
+                    assert!(thunkenv.update.insert((this_root, this_clk), tclo).is_none());
                     drop(thunkenv);
                     state = 1;
+                    break;
                   }
                 }
                 (0, SpineEntry::Accumulate(y, ..)) => {
-                  if y == rhs {
+                  let yroot = spine.cur_env.borrow()._deref(y);
+                  if yroot == rhs_root {
                     panic!("bug");
                   }
                 }
                 (0, SpineEntry::UnsafeWrite(y, ..)) => {
-                  if y == rhs {
+                  let yroot = spine.cur_env.borrow()._deref(y);
+                  if yroot == rhs_root {
                     unimplemented!();
                   }
                 }
-                (1, SpineEntry::Intro(y, yclk)) |
+                /*(1, SpineEntry::Intro(y, yclk)) |
                 (1, SpineEntry::Uninit(y, yclk)) => {
-                  if y == rhs {
+                  let yroot = spine.cur_env.borrow()._deref(y);
+                  if yroot == rhs_root {
+                    println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name());
                     //assert_eq!(yclk, rhs_clk);
                     spine.log.borrow_mut()[sp as usize] = match (this_clk.up, e_sp.name()) {
                       (0, SpineEntryName::Intro) => {
@@ -128,7 +186,7 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                     }
                     match cur_env._lookup_mut(this) {
                       None => {
-                        let this_root = cur_env._deref(this);
+                        //let this_root = cur_env._deref(this);
                         let mut state = CellState::default();
                         state.flag.set_intro();
                         state.clk = this_clk;
@@ -146,14 +204,14 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                     state = 2;
                     break;
                   }
-                }
+                }*/
                 _ => {}
               }
             }
             match state {
               0 => {}
-              1 => panic!("bug"),
-              2 => {
+              //1 => panic!("bug"),
+              1 => {
                 // FIXME: should seal rhs.
                 /*
                 spine.seal(rhs);
@@ -168,10 +226,35 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
       }) {
         return;
       }
-      let op = NopFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(rhs);
-      ctx_pop_accumulate_thunk(op, this)
+      //println!("DEBUG: AddAssign::add_assign: fallback: this={:?} rhs={:?}", this, rhs);
+      TL_CTX.with(|ctx| {
+      /*println!("DEBUG: AddAssign::add_assign: fallback:   {:?}",
+          ctx.thunkenv.borrow().accumulate_in_place.get());
+      println!("DEBUG: AddAssign::add_assign: fallback:   {:?}",
+          ctx.thunkenv.borrow().assume_uninit_zero.get());*/
+        if ctx.thunkenv.borrow().assume_uninit_zero.get() {
+          let spine = ctx.spine.borrow();
+          let base_clk = spine._counter();
+          let mut this_clk = spine._version(this).unwrap_or_else(|| Clock::default());
+          this_clk = base_clk.max(this_clk).init_or_update();
+          if this_clk.is_update() {
+            let op = IdentityFutThunkSpec;
+            assert!(ctx_clean_arg());
+            ctx_push_cell_arg(rhs);
+            ctx_pop_accumulate_thunk(op, this)
+          } else if this_clk.is_init_once() {
+            // FIXME: could just snapshot.
+            let op = IdentityFutThunkSpec;
+            assert!(ctx_clean_arg());
+            ctx_push_cell_arg(rhs);
+            ctx_pop_apply_thunk(op, this)
+          } else {
+            unreachable!();
+          }
+        } else {
+          unimplemented!();
+        }
+      });
     })
   }
 }
@@ -1832,7 +1915,7 @@ pub fn jvp(y: &MSet, x_dx: &MMap) -> MMap {
   unimplemented!();
 }*/
 
-#[track_caller]
+/*#[track_caller]
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
   panick_wrap(|| {
     let result = TL_CTX.with(|ctx| {
@@ -1886,7 +1969,7 @@ pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
 #[track_caller]
 pub fn apply2_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> (CellPtr, CellPtr) {
   unimplemented!();
-}
+}*/
 
 /*#[track_caller]
 pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {

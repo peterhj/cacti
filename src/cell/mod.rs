@@ -1219,7 +1219,7 @@ pub enum ShapeCompat {
   Incompat,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct CellType {
   pub shape:    Vec<i64>,
   pub dtype:    Dtype,
@@ -1242,6 +1242,15 @@ impl CellType {
     assert!(self.dtype != Dtype::_Top);
     assert!(self.shape.len() <= i8::max_value() as usize);
     self.shape.len() as i8
+  }
+
+  pub fn is_top(&self) -> bool {
+    if self.dtype == Dtype::_Top {
+      assert_eq!(self.ndim(), 0);
+      true
+    } else {
+      false
+    }
   }
 
   pub fn is_scalar(&self) -> bool {

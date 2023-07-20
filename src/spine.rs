@@ -95,6 +95,7 @@ pub enum SpineEntry {
   //Snapshot(CellPtr, CellPtr, CellPtr, /*Clock*/),
   //Keep(CellPtr),
   PushSeal(CellPtr, Clock),
+  //PushOut(CellPtr, Clock),
   Initialize(CellPtr, Clock, ThunkPtr),
   Apply(CellPtr, Clock, ThunkPtr),
   //Apply2([(CellPtr, Clock); 2], ThunkPtr),
@@ -255,6 +256,7 @@ pub struct SpineEnv {
   //pub map:      BTreeMap<(MCellPtr, CellPtr, TotalClock), SpineEnvMapEntry>,
   pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
   pub arg:      Vec<(CellPtr, Clock)>,
+  //pub out:      Vec<(CellPtr, Clock)>,
   pub update:   HashMap<(CellPtr, Clock), (CellPtr, Vec<(CellPtr, Clock)>)>,
   /*pub iapply:   HashMap<CellPtr, (u32, ThunkPtr, Clock)>,
   pub apply_:   HashMap<CellPtr, Vec<(u32, ThunkPtr, Clock)>>,
@@ -272,6 +274,7 @@ impl SpineEnv {
     //self.set.clear();
     self.map.clear();
     self.arg.clear();
+    //self.out.clear();
     self.update.clear();
     /*self.iapply.clear();
     self.apply_.clear();
@@ -459,10 +462,16 @@ impl SpineEnv {
             }
             Some(&mut SpineEnvMapEntry2::Value(ovroot, ref mut kvclk)) => {
               assert_eq!(ovroot, vroot);
-              let (okclk, ovclk) = kvclk[kvclk.len() - 1];
+              let fin = kvclk.len() - 1;
+              let (okclk, ovclk) = kvclk[fin];
+              // FIXME: descriptive error.
               assert!(okclk <= kclk);
               assert!(ovclk <= vclk);
-              kvclk.push((kclk, vclk));
+              if okclk == kclk {
+                kvclk[fin] = (kclk, vclk);
+              } else {
+                kvclk.push((kclk, vclk));
+              }
             }
             _ => panic!("bug")
           }
@@ -483,10 +492,16 @@ impl SpineEnv {
             }
             Some(&mut SpineEnvMapEntry2::Value(ov, ref mut kvclk)) => {
               assert_eq!(ov, v);
-              let (okclk, ovclk) = kvclk[kvclk.len() - 1];
+              let fin = kvclk.len() - 1;
+              let (okclk, ovclk) = kvclk[fin];
+              // FIXME: descriptive error.
               assert!(okclk <= kclk);
               assert!(ovclk <= vclk);
-              kvclk.push((kclk, vclk));
+              if okclk == kclk {
+                kvclk[fin] = (kclk, vclk);
+              } else {
+                kvclk.push((kclk, vclk));
+              }
             }
             _ => panic!("bug")
           }
@@ -519,7 +534,6 @@ impl SpineEnv {
             SpineEntry::Uninit(..) |
             SpineEntry::YieldSet(..) |
             SpineEntry::YieldInit(..) |
-            // FIXME: alias semantics.
             SpineEntry::Alias(..) |
             //SpineEntry::Snapshot(..) |
             SpineEntry::PushSeal(..) => {}
@@ -579,9 +593,15 @@ impl SpineEnv {
                       drop(self_);
                       {
                         //let ctr = ctr.unwrap();
-                        for &(x, xclk) in arg.iter().rev() {
-                          // FIXME: alias semantics.
+                        // NB: do not allocate fresh dx for repeated x in arg.
+                        'for_x: for (idx, &(x, xclk)) in arg.iter().rev().enumerate() {
                           let self_ = this.borrow();
+                          for (&(x2, _), &dx2) in arg.iter().rev().zip(arg_adj.iter()).take(idx) {
+                            if x == x2 {
+                              arg_adj.push(dx2);
+                              continue 'for_x;
+                            }
+                          }
                           let dx =
                               self_._get(sink, x, xclk.into())
                               .or_else(|| self_._get(allsrc, x, xclk.into()))
@@ -683,7 +703,7 @@ impl SpineEnv {
                             drop(thunkenv);
                             println!("DEBUG: SpineEnv::step: AdjMap:   pop adj: th={:?} {:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?}",
                                 th, pthunk.spec_.debug_name(), &arg, y, yclk, dy, &arg_adj);
-                            match pthunk.spec_.pop_adj(&arg, y, yclk, dy, &mut arg_adj) {
+                            match pthunk.spec_.pop_adj(&arg, y, yclk, ThunkMode::Apply0, dy, &mut arg_adj) {
                               Err(_) => {
                                 println!("ERROR: SpineEnv::step: adj failure ({:?} th={:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?})",
                                     e.name(), th, &arg, y, yclk, dy, &arg_adj);
@@ -810,6 +830,7 @@ impl SpineEnv {
           }
           //rev_env.unstep(&log[sp as usize]);
         }
+        println!("DEBUG: SpineEnv::step: AdjMap: done");
       }
       /*SpineEntry::AdjMap2(some_src, src_mask, sink) => {
         // FIXME FIXME
@@ -821,9 +842,10 @@ impl SpineEnv {
       }
       SpineEntry::Cache(x, _xclk) => {
         let mut self_ = this.borrow_mut();
+        let xroot = self_._deref(x);
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default().into());
+            self_.state.insert(xroot, CellState::default().into());
           }
           _ => {}
         }
@@ -831,14 +853,15 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            assert_eq!(state.mode, CellMode::_Top);
-            assert!(!state.flag.intro());
+            //assert_eq!(state.mode, CellMode::_Top);
+            //assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
-            assert!(state.clk.is_uninit());
-            state.mode = CellMode::Aff;
-            state.flag.set_intro();
+            //assert!(state.clk.is_uninit());
+            //state.mode = CellMode::Aff;
+            //state.flag.set_intro();
             let next_clk = base_clk.init_once();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
             /*match self_.apply_.get(&x) {
@@ -909,9 +932,10 @@ impl SpineEnv {
       }
       SpineEntry::YieldSet(x, _xclk, _loc) => {
         let mut self_ = this.borrow_mut();
+        let xroot = self_._deref(x);
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default().into());
+            self_.state.insert(xroot, CellState::default().into());
           }
           _ => {}
         }
@@ -919,14 +943,15 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            assert_eq!(state.mode, CellMode::_Top);
-            assert!(!state.flag.intro());
+            //assert_eq!(state.mode, CellMode::_Top);
+            //assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
             assert!(state.clk.is_uninit());
-            state.mode = CellMode::Aff;
-            state.flag.set_intro();
+            //state.mode = CellMode::Aff;
+            //state.flag.set_intro();
             let next_clk = base_clk.init_once();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
             /*match self_.apply_.get(&x) {
@@ -951,9 +976,10 @@ impl SpineEnv {
       }
       SpineEntry::YieldInit(x, _xclk, _loc) => {
         let mut self_ = this.borrow_mut();
+        let xroot = self_._deref(x);
         match self_._lookup(x) {
           None => {
-            self_.state.insert(x, CellState::default().into());
+            self_.state.insert(xroot, CellState::default().into());
           }
           _ => {}
         }
@@ -961,15 +987,16 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            assert_eq!(state.mode, CellMode::_Top);
-            assert!(!state.flag.intro());
+            //assert_eq!(state.mode, CellMode::_Top);
+            //assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
             // FIXME
             /*assert!(state.clk.is_uninit());*/
-            state.mode = CellMode::Init;
-            state.flag.set_intro();
+            //state.mode = CellMode::Init;
+            //state.flag.set_intro();
             let next_clk = base_clk.init_once();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
             // FIXME FIXME
@@ -1017,7 +1044,7 @@ impl SpineEnv {
             panic!("bug");
           }
           Some((_, state)) => {
-            assert!(state.flag.intro());
+            //assert!(state.flag.intro());
             // NB: late/lazy idempotent seal.
             /*assert!(!state.flag.seal());*/
             let next_clk = state.clk;
@@ -1030,20 +1057,29 @@ impl SpineEnv {
       }
       SpineEntry::Initialize(x, _xclk, ith) => {
         let mut self_ = this.borrow_mut();
-        //let base_clk: Clock = self_.ctr.into();
+        let base_clk: Clock = self_.ctr.into();
+        let xroot = self_._deref(x);
+        match self_._lookup(x) {
+          None => {
+            // FIXME FIXME
+            self_.state.insert(xroot, CellState::default().into());
+          }
+          Some(_) => {}
+        }
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((xroot, state)) => {
-            assert_eq!(state.mode, CellMode::_Top);
-            assert!(!state.flag.intro());
+            //assert_eq!(state.mode, CellMode::_Top);
+            //assert!(!state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
             // FIXME
             /*assert!(state.clk.is_uninit());*/
-            state.mode = CellMode::Init;
-            state.flag.set_intro();
-            let next_clk = state.clk.init_once();
-            //let next_clk = base_clk.max(state.clk).init_once();
+            //state.mode = CellMode::Init;
+            //state.flag.set_intro();
+            //let next_clk = state.clk.init_once();
+            let next_clk = base_clk.max(state.clk).init_once();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
             let mut arg = Vec::new();
@@ -1055,17 +1091,26 @@ impl SpineEnv {
       }
       SpineEntry::Apply(x, _xclk, th) => {
         let mut self_ = this.borrow_mut();
-        //let base_clk: Clock = self_.ctr.into();
+        let base_clk: Clock = self_.ctr.into();
+        let xroot = self_._deref(x);
+        match self_._lookup(x) {
+          None => {
+            // FIXME FIXME
+            self_.state.insert(xroot, CellState::default().into());
+          }
+          Some(_) => {}
+        }
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((xroot, state)) => {
-            assert_eq!(state.mode, CellMode::Aff);
-            assert!(state.flag.intro());
+            //assert_eq!(state.mode, CellMode::Aff);
+            //assert!(state.flag.intro());
             assert!(!state.flag.seal());
             /*assert_eq!(state.clk.up, 0);*/
-            assert!(state.clk.is_uninit());
-            let next_clk = state.clk.init_once();
-            //let next_clk = base_clk.max(state.clk).init_once();
+            //assert!(state.clk.is_uninit());
+            //let next_clk = state.clk.init_once();
+            let next_clk = base_clk.max(state.clk).init_once();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
             /*match self_.apply_.get(&x) {
@@ -1096,30 +1141,30 @@ impl SpineEnv {
       }
       SpineEntry::Accumulate(x, _xclk, th) => {
         let mut self_ = this.borrow_mut();
-        //let base_clk: Clock = self_.ctr.into();
+        let base_clk: Clock = self_.ctr.into();
+        let xroot = self_._deref(x);
+        //println!("DEBUG: SpineEnv::step: Accumulate: x={:?} xroot={:?} th={:?}", x, xroot, th);
+        match self_._lookup(x) {
+          None => {
+            // FIXME FIXME
+            self_.state.insert(xroot, CellState::default().into());
+          }
+          Some(_) => {}
+        }
         match self_._lookup_mut(x) {
           None => panic!("bug"),
-          Some((xroot, state)) => {
-            assert_eq!(state.mode, CellMode::Init);
-            assert!(state.flag.intro());
+          Some((_, state)) => {
+            //assert_eq!(state.mode, CellMode::Init);
+            //assert!(state.mode != CellMode::Aff);
+            //assert!(state.flag.intro());
             assert!(!state.flag.seal());
-            let next_clk = state.clk.update();
-            //let next_clk = base_clk.max(state.clk).update();
+            //state.mode = CellMode::Init;
+            //state.flag.set_intro();
+            //let next_clk = state.clk.update();
+            let next_clk = base_clk.max(state.clk).update();
+            assert!(state.clk < next_clk);
             state.clk = next_clk;
             drop(state);
-            /*match self_.apply_.get(&x) {
-              None => {
-                self_.apply_.insert(x, Vec::new());
-              }
-              _ => {}
-            }
-            match self_.apply_.get_mut(&x) {
-              None => panic!("bug"),
-              Some(thlist) => {
-                assert_eq!(thlist.len(), next_clk.up as _);
-                thlist.push((sp, th, next_clk));
-              }
-            }*/
             let mut arg = Vec::new();
             swap(&mut self_.arg, &mut arg);
             assert!(self_.update.insert((xroot, next_clk), (x, arg)).is_none());
@@ -1288,7 +1333,7 @@ impl Spine {
     SpineEnv::step(&self.cur_env, sp, &self.curp, &self.log, None, None);
   }
 
-  pub fn intro_aff(&self, x: CellPtr) {
+  /*pub fn intro_aff(&self, x: CellPtr) {
     //let sp = self.curp;
     //self.curp += 1;
     let sp = self.curp.get();
@@ -1304,7 +1349,7 @@ impl Spine {
     let e = SpineEntry::Uninit(x, Clock::default());
     self.log.borrow_mut().push(e);
     SpineEnv::step(&self.cur_env, sp, &self.curp, &self.log, None, None);
-  }
+  }*/
 
   pub fn init_cache_mux(&self, x: CellPtr) {
     //let sp = self.curp;
@@ -1583,13 +1628,17 @@ impl Spine {
       SpineEntry::Profile(_, _) => {
         unimplemented!();
       }
+      SpineEntry::AdjMap(..) => {
+        // FIXME FIXME
+        //unimplemented!();
+      }
       SpineEntry::Add(mx, x, _xclk) => {
         // FIXME FIXME
         unimplemented!();
       }
       SpineEntry::Add2(mx, k, _kclk, v, _vclk) => {
         // FIXME FIXME
-        unimplemented!();
+        //unimplemented!();
       }
       SpineEntry::Cache(x, _xclk) => {
         match env.lookup_ref(x) {
@@ -1601,7 +1650,7 @@ impl Spine {
             if prev_clk >= next_clk {
               panic!("bug");
             } else if prev_clk < next_clk {
-              e.state().mode = CellMode::Aff;
+              //e.state().mode = CellMode::Aff;
               e.state().flag.set_intro();
               e.state().flag.unset_seal();
               // FIXME FIXME
@@ -1634,13 +1683,13 @@ impl Spine {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            match e.state().mode {
+            /*match e.state().mode {
               CellMode::_Top => {}
               CellMode::Aff => {
                 // FIXME FIXME: should warn here?
               }
               _ => panic!("bug")
-            }
+            }*/
             e.state().mode = CellMode::Aff;
             //if !e.state().clk.happens_before(self.ctr).unwrap() {}
             match e.state().clk.partial_cmp_(self.ctr) {
@@ -1717,7 +1766,7 @@ impl Spine {
                 assert_eq!(e.state().clk.ctr(), self.ctr);
                 assert!(prev_clk.ctr().is_nil() || prev_clk.ctr() == self.ctr);
                 assert_eq!(prev_clk.up, 0);*/
-                e.state().mode = CellMode::Aff;
+                //e.state().mode = CellMode::Aff;
                 e.state().flag.set_intro();
                 e.state().flag.unset_seal();
                 e.clock_sync_loc(Locus::Mem, prev_clk, next_clk, env);
@@ -1785,24 +1834,26 @@ impl Spine {
       }
       SpineEntry::Initialize(x, _xclk, th) => {
         // FIXME FIXME
-        let xclk = match env.lookup_ref(x) {
+        let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            match e.state().mode {
+            /*match e.state().mode {
               CellMode::Init => {}
               _ => panic!("bug")
-            }
+            }*/
             assert_eq!(e.state().clk.ctr(), self.ctr);
-            assert!(e.state().flag.intro());
+            //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
+            e.state().flag.set_intro();
             // FIXME FIXME
-            let next_clk = e.state().clk.update();
+            let base_clk: Clock = self.ctr.into();
+            let next_clk = base_clk.max(e.state().clk).init_once();
             e.state().clk = next_clk;
-            next_clk
+            (e.root, next_clk)
           }
         };
         {
-          let tclo = match thunkenv.update.get(&(x, xclk)) {
+          let tclo = match thunkenv.update.get(&(xroot, xclk)) {
             None => panic!("bug"),
             Some(tclo) => tclo
           };
@@ -1838,26 +1889,28 @@ impl Spine {
         }
       }
       SpineEntry::Apply(x, _xclk, th) => {
-        let xclk = match env.lookup_ref(x) {
+        let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            match e.state().mode {
+            /*match e.state().mode {
               CellMode::Aff => {}
               _ => panic!("bug")
-            }
-            assert_eq!(e.state().clk.ctr(), self.ctr);
+            }*/
+            //assert_eq!(e.state().clk.ctr(), self.ctr);
             /*assert_eq!(e.state().clk.up, 0);*/
             assert!(e.state().clk.is_uninit());
-            assert!(e.state().flag.intro());
+            //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
+            e.state().flag.set_intro();
             // FIXME
-            let next_clk = e.state().clk.init_once();
+            let base_clk: Clock = self.ctr.into();
+            let next_clk = base_clk.max(e.state().clk).init_once();
             e.state().clk = next_clk;
-            next_clk
+            (e.root, next_clk)
           }
         };
         {
-          let tclo = match thunkenv.update.get(&(x, xclk)) {
+          let tclo = match thunkenv.update.get(&(xroot, xclk)) {
             None => panic!("bug"),
             Some(tclo) => tclo
           };
@@ -1895,25 +1948,27 @@ impl Spine {
         }
       }
       SpineEntry::Accumulate(x, _xclk, th) => {
-        let xclk = match env.lookup_ref(x) {
+        let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            match e.state().mode {
+            /*match e.state().mode {
               CellMode::Init => {}
               _ => panic!("bug")
-            }
-            assert_eq!(e.state().clk.ctr(), self.ctr);
+            }*/
+            //assert_eq!(e.state().clk.ctr(), self.ctr);
             assert!(e.state().clk.is_uninit());
-            assert!(e.state().flag.intro());
+            //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
+            e.state().flag.set_intro();
             // FIXME
-            let next_clk = e.state().clk.update();
+            let base_clk: Clock = self.ctr.into();
+            let next_clk = base_clk.max(e.state().clk).update();
             e.state().clk = next_clk;
-            next_clk
+            (e.root, next_clk)
           }
         };
         {
-          let tclo = match thunkenv.update.get(&(x, xclk)) {
+          let tclo = match thunkenv.update.get(&(xroot, xclk)) {
             None => panic!("bug"),
             Some(tclo) => tclo
           };

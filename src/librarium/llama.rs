@@ -172,7 +172,7 @@ impl Llama {
     matches.inv()
   }
 
-  pub fn param(&self) -> Vec<StableCell> {
+  pub fn clone_param(&self) -> Vec<StableCell> {
     let mut param = Vec::new();
     // FIXME: 0-th embed requires zero grad.
     param.push(self.embed.clone());
@@ -192,12 +192,30 @@ impl Llama {
     param
   }
 
-  pub fn make_input(&self) -> LanguageModelIn {
+  pub fn param(&self) -> Vec<StableCell> {
+    self.clone_param()
+  }
+
+  pub fn fresh_grad(&self) -> Vec<StableCell> {
+    // FIXME
+    unimplemented!();
+  }
+
+  pub fn fresh_grad_with_matmul_dtype(&self, dtype: Dtype) -> Vec<StableCell> {
+    // FIXME
+    unimplemented!();
+  }
+
+  pub fn fresh_input(&self) -> LanguageModelIn {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let in_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
     let in_lm_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
     LanguageModelIn{in_tok, in_lm_tok}
+  }
+
+  pub fn make_input(&self) -> LanguageModelIn {
+    self.fresh_input()
   }
 
   pub fn init(&mut self) {

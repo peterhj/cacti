@@ -592,12 +592,10 @@ impl Drop for NvGpuMemCell {
     if self.ptr.is_null() {
       return;
     }
-    unsafe {
-      match cuda_mem_free_host(self.ptr) {
-        Ok(_) => {}
-        Err(CUDA_ERROR_DEINITIALIZED) => {}
-        Err(_) => panic!("bug"),
-      }
+    match cuda_mem_free_host(self.ptr) {
+      Ok(_) => {}
+      Err(CUDA_ERROR_DEINITIALIZED) => {}
+      Err(_) => panic!("bug"),
     }
   }
 }

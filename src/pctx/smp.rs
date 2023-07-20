@@ -157,19 +157,13 @@ impl PCtxImpl for SmpPCtx {
 
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
-    let n = unsafe {
-      (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())()
-    };
+    let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
     println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
     // FIXME FIXME: debugging.
     let n = 1;
-    unsafe {
-      (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n)
-    };
+    (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n);
     println!("DEBUG: SmpPCtx::new: blas set num threads={}", n);
-    let n = unsafe {
-      (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())()
-    };
+    let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
     println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
     SmpPCtx{
     }

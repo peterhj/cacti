@@ -8,8 +8,8 @@ use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::stat::*;
 
-use futhark_syntax::{Token as FutToken};
 use futhark_syntax::re::{ReTrie};
+use futhark_syntax::tokenizing::{Token as FutToken};
 
 use std::any::{Any};
 use std::borrow::{Borrow};
@@ -706,13 +706,87 @@ pub fn ctx_pop_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType) -> Cel
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
-    spine.intro_aff(y);
+    //spine.intro_aff(y);
     spine.apply(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(y, yclk, tp, arg);
+    ctx.thunkenv.borrow_mut().update(y, y, yclk, tp, arg);
     y
+  })
+}
+
+pub fn ctx_pop_apply_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) {
+  TL_CTX.with(|ctx| {
+    let mut dims = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
+    let mut tys_ = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
+    for &(arg, _) in ctx.thunkenv.borrow().arg.iter() {
+      let ty_ = match ctx.env.borrow().lookup_ref(arg) {
+        None => panic!("bug"),
+        Some(e) => e.ty.clone()
+      };
+      dims.push(ty_.to_dim());
+      tys_.push(ty_);
+    }
+    // FIXME FIXME: multiple arity out.
+    let odim = match th.out_dim(&dims) {
+      Err(_) => {
+        println!("ERROR: thunk apply dim error: name={:?}", th.debug_name());
+        println!("ERROR: thunk apply dim error: dims={:?}", &dims);
+        println!("ERROR: thunk apply dim error: tys_={:?}", &tys_);
+        panic!();
+      }
+      Ok(dim) => dim
+    };
+    let oty_ = match th.out_ty_(&tys_) {
+      Err(_) => {
+        println!("ERROR: thunk apply type error: name={:?}", th.debug_name());
+        println!("ERROR: thunk apply type error: dims={:?}", &dims);
+        println!("ERROR: thunk apply type error: tys_={:?}", &tys_);
+        panic!();
+      }
+      Ok(ty_) => ty_
+    };
+    assert_eq!(odim, oty_.to_dim());
+    ctx_pop_apply_thunk_(th, out, oty_)
+  })
+}
+
+pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_ty: CellType) {
+  TL_CTX.with(|ctx| {
+    let mut dims = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
+    for &(arg, _) in ctx.thunkenv.borrow().arg.iter() {
+      let ty_ = match ctx.env.borrow().lookup_ref(arg) {
+        None => panic!("bug"),
+        Some(e) => e.ty.clone()
+      };
+      dims.push(ty_.to_dim());
+      let spine = ctx.spine.borrow();
+      spine.push_seal(arg);
+    }
+    // FIXME FIXME: multiple arity out.
+    let odim = out_ty.to_dim();
+    let oty_ = out_ty;
+    dims.push(odim);
+    let (ar_in, ar_out) = th.arity();
+    // FIXME FIXME
+    //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
+    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
+    let y = out;
+    let yroot = match ctx.env.borrow().lookup_ref(y) {
+      None => panic!("bug"),
+      Some(e) => {
+        assert_eq!(e.ty, &oty_);
+        e.root
+      }
+    };
+    let spine = ctx.spine.borrow();
+    assert_eq!(yroot, spine._deref(y));
+    spine.apply(y, tp);
+    let yclk = spine._version(y).unwrap();
+    let mut arg = Vec::new();
+    swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
   })
 }
 
@@ -769,12 +843,12 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
-    spine.uninit(y);
+    //spine.uninit(y);
     spine.initialize(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(y, yclk, tp, arg);
+    ctx.thunkenv.borrow_mut().update(y, y, yclk, tp, arg);
     y
   })
 }
@@ -814,18 +888,20 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
     let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
     let y = out;
-    match ctx.env.borrow().lookup_ref(y) {
+    let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
         assert_eq!(e.ty, &oty_);
+        e.root
       }
-    }
+    };
     let spine = ctx.spine.borrow();
+    assert_eq!(yroot, spine._deref(y));
     spine.accumulate(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(y, yclk, tp, arg);
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
   })
 }
 
@@ -906,6 +982,7 @@ pub struct ThunkEnvEntry {
 pub struct ThunkClosure {
   pub pthunk:   ThunkPtr,
   pub arg:      Vec<(CellPtr, Clock)>,
+  pub out:      CellPtr,
 }
 
 #[derive(Default)]
@@ -932,15 +1009,15 @@ impl CtxThunkEnv {
     self.assume_uninit_zero.set(flag);
   }
 
-  pub fn update(&mut self, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>) {
+  pub fn update(&mut self, yroot: CellPtr, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>) {
     match self.thunktab.get(&tp) {
       None => panic!("bug"),
       Some(te) => {
         // FIXME: where to typecheck?
         assert_eq!(arg.len(), te.pthunk.arityin as usize);
         assert_eq!(1, te.pthunk.arityout);
-        let tclo = ThunkClosure{pthunk: tp, arg};
-        self.update.insert((y, yclk), tclo);
+        let tclo = ThunkClosure{pthunk: tp, arg, out: y};
+        self.update.insert((yroot, yclk), tclo);
       }
     }
   }

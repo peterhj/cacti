@@ -68,6 +68,12 @@ pub struct PickleDir {
   pub tensor_map: HashMap<SmolStr, (usize, PickleTensor)>,
 }
 
+impl AsRef<Path> for PickleDir {
+  fn as_ref(&self) -> &Path {
+    self.dir_path.as_ref()
+  }
+}
+
 impl PickleDir {
   pub fn from<P: Into<PathBuf>>(p: P) -> Result<PickleDir, PickleDirErr> {
     PickleDir::open(p)

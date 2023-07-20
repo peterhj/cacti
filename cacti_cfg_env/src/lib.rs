@@ -17,7 +17,7 @@ pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
   pub virtualenv: bool,
-  pub debug:      bool,
+  pub debug:      i8,
 }
 
 impl CfgEnv {
@@ -69,8 +69,11 @@ impl CfgEnv {
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let debug = var("CACTI_DEBUG")
-      .map(|_| true)
-      .unwrap_or_else(|_| false);
+      .map(|s| match s.parse() {
+        Ok(d) => d,
+        Err(_) => 1
+      })
+      .unwrap_or_else(|_| 0);
     CfgEnv{
       cabalpath,
       cudaprefix,

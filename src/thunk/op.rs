@@ -6,7 +6,7 @@ use cacti_gpu_cu_ffi::{cublas_gemm_batched};
 use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F, CUDA_R_16BF};
 
 use futhark_ffi::{Abi, AbiOutput, AbiArrayRepr, AbiScalarType};
-use futhark_syntax::{Exp};
+//use futhark_syntax::{Exp};
 
 use std::borrow::{Cow};
 use std::cell::{Cell};
@@ -15,7 +15,7 @@ use std::ffi::{c_void};
 use std::rc::{Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+/*#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct LamFutExpThunkSpec {
   pub lam_src: Cow<'static, str>,
   pub lam_exp: Exp,
@@ -67,14 +67,70 @@ impl FutharkThunkSpec for LamFutExpThunkSpec {
     code.body.push(s);
     code.into()
   }
+}*/
+
+#[derive(PartialEq, Eq, Hash)]
+pub struct FutharkCodeThunkSpec {
+  // TODO
+  pub primal_mode: ThunkMode,
+  pub cost: Option<ThunkCostR0>,
+  pub abi: FutAbi,
+  //pub param: _,
+  pub dim: Vec<Dim>,
+  pub ty_: Vec<CellType>,
+  pub code: FutharkThunkCode,
+}
+
+impl FutharkThunkSpec for FutharkCodeThunkSpec {
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    self.cost
+  }
+
+  fn abi(&self) -> Abi {
+    self.abi.clone()
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    // TODO
+    if arg.len() != self.abi.arityin as usize {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg != &self.dim[ .. self.abi.arityin as usize] {
+      return Err(ThunkDimErr::_Bot);
+    }
+    assert_eq!(1, self.abi.arityout);
+    Ok(self.dim[self.abi.arityin as usize])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    // TODO
+    if arg.len() != self.abi.arityin as usize {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg != &self.ty_[ .. self.abi.arityin as usize] {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    assert_eq!(1, self.abi.arityout);
+    Ok(self.ty_[self.abi.arityin as usize].clone())
+  }
+
+  fn gen_futhark(&self, abi: &mut FutAbi, _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    // TODO
+    assert_eq!(1, abi.arityout);
+    abi.push_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    for k in 0 .. abi.arityin {
+      abi.push_arg_arr(k, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    }
+    Ok(self.code.clone())
+  }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct NopFutThunkSpec;
+pub struct IdentityFutThunkSpec;
 
-impl FutharkThunkSpec for NopFutThunkSpec {
+impl FutharkThunkSpec for IdentityFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.nop")
+    Some("futhark.identity")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -412,8 +468,9 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
             self.inner_len,
             out.dtype.format_futhark(),
         ));
-        code.body.push(format!(r"let {{%1}} = unflatten {{%0.s[0]}} {} t1 in",
+        code.body.push(format!(r"let {{%1}} = unflatten (t1 :> [{{%0.s[0]}} * {}]{}) in",
             self.inner_len,
+            out.dtype.format_futhark(),
         ));
         code.into()
       }
@@ -437,8 +494,9 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
             self.inner_len,
             out.dtype.format_futhark(),
         ));
-        code.body.push(format!(r"let {{%1}} = unflatten_3d {{%0.s[0]}} {{%0.s[1]}} {} t1 in",
+        code.body.push(format!(r"let {{%1}} = unflatten_3d (t1 :> [{{%0.s[0]}} * {{%0.s[1]}} * {}]{}) in",
             self.inner_len,
+            out.dtype.format_futhark(),
         ));
         code.into()
       }
@@ -883,8 +941,8 @@ impl FutharkThunkSpec for AddFutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
     arg_adj[1] += out_adj;
+    arg_adj[0] += out_adj;
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -1709,13 +1767,13 @@ impl FutharkThunkSpec for SquareFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    // FIXME FIXME
-    unimplemented!();
+    // FIXME: scalar 2.
+    arg_adj[0] += out_adj * (arg[0].0 + arg[0].0);
     /*
     let dtype = _;
     arg_adj[0] += out_adj * arg[0].0 * ScalarVal_::two(dtype);
-    Some(Ok(()))
     */
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -1788,8 +1846,10 @@ impl FutharkThunkSpec for SqrtFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    // FIXME FIXME
-    unimplemented!();
+    let y = arg[0].0.sqrt();
+    // FIXME: scalar 2.
+    arg_adj[0] += out_adj / (y + y);
+    Ok(FutharkThunkAdj::Spec)
   }
 }
 
@@ -3056,7 +3116,7 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, _out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
     let [l_blk_outer, l_blk_inner] = if self.l_blk_t { [self.l_block[1], self.l_block[0]] } else { self.l_block };
     let [r_blk_inner, r_blk_outer] = if self.r_blk_t { [self.r_block[1], self.r_block[0]] } else { self.r_block };
     assert_eq!(l_blk_inner, r_blk_inner);
