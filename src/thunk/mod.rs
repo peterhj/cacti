@@ -44,7 +44,7 @@ use home::{home_dir};
 
 use std::any::{Any};
 use std::borrow::{Borrow};
-use std::cell::{RefCell};
+use std::cell::{RefCell, UnsafeCell};
 use std::cmp::{max};
 //use std::convert::{TryFrom};
 use std::ffi::{c_void};
@@ -1961,7 +1961,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     };
     assert_eq!(extra, 0);
     let mut arg_ty_ = Vec::with_capacity((self.abi.arityin + extra) as usize);
-    let mut arg_arr = Vec::with_capacity((self.abi.arityin + extra) as usize);
+    let mut arg_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity((self.abi.arityin + extra) as usize);
     for k in 0 .. self.abi.arityin as usize {
       let e = match env.pread_ref(arg[k].0, arg[k].1) {
         None => panic!("bug"),
@@ -1993,7 +1993,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         a.set_shape(&e.ty.shape);
       }
       arg_ty_.push(e.ty);
-      arg_arr.push(a);
+      arg_arr.push(a.into());
     }
     let mut out_ty_ = Vec::with_capacity(self.abi.arityout as usize);
     for k in 0 .. self.abi.arityout as usize {
@@ -2062,12 +2062,12 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
         }
       }*/
     }
-    let mut out_arr = Vec::with_capacity(self.abi.arityout as usize);
+    let mut out_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity(self.abi.arityout as usize);
     for k in 0 .. self.abi.arityout as usize {
       let ty_ = &out_ty_[k];
       assert_eq!(self.spec_dim[self.abi.arityin as usize + k], ty_.to_dim());
       // FIXME FIXME
-      out_arr.push(FutArrayDev::null());
+      out_arr.push(FutArrayDev::null().into());
     }
     let mut objects = self.objects.borrow_mut();
     let mut object = objects.find_mut(mode).unwrap().1;
@@ -2088,28 +2088,36 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     if np == 0 && self.param.len() == 0 {
     } else if np == 1 && self.param.len() == 0 {
       // FIXME FIXME: hack.
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0].into()));
     } else if np == 2 && self.param.len() == 0 {
       // FIXME FIXME: hack.
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1].into()));
     } else if np == 3 && self.param.len() == 0 {
       // FIXME FIXME: hack.
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[2]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[2].into()));
     } else if np == 4 && self.param.len() == 0 {
       // FIXME FIXME: hack.
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[0]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[1]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[2]));
-      param.push(FutAbiScalar::I64(out_ty_[0].shape[3]));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[0].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[1].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[2].into()));
+      param.push(FutAbiScalar::I64(out_ty_[0].shape[3].into()));
     } else {
       unimplemented!();
     }
     /*obj.unify_abi(self.abi).unwrap();*/
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
+    //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr={:?}", &arg_arr);
+    //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
+    let mut arg_ndim = Vec::with_capacity(arg_arr.len());
+    for (k, arr) in arg_arr.iter_mut().enumerate() {
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr[{}]={:?}", k, arr.get_mut());
+      arg_ndim.push(arr.get_mut()._unset_ndim());
+    }
+    for (k, arr) in out_arr.iter_mut().enumerate() {
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr[{}]={:?}", k, arr.get_mut());
+    }
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: enter kernel...");
     let (pre_front_dptr, pre_backoffset) = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -2127,7 +2135,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
       (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
     });
     //let o_ret = obj.enter_kernel(self.abi.arityin + extra, self.abi.arityout, &self.param, &arg_arr, &mut out_arr);
-    let o_ret = obj.enter_kernel(&self.abi, &param, &arg_arr, &mut out_arr);
+    let o_ret = obj.enter_kernel(&self.abi, &param, &arg_arr, &out_arr);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       panic!("bug: FutharkThunkImpl::<CudaBackend>::apply: runtime error");
@@ -2175,23 +2183,30 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     drop(obj);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: ret={:?}", o_ret);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out={:?} oclk={:?}", out, oclk);
+    for (k, arr) in arg_arr.iter_mut().enumerate() {
+      arr.get_mut()._set_ndim(arg_ndim[k]);
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: arg_arr[{}]={:?}", k, arr.get_mut());
+    }
     // FIXME: at this point, the remaining memblocks are the outputs.
     // but, if any of the inputs were clobbered, then we have to unset those.
     // so, do some kind of unification here.
     for k in 0 .. self.abi.arityout as usize {
-      assert!(!out_arr[k].as_ptr().is_null());
-      out_arr[k]._set_ndim(max(1, out_ty_[k].ndim()));
+      assert!(!out_arr[k].get_mut().as_ptr().is_null());
+      out_arr[k].get_mut()._set_ndim(max(1, out_ty_[k].ndim()));
     }
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: shape={:?}", out_arr[0].shape().unwrap());
+    //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr={:?}", &out_arr);
+    for (k, arr) in out_arr.iter_mut().enumerate() {
+      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out_arr[{}]={:?}", k, arr.get_mut());
+    }
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: shape={:?}", out_arr[0].get_mut().shape().unwrap());
     if out_ty_[0].ndim() == 0 {
-      assert_eq!(&[1], out_arr[0].shape().unwrap());
+      assert_eq!(&[1], out_arr[0].get_mut().shape().unwrap());
     } else {
-      assert_eq!(&out_ty_[0].shape, out_arr[0].shape().unwrap());
+      assert_eq!(&out_ty_[0].shape, out_arr[0].get_mut().shape().unwrap());
     }
     // TODO TODO
-    let (mem_dptr, mem_size) = out_arr[0].mem_parts().unwrap();
-    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].refcount(), mem_dptr, mem_size);
+    let (mem_dptr, mem_size) = out_arr[0].get_mut().mem_parts().unwrap();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out: rc={:?} dptr=0x{:016x} size={}", out_arr[0].get_mut().refcount(), mem_dptr, mem_size);
     if mem_dptr == pre_front_dptr {
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   no fragmentation");
     } else if mem_dptr > pre_front_dptr {
@@ -2199,7 +2214,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     } else {
       unimplemented!();
     }
-    match out_arr[0].tag() {
+    match out_arr[0].get_mut().tag() {
       None => {
         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::apply: out:   tag=null");
       }
@@ -2354,6 +2369,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     }
     // FIXME FIXME
     unimplemented!();
+    /*
     assert_eq!(arg.len(), self.abi.arityin as usize);
     assert_eq!(1, self.abi.arityout);
     let mut arg_ty_ = Vec::with_capacity((self.abi.arityin + 1) as usize);
@@ -2450,6 +2466,7 @@ impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
     assert_eq!(out_ndim, out_arr[0].ndim());
     // FIXME FIXME
     unimplemented!();
+    */
   }
 }
 
