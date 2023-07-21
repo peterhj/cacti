@@ -1376,6 +1376,7 @@ impl<'a> CellEnvEntryRef<'a> {
 }
 
 pub struct CellEnvEntryMutRef<'a> {
+  pub root:     CellPtr,
   pub stablect: &'a Cell<u32>,
   //pub snapshot: &'a Cell<u32>,
   pub ty:       CellType,
@@ -1593,6 +1594,7 @@ impl CtxEnv {
           assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
         }
         return Some(CellEnvEntryMutRef{
+          root,
           stablect: &e.stablect,
           //snapshot: &e.snapshot,
           ty,
@@ -1657,6 +1659,7 @@ impl CtxEnv {
                     _ => panic!("bug")
                   }*/
                   return Some(CellEnvEntryMutRef{
+                    root,
                     stablect: &e.stablect,
                     //snapshot: &e.snapshot,
                     ty: ty.unwrap(),
@@ -1701,6 +1704,7 @@ impl CtxEnv {
                 Some(e) => {
                   // FIXME: type compat.
                   return Some(CellEnvEntryMutRef{
+                    root,
                     stablect: &e.stablect,
                     //snapshot: &e.snapshot,
                     ty: ty.unwrap(),
@@ -1760,6 +1764,7 @@ impl CtxEnv {
                 let pcel = PCell::new(optr, ty.clone());
                 e.cel_ = Cell_::Phy(state, clo, pcel);
                 return Some(CellEnvEntryMutRef{
+                  root,
                   stablect: &e.stablect,
                   //snapshot: &e.snapshot,
                   ty,
@@ -1778,6 +1783,7 @@ impl CtxEnv {
               Some(e) => {
                 // FIXME: type compat.
                 return Some(CellEnvEntryMutRef{
+                  root,
                   stablect: &e.stablect,
                   //snapshot: &e.snapshot,
                   ty,
@@ -1827,6 +1833,7 @@ impl CtxEnv {
                     }*/
                     // FIXME: type compat.
                     return Some(CellEnvEntryMutRef{
+                      root,
                       stablect: &e.stablect,
                       //snapshot: &e.snapshot,
                       ty,

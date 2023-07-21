@@ -1848,6 +1848,7 @@ impl Spine {
             // FIXME FIXME
             let base_clk: Clock = self.ctr.into();
             let next_clk = base_clk.max(e.state().clk).init_once();
+            assert!(e.state().clk < next_clk);
             e.state().clk = next_clk;
             (e.root, next_clk)
           }
@@ -1898,13 +1899,14 @@ impl Spine {
             }*/
             //assert_eq!(e.state().clk.ctr(), self.ctr);
             /*assert_eq!(e.state().clk.up, 0);*/
-            assert!(e.state().clk.is_uninit());
+            //assert!(e.state().clk.is_uninit());
             //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
             e.state().flag.set_intro();
             // FIXME
             let base_clk: Clock = self.ctr.into();
             let next_clk = base_clk.max(e.state().clk).init_once();
+            assert!(e.state().clk < next_clk);
             e.state().clk = next_clk;
             (e.root, next_clk)
           }
@@ -1956,13 +1958,14 @@ impl Spine {
               _ => panic!("bug")
             }*/
             //assert_eq!(e.state().clk.ctr(), self.ctr);
-            assert!(e.state().clk.is_uninit());
+            //assert!(e.state().clk.is_uninit());
             //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
             e.state().flag.set_intro();
             // FIXME
             let base_clk: Clock = self.ctr.into();
             let next_clk = base_clk.max(e.state().clk).update();
+            assert!(e.state().clk < next_clk);
             e.state().clk = next_clk;
             (e.root, next_clk)
           }
