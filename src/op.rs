@@ -244,7 +244,8 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
             ctx_pop_accumulate_thunk(op, this)
           } else if this_clk.is_init_once() {
             // FIXME: could just snapshot.
-            let op = IdentityFutThunkSpec;
+            //let op = IdentityFutThunkSpec;
+            let op = MemcpyThunkSpec;
             assert!(ctx_clean_arg());
             ctx_push_cell_arg(rhs);
             ctx_pop_apply_thunk(op, this)
@@ -575,6 +576,47 @@ impl BorrowCellViewOps for CellView {}
 impl<'l> BorrowCellViewOps for &'l CellView {}
 impl<'l> BorrowCellViewOps for CellViewRef<'l> {}
 
+impl<'l> Add<ScalarVal_> for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| {
+      let op = AddScalarFutThunkSpec{val: rhs};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Add<ScalarVal_> for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| (&self).add(rhs))
+  }
+}
+
+impl<'l> Add<ScalarVal_> for &'l StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
+  }
+}
+
+impl Add<ScalarVal_> for StableCell {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn add(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| self.as_ptr_ref().add(rhs))
+  }
+}
+
 impl<'l> Add<f32> for &'l CellPtr {
   type Output = CellPtr;
 
@@ -658,6 +700,29 @@ impl<R: Borrow<CellPtr>> Add<R> for StableCell {
 
   fn add(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().add(rhs))
+  }
+}
+
+impl<'l> Sub<CellPtr> for &'l ScalarVal_ {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| {
+      let op = LSubScalarFutThunkSpec{val: (*self).try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Sub<CellPtr> for ScalarVal_ {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn sub(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| (&self).sub(rhs))
   }
 }
 
@@ -752,19 +817,40 @@ impl<R: Borrow<CellPtr>> Sub<R> for StableCell {
   }
 }
 
+impl<'l> Mul<ScalarVal_> for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn mul(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| {
+      let op = MulScalarFutThunkSpec{val: rhs};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Mul<ScalarVal_> for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn mul(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| (&self).mul(rhs))
+  }
+}
+
 impl<'l> Mul<f32> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
   fn mul(self, rhs: f32) -> CellPtr {
-    unimplemented!();
-    /*
-    let op = MulScalarF32ThunkOp{scalar: rhs};
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(self.into());
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-    */
+    panick_wrap(|| {
+      let op = MulScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(op)
+    })
   }
 }
 

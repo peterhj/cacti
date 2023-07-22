@@ -593,6 +593,28 @@ impl CellDeref for CellViewHandle {
   }
 }
 
+#[repr(transparent)]
+pub struct CellViewHandle_([_Void]);
+
+/*impl Debug for CellViewHandle_ {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "CellViewHandle({})", self._deref().raw_)
+  }
+}*/
+
+/*impl Borrow<CellPtr> for CellViewHandle_ {
+  fn borrow(&self) -> &CellPtr {
+    unsafe { &*(self.0.as_ptr() as *const CellPtr) }
+  }
+}*/
+
+impl CellViewHandle_ {
+  pub fn _from_mut<'a>(this: &'a mut CellPtr) -> &'a mut CellViewHandle_ {
+    let ptr = { this.raw_ as _ };
+    unsafe { &mut *(from_raw_parts_mut(this as *mut CellPtr as *mut _Void, ptr) as *mut [_Void] as *mut CellViewHandle_) }
+  }
+}
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct CellViewHandleEx(usize, usize);
@@ -875,7 +897,15 @@ impl ScalarVal_ {
     // FIXME: use the formatter.
     match self {
       ScalarVal_::F64(x) => {
-        format!("{}f64", x.0).into()
+        if x.0.is_infinite() {
+          if x.0 < 0.0 {
+            format!("-f64.inf").into()
+          } else {
+            format!("f64.inf").into()
+          }
+        } else {
+          format!("{}f64", x.0).into()
+        }
       }
       ScalarVal_::F32(x) => {
         if x.0.is_infinite() {
@@ -892,6 +922,12 @@ impl ScalarVal_ {
         // FIXME FIXME
         if x.0.to_bits() == 0 {
           "0.0f16".into()
+        } else if x.0.to_bits() == 0x3c00 {
+          "1.0f16".into()
+        } else if x.0.to_bits() == 0x8000 {
+          "-0.0f16".into()
+        } else if x.0.to_bits() == 0xbc00 {
+          "-1.0f16".into()
         } else {
           unimplemented!();
         }

@@ -1644,8 +1644,8 @@ impl Spine {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            let prev_clk = e.state().clk;
             let base_clk: Clock = self.ctr.into();
+            let prev_clk = e.state().clk;
             let next_clk = base_clk.init_once();
             if prev_clk >= next_clk {
               panic!("bug");
@@ -1751,8 +1751,8 @@ impl Spine {
           let xclk = match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
-              let prev_clk = e.state().clk;
               let base_clk: Clock = self.ctr.into();
+              let prev_clk = e.state().clk;
               let next_clk = base_clk.init_once();
               println!("DEBUG: Spine::_step: YieldSet:   prev clk={:?}", prev_clk);
               println!("DEBUG: Spine::_step: YieldSet:   base clk={:?}", base_clk);
@@ -1953,6 +1953,7 @@ impl Spine {
         let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
+            let root = e.root;
             /*match e.state().mode {
               CellMode::Init => {}
               _ => panic!("bug")
@@ -1964,10 +1965,12 @@ impl Spine {
             e.state().flag.set_intro();
             // FIXME
             let base_clk: Clock = self.ctr.into();
-            let next_clk = base_clk.max(e.state().clk).update();
-            assert!(e.state().clk < next_clk);
-            e.state().clk = next_clk;
-            (e.root, next_clk)
+            let prev_clk = e.state().clk;
+            let next_clk = base_clk.max(prev_clk).update();
+            assert!(prev_clk < next_clk);
+            //e.state().clk = next_clk;
+            e.clock_sync(prev_clk, next_clk, env);
+            (root, next_clk)
           }
         };
         {

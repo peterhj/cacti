@@ -387,6 +387,16 @@ impl PCtx {
     }
   }
 
+  pub fn lookup_root(&self, addr: PAddr) -> Option<CellPtr> {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        InnerCell_::root(&*icel)
+      }
+    }
+  }
+
   pub fn set_root(&self, addr: PAddr, new_root: CellPtr) -> Option<CellPtr> {
     // FIXME
     match self.lookup(addr) {
