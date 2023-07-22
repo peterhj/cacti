@@ -1357,6 +1357,19 @@ impl CellType {
     }
     ShapeCompat::UnalignedPrefix
   }
+
+  pub fn unbroadcast(&self) -> CellType {
+    let mut shape = Vec::new();
+    let nd = self.ndim() as usize;
+    for d in 0 .. nd {
+      if self.shape[d] <= 0 {
+        unimplemented!();
+      } else if self.shape[d] > 1 {
+        shape.push(self.shape[d]);
+      }
+    }
+    CellType{shape, dtype: self.dtype}
+  }
 }
 
 #[derive(Clone)]

@@ -1822,6 +1822,11 @@ impl Spine {
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
+            if !e.state().flag.intro() {
+              let xroot = e.root;
+              let xclk = e.state().clk;
+              println!("DEBUG: Spine::_step: PushSeal: xroot={:?} x={:?} xclk={:?}", xroot, x, xclk);
+            }
             assert!(e.state().flag.intro());
             let xclk = e.state().clk;
             /*if xclk.ctr().is_nil() {
@@ -1837,6 +1842,7 @@ impl Spine {
         let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
+            let root = e.root;
             /*match e.state().mode {
               CellMode::Init => {}
               _ => panic!("bug")
@@ -1847,10 +1853,12 @@ impl Spine {
             e.state().flag.set_intro();
             // FIXME FIXME
             let base_clk: Clock = self.ctr.into();
-            let next_clk = base_clk.max(e.state().clk).init_once();
-            assert!(e.state().clk < next_clk);
-            e.state().clk = next_clk;
-            (e.root, next_clk)
+            let prev_clk = e.state().clk;
+            let next_clk = base_clk.max(prev_clk).init_once();
+            assert!(prev_clk < next_clk);
+            //e.state().clk = next_clk;
+            e.clock_sync(prev_clk, next_clk, env);
+            (root, next_clk)
           }
         };
         {
@@ -1893,6 +1901,7 @@ impl Spine {
         let (xroot, xclk) = match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
+            let root = e.root;
             /*match e.state().mode {
               CellMode::Aff => {}
               _ => panic!("bug")
@@ -1905,10 +1914,12 @@ impl Spine {
             e.state().flag.set_intro();
             // FIXME
             let base_clk: Clock = self.ctr.into();
-            let next_clk = base_clk.max(e.state().clk).init_once();
-            assert!(e.state().clk < next_clk);
-            e.state().clk = next_clk;
-            (e.root, next_clk)
+            let prev_clk = e.state().clk;
+            let next_clk = base_clk.max(prev_clk).init_once();
+            assert!(prev_clk < next_clk);
+            //e.state().clk = next_clk;
+            e.clock_sync(prev_clk, next_clk, env);
+            (root, next_clk)
           }
         };
         {

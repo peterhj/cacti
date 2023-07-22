@@ -161,7 +161,8 @@ impl FutharkThunkSpec for IdentityFutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -905,7 +906,8 @@ impl FutharkThunkSpec for AddScalarFutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -943,7 +945,8 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -995,8 +998,9 @@ impl FutharkThunkSpec for AddFutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[1] += out_adj;
-    arg_adj[0] += out_adj;
+    // FIXME: snapshot.
+    arg_adj[1] += out_adj._memcpy();
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -1175,7 +1179,8 @@ impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -1227,8 +1232,9 @@ impl FutharkThunkSpec for SubFutThunkSpec {
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj;
     arg_adj[1] += -out_adj;
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -1423,8 +1429,8 @@ impl FutharkThunkSpec for MulFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj * arg[1].0;
     arg_adj[1] += arg[0].0 * out_adj;
+    arg_adj[0] += out_adj * arg[1].0;
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -1700,8 +1706,8 @@ impl FutharkThunkSpec for DivFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    arg_adj[0] += out_adj / arg[1].0;
     arg_adj[1] += (out_adj * arg[0].0) / -arg[1].0.square();
+    arg_adj[0] += out_adj / arg[1].0;
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -2195,7 +2201,7 @@ impl FutharkThunkSpec for StandardSiluFutThunkSpec {
     let x = arg[0].0;
     let x_ty = x.type_();
     let y = x.standard_silu();
-    //arg_adj[0] += out_adj * y * (x * (1.0_f32 - y) + 1.0_f32);
+    /*arg_adj[0] += out_adj * y * (x * (1.0_f32 - y) + 1.0_f32);*/
     arg_adj[0] += out_adj * y * (x * (ScalarVal_::one(x_ty.dtype) - y) + ScalarVal_::one(x_ty.dtype));
     Ok(FutharkThunkAdj::Spec)
   }
@@ -3172,10 +3178,9 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != 2 {
-      return Err(ThunkDimErr::_Bot);
-    }
-    if arg[1].ndim() != 2 {
+    if !((arg[0].ndim() == 2 && arg[1].ndim() == 2) ||
+         (arg[0].ndim() == 4 && arg[1].ndim() == 4))
+    {
       return Err(ThunkDimErr::_Bot);
     }
     if self.l_dtype != arg[0].dtype {
@@ -3184,7 +3189,13 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     if self.r_dtype != arg[1].dtype {
       return Err(ThunkDimErr::_Bot);
     }
-    Ok(Dim{ndim: 2, dtype: self.o_dtype})
+    if arg[0].ndim() == 2 && arg[1].ndim() == 2 {
+      Ok(Dim{ndim: 2, dtype: self.o_dtype})
+    } else if arg[0].ndim() == 4 && arg[1].ndim() == 4 {
+      Ok(Dim{ndim: 4, dtype: self.o_dtype})
+    } else {
+      unreachable!();
+    }
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
@@ -3257,7 +3268,12 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     }
   }
 
-  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, _out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, _out_clk: Clock, _out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+    let l_ty = arg[0].0.type_();
+    let r_ty = arg[1].0.type_();
+    let y_ty = out.type_();
+    let dy_ty = out_adj.type_();
+    if l_ty.ndim() == 2 && r_ty.ndim() == 2 && y_ty.ndim() == 2 && dy_ty.ndim() == 2 {
     let [l_blk_outer, l_blk_inner] = if self.l_blk_t { [self.l_block[1], self.l_block[0]] } else { self.l_block };
     let [r_blk_inner, r_blk_outer] = if self.r_blk_t { [self.r_block[1], self.r_block[0]] } else { self.r_block };
     assert_eq!(l_blk_inner, r_blk_inner);
@@ -3292,6 +3308,40 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
         arg_adj[1] += out_adj.block_mm(out_block, true, arg[0].0, self.l_block, true);
       }
     }
+    } else if l_ty.ndim() == 4 && r_ty.ndim() == 4 && y_ty.ndim() == 4 && dy_ty.ndim() == 4 {
+      match (self.l_blk_t, self.r_blk_t) {
+        (false, false) => {
+          // (O-R, O-C) = (a-R, a-C) x (b-R, b-C)     = (a-R, b-C)
+          // (a-R, a-C) = (O-R, O-C) x (O-C, a-C)     = (O-R, O-C)   x (b-R, b-C)^T
+          // (b-R, b-C) = (b-R, O-R) x (O-R, O-C)     = (a-R, a-C)^T x (O-R, O-C)
+          arg_adj[1] += arg[0].0.block_matmul(true, out_adj, false);
+          arg_adj[0] += out_adj.block_matmul(false, arg[1].0, true);
+        }
+        (false, true) => {
+          // (O-R, O-C) = (a-R, a-C)   x (b-R, b-C)^T = (a-R, b-R)
+          // (a-R, a-C) = (O-R, O-C)   x (O-R, a-C)   = (O-R, O-C)   x (b-R, b-C)
+          // (b-R, b-C) = (O-R, O-C)^T x (O-R, b-C)   = (O-R, O-C)^T x (a-R, a-C)
+          arg_adj[1] += out_adj.block_matmul(true, arg[0].0, false);
+          arg_adj[0] += out_adj.block_matmul(false, arg[1].0, false);
+        }
+        (true, false) => {
+          // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)   = (a-C, b-C)
+          // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)   x (O-R, O-C)^T
+          // (b-R, b-C) = (b-R, O-R)   x (O-R, O-C)   = (a-R, a-C)   x (O-R, O-C)
+          arg_adj[1] += arg[0].0.block_matmul(false, out_adj, false);
+          arg_adj[0] += arg[1].0.block_matmul(false, out_adj, true);
+        }
+        (true, true) => {
+          // (O-R, O-C) = (a-R, a-C)^T x (b-R, b-C)^T = (a-C, b-R)
+          // (a-R, a-C) = (a-R, O-C)   x (O-R, O-C)^T = (b-R, b-C)^T x (O-R, O-C)^T
+          // (b-R, b-C) = (O-R, O-C)^T x (O-C, b-C)   = (O-R, O-C)^T x (a-R, a-C)^T
+          arg_adj[1] += out_adj.block_matmul(true, arg[0].0, true);
+          arg_adj[0] += arg[1].0.block_matmul(true, out_adj, true);
+        }
+      }
+    } else {
+      panic!("bug");
+    }
     Ok(())
   }
 }
@@ -3313,10 +3363,9 @@ pub struct BlockMatrixMulTypes {
 
 impl BlockMatrixMulThunkSpec {
   pub fn _calculate_out_ty(&self, arg: &[CellType]) -> Result<BlockMatrixMulTypes, ThunkTypeErr> {
-    if arg[0].ndim() != 2 {
-      return Err(ThunkTypeErr::_Bot);
-    }
-    if arg[1].ndim() != 2 {
+    if !((arg[0].ndim() == 2 && arg[1].ndim() == 2) ||
+         (arg[0].ndim() == 4 && arg[1].ndim() == 4))
+    {
       return Err(ThunkTypeErr::_Bot);
     }
     if self.l_dtype != arg[0].dtype {
@@ -3325,22 +3374,33 @@ impl BlockMatrixMulThunkSpec {
     if self.r_dtype != arg[1].dtype {
       return Err(ThunkTypeErr::_Bot);
     }
-    if arg[0].shape[0] % self.l_block[0] != 0 {
-      return Err(ThunkTypeErr::_Bot);
-    }
-    if arg[0].shape[1] % self.l_block[1] != 0 {
-      return Err(ThunkTypeErr::_Bot);
-    }
-    if arg[1].shape[0] % self.r_block[0] != 0 {
-      return Err(ThunkTypeErr::_Bot);
-    }
-    if arg[1].shape[1] % self.r_block[1] != 0 {
-      return Err(ThunkTypeErr::_Bot);
-    }
-    let l_nrow = arg[0].shape[0] / self.l_block[0];
-    let l_ncol = arg[0].shape[1] / self.l_block[1];
-    let r_nrow = arg[1].shape[0] / self.r_block[0];
-    let r_ncol = arg[1].shape[1] / self.r_block[1];
+    let (l_nrow, l_ncol, r_nrow, r_ncol) = if arg[0].ndim() == 2 && arg[1].ndim() == 2 {
+      if arg[0].shape[0] % self.l_block[0] != 0 {
+        return Err(ThunkTypeErr::_Bot);
+      }
+      if arg[0].shape[1] % self.l_block[1] != 0 {
+        return Err(ThunkTypeErr::_Bot);
+      }
+      if arg[1].shape[0] % self.r_block[0] != 0 {
+        return Err(ThunkTypeErr::_Bot);
+      }
+      if arg[1].shape[1] % self.r_block[1] != 0 {
+        return Err(ThunkTypeErr::_Bot);
+      }
+      let l_nrow = arg[0].shape[0] / self.l_block[0];
+      let l_ncol = arg[0].shape[1] / self.l_block[1];
+      let r_nrow = arg[1].shape[0] / self.r_block[0];
+      let r_ncol = arg[1].shape[1] / self.r_block[1];
+      (l_nrow, l_ncol, r_nrow, r_ncol)
+    } else if arg[0].ndim() == 4 && arg[1].ndim() == 4 {
+      let l_nrow = arg[0].shape[0];
+      let l_ncol = arg[0].shape[2];
+      let r_nrow = arg[1].shape[0];
+      let r_ncol = arg[1].shape[2];
+      (l_nrow, l_ncol, r_nrow, r_ncol)
+    } else {
+      unreachable!();
+    };
     println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: l nrow={} r nrow={} l ncol={} r ncol={}",
         l_nrow, r_nrow,
         l_ncol, r_ncol);
@@ -3357,13 +3417,19 @@ impl BlockMatrixMulThunkSpec {
     if l_blk_inner != r_blk_inner {
       return Err(ThunkTypeErr::_Bot);
     }
-    let m = l_blk_outer * nrow;
-    let n = r_blk_outer * ncol;
-    println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: ({:?} / {:?}{}) x ({:?} / {:?}{}) = [{}, {}]",
+    let o_ty = if arg[0].ndim() == 2 && arg[1].ndim() == 2 {
+      let m = nrow * l_blk_outer;
+      let n = ncol * r_blk_outer;
+      CellType{shape: vec![m, n], dtype: self.o_dtype}
+    } else if arg[0].ndim() == 4 && arg[1].ndim() == 4 {
+      CellType{shape: vec![nrow, l_blk_outer, ncol, r_blk_outer], dtype: self.o_dtype}
+    } else {
+      unreachable!();
+    };
+    println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: ({:?} / {:?}{}) x ({:?} / {:?}{}) = {:?}",
         &arg[0].shape, self.l_block, if self.l_blk_t { " T" } else { "" },
         &arg[1].shape, self.r_block, if self.r_blk_t { " T" } else { "" },
-        m, n);
-    let o_ty = CellType{shape: vec![m, n], dtype: self.o_dtype};
+        &o_ty.shape);
     let tys = BlockMatrixMulTypes{
       l_nrow,
       l_ncol,
@@ -3393,15 +3459,15 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 }
 
 #[cfg(feature = "nvgpu")]
-impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply");
+impl BlockMatrixMulF16F32GpuThunkImpl {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter");
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm pre sync error: {:?}", e);
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm pre sync error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
@@ -3409,14 +3475,21 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
     })?;
     let t0 = Stopwatch::tl_stamp();
     let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
-    /*self.alpha.set(1.0);*/
     match &spec.o_scale {
       &ScalarVal_::F32(ref val) => {
         self.alpha.set(*val.borrow());
       }
       _ => unimplemented!()
     }
-    self.beta.set(0.0);
+    match mode {
+      ThunkMode::Apply0 => {
+        self.beta.set(0.0);
+      }
+      ThunkMode::Accumulate => {
+        self.beta.set(1.0);
+      }
+      _ => unimplemented!()
+    }
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
       match env.lookup_ref(x) {
@@ -3428,11 +3501,11 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
     }
     /*let out_ty_ = ThunkSpec::out_ty_(spec, &arg_ty_).unwrap();*/
     let tys = spec._calculate_out_ty(&arg_ty_).unwrap();
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: arg_ty_={:?}", &arg_ty_);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemmtys={:?}", &tys);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: nrow={}", tys.nrow);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: ncol={}", tys.ncol);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: nblk={}", tys.nrow * tys.ncol);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: arg_ty_={:?}", &arg_ty_);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemmtys={:?}", &tys);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: nrow={}", tys.nrow);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ncol={}", tys.ncol);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: nblk={}", tys.nrow * tys.ncol);
     let out_ty_ = tys.o_ty.clone();
     // FIXME FIXME: correct transposes, shapes, arg order for row major v col major.
     let colmajor_bt = spec.l_blk_t;
@@ -3440,9 +3513,9 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
     let colmajor_n = tys.l_blk_outer;
     let colmajor_m = tys.r_blk_outer;
     let inner_len = tys.l_blk_inner;
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: m={}", colmajor_m);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: n={}", colmajor_n);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: k={}", inner_len);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: m={}", colmajor_m);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: n={}", colmajor_n);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: k={}", inner_len);
     assert_eq!(inner_len, tys.r_blk_inner);
     assert!(colmajor_m >= 0);
     assert!(colmajor_m <= i32::max_value() as _);
@@ -3451,23 +3524,33 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
     assert!(inner_len >= 0);
     assert!(inner_len <= i32::max_value() as _);
     // FIXME: does ldx need multiplying by elem size?
-    let ldb = arg_ty_[0].shape[1];
-    let lda = arg_ty_[1].shape[1];
-    let ldc = out_ty_.shape[1];
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: lda={}", lda);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: ldb={}", ldb);
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: ldc={}", ldc);
-    assert!(ldb >= 0);
-    assert!(ldb <= i32::max_value() as _);
+    let (lda, ldb, ldc) = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
+      let ldb = arg_ty_[0].shape[1];
+      let lda = arg_ty_[1].shape[1];
+      let ldc = out_ty_.shape[1];
+      (lda, ldb, ldc)
+    } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
+      let ldb = arg_ty_[0].shape[2] * arg_ty_[0].shape[3];
+      let lda = arg_ty_[1].shape[2] * arg_ty_[1].shape[3];
+      let ldc = out_ty_.shape[2] * out_ty_.shape[3];
+      (lda, ldb, ldc)
+    } else {
+      panic!("bug");
+    };
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: lda={}", lda);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ldb={}", ldb);
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ldc={}", ldc);
     assert!(lda >= 0);
     assert!(lda <= i32::max_value() as _);
+    assert!(ldb >= 0);
+    assert!(ldb <= i32::max_value() as _);
     assert!(ldc >= 0);
     assert!(ldc <= i32::max_value() as _);
     let loc = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.device_locus()
     });
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: read arg[0]...");
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]...");
     match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3481,7 +3564,14 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
             let inc = spec.l_dtype.size_bytes() as u64;
             let blk_row_len = spec.l_block[0] as u64;
             let blk_col_len = spec.l_block[1] as u64;
-            let stride = arg_ty_[0].shape[1] as u64;
+            //let stride = arg_ty_[0].shape[1] as u64;
+            let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
+              arg_ty_[0].shape[1] as u64
+            } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
+              (arg_ty_[0].shape[2] * arg_ty_[0].shape[3]) as u64
+            } else {
+              panic!("bug");
+            };
             // FIXME FIXME
             let mult_row = if tys.l_nrow == 1 && tys.l_nrow != tys.nrow { 0 } else { 1 };
             let mult_col = if tys.l_ncol == 1 && tys.l_ncol != tys.ncol { 0 } else { 1 };
@@ -3497,7 +3587,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: read arg[1]...");
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]...");
     match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3511,7 +3601,14 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
             let inc = spec.r_dtype.size_bytes() as u64;
             let blk_row_len = spec.r_block[0] as u64;
             let blk_col_len = spec.r_block[1] as u64;
-            let stride = arg_ty_[1].shape[1] as u64;
+            //let stride = arg_ty_[1].shape[1] as u64;
+            let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
+              arg_ty_[1].shape[1] as u64
+            } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
+              (arg_ty_[1].shape[2] * arg_ty_[1].shape[3]) as u64
+            } else {
+              panic!("bug");
+            };
             // FIXME FIXME
             let mult_row = if tys.r_nrow == 1 && tys.r_nrow != tys.nrow { 0 } else { 1 };
             let mult_col = if tys.r_ncol == 1 && tys.r_ncol != tys.ncol { 0 } else { 1 };
@@ -3527,7 +3624,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: write out...");
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out...");
     match env.pwrite_ref(out, oclk, /*CellEMode::Mutex,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3541,7 +3638,14 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
             let inc = spec.o_dtype.size_bytes() as u64;
             let blk_row_len = tys.l_blk_outer as u64;
             let blk_col_len = tys.r_blk_outer as u64;
-            let stride = out_ty_.shape[1] as u64;
+            //let stride = out_ty_.shape[1] as u64;
+            let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
+              out_ty_.shape[1] as u64
+            } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
+              (out_ty_.shape[2] * out_ty_.shape[3]) as u64
+            } else {
+              panic!("bug");
+            };
             let mut tmp = self.tmp_c.borrow_mut();
             tmp.clear();
             for j in 0 .. tys.nrow as u64 {
@@ -3554,9 +3658,9 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
-    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp_a=[0x{:016x}]", self.tmp_a.borrow()[0]);
-    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp_b=[0x{:016x}]", self.tmp_b.borrow()[0]);
-    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp_c=[0x{:016x}]", self.tmp_c.borrow()[0]);
+    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_a=[0x{:016x}]", self.tmp_a.borrow()[0]);
+    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_b=[0x{:016x}]", self.tmp_b.borrow()[0]);
+    //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_c=[0x{:016x}]", self.tmp_c.borrow()[0]);
     let b_gputy = match spec.l_dtype {
       Dtype::Fp32 => CUDA_R_32F,
       Dtype::Fp16 => CUDA_R_16F,
@@ -3577,17 +3681,17 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
     };
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm...");
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm...");
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: pre gemm sync error: {:?}", e);
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: pre gemm sync error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
       }?;
       let t1 = Stopwatch::tl_stamp();
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: pre gemm elapsed: {:.06} s", t1 - t0);
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0);
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -3606,11 +3710,11 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       //let tmp_a_ptr = tmp_a.as_ptr() as usize;
       //let tmp_b_ptr = tmp_b.as_ptr() as usize;
       //let tmp_c_ptr = tmp_c.as_ptr() as usize;
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: alpha ptr=0x{:016x}", alpha_ptr);
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: beta ptr =0x{:016x}", beta_ptr);
-      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp a ptr=0x{:016x}", tmp_a_ptr);
-      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp b ptr=0x{:016x}", tmp_b_ptr);
-      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: tmp c ptr=0x{:016x}", tmp_c_ptr);
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: alpha ptr=0x{:016x}", alpha_ptr);
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: beta ptr =0x{:016x}", beta_ptr);
+      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp a ptr=0x{:016x}", tmp_a_ptr);
+      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp b ptr=0x{:016x}", tmp_b_ptr);
+      //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp c ptr=0x{:016x}", tmp_c_ptr);
       // FIXME FIXME: the arrays to blocks have to be in vmem...
       let (nblk, tmp_a_dptr, tmp_b_dptr, tmp_c_dptr) = {
         let nblk = self.tmp_c.borrow().len();
@@ -3670,7 +3774,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       );
       match ret {
         Err(e) => {
-          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm error: {:?}", e);
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
@@ -3678,7 +3782,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm sync error: {:?}", e);
+          println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm sync error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
@@ -3687,7 +3791,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       //drop(tmp_c);
       //drop(tmp_b);
       //drop(tmp_a);
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply: gemm OK elapsed: {:.06} s", t1 - t0);
+      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0);
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -3700,10 +3804,21 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       Ok(())
     })
   }
+}
+
+#[cfg(feature = "nvgpu")]
+impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
+    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply");
+    let mode = ThunkMode::Apply0;
+    self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
+  }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate");
-    let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
+    let mode = ThunkMode::Accumulate;
+    self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
+    /*let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
     /*self.alpha.set(1.0);*/
     match &spec.o_scale {
       &ScalarVal_::F32(ref val) => {
@@ -3712,7 +3827,7 @@ impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
       _ => unimplemented!()
     }
     self.beta.set(1.0);
-    unimplemented!();
+    unimplemented!();*/
     /*
     TL_PCTX.with(|pctx| {
       // FIXME FIXME
@@ -3821,7 +3936,6 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
           }
         }
       };
-      let gpu = pctx.nvgpu.as_ref().unwrap();
       let ret = cuda_memcpy_async(
           dst_dptr,
           src_dptr,

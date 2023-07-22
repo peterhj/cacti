@@ -132,20 +132,20 @@ impl From<LlamaConfig> for Llama {
     let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
     let mut layers = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let q = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let k = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let v = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let o = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
+      let q = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
+      let k = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
+      let v = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
+      let o = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
+      let gate = StableCell::array([1, mlp_inner_dim, 1, inner_dim], f16::dtype());
+      let up = StableCell::array([1, mlp_inner_dim, 1, inner_dim], f16::dtype());
+      let down = StableCell::array([1, inner_dim, 1, mlp_inner_dim], f16::dtype());
       let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
       let pre_norm = StableCell::array([inner_dim], f16::dtype());
       let post_norm = StableCell::array([inner_dim], f16::dtype());
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
     }
     let head_norm = StableCell::array([inner_dim], f16::dtype());
-    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    let lm_head = StableCell::array([1, tok_dim, 1, inner_dim], f16::dtype());
     Llama{cfg, cos, sin, embed, layers, head_norm, lm_head}
   }
 }
@@ -296,29 +296,38 @@ impl Llama {
     for i in 0 .. num_layer as usize {
       let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
-                  .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].q, [inner_dim, inner_dim], true)
+                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].q, [inner_dim, inner_dim], true)
+                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                  .block_matmul(false, &self.layers[i].q, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let k_proj = pre_nrm
-                  .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].k, [inner_dim, inner_dim], true)
+                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].k, [inner_dim, inner_dim], true)
+                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                  .block_matmul(false, &self.layers[i].k, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let v_proj = pre_nrm
-                  .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].v, [inner_dim, inner_dim], true)
+                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].v, [inner_dim, inner_dim], true)
+                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                  .block_matmul(false, &self.layers[i].v, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let (q_proj, k_proj) = symplectic_embed(q_proj, k_proj);
-      let q_proj = q_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let k_proj = k_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      //let q_proj = q_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      //let k_proj = k_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let attn = q_proj
-                .block_mm_scale([seq_cap, head_dim], false, k_proj, [seq_cap, head_dim], true, 1.0 / (head_dim as f32).sqrt())
-                .new_shape([ubat_sz, seq_cap, num_head, seq_cap])
+                //.block_mm_scale([seq_cap, head_dim], false, k_proj, [seq_cap, head_dim], true, 1.0 / (head_dim as f32).sqrt())
+                .block_matmul_scale(false, k_proj, true, 1.0 / (head_dim as f32).sqrt())
+                //.new_shape([ubat_sz, seq_cap, num_head, seq_cap])
                 .cast(f32::dtype());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
                 .cast(f16::dtype())
-                .new_shape([ubat_sz * seq_cap, num_head * seq_cap]);
-      // FIXME: pad because block_mm is a very low level wrapper.
+                //.new_shape([ubat_sz * seq_cap, num_head * seq_cap]);
+                //.new_shape([ubat_sz, seq_cap, num_head, seq_cap]);
+                ;
+      /*// FIXME: pad because block_mm is a very low level wrapper.
       let pad_head_dim = ((head_dim + 8 - 1) / 8) * 8;
       let v_attn = if head_dim == pad_head_dim {
         let v_proj = v_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
@@ -333,28 +342,39 @@ impl Llama {
                     .block_unpad([seq_cap, head_dim])
                     .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
         v_attn
-      };
-      let o_proj = v_attn.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].o, [inner_dim, inner_dim], true)
+      };*/
+      let v_attn = attn.block_matmul(false, v_proj, false)
+                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim]);
+      //let o_proj = v_attn.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].o, [inner_dim, inner_dim], true)
+      let o_proj = v_attn.block_matmul(false, &self.layers[i].o, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
       let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
       let up_proj = post_nrm
-                   .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                   .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].up, [mlp_inner_dim, inner_dim], true);
+                   //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                   //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].up, [mlp_inner_dim, inner_dim], true);
+                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                   .block_matmul(false, &self.layers[i].up, true);
       let gate_proj = post_nrm
-                     .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                     .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].gate, [mlp_inner_dim, inner_dim], true);
+                     //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                     //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].gate, [mlp_inner_dim, inner_dim], true);
+                     .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                     .block_matmul(false, &self.layers[i].gate, true);
       let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
       let down_proj = gate_up
-                     .block_mm([ubat_sz * seq_cap, mlp_inner_dim], false, &self.layers[i].down, [inner_dim, mlp_inner_dim], true)
+                     //.block_mm([ubat_sz * seq_cap, mlp_inner_dim], false, &self.layers[i].down, [inner_dim, mlp_inner_dim], true)
+                     .block_matmul(false, &self.layers[i].down, true)
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }
     let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
-                      .new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                      .block_mm([ubat_sz * seq_cap, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
+                      //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
+                      //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
+                      .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
+                      .block_matmul(false, &self.lm_head, true)
                       .new_shape([ubat_sz, seq_cap, tok_dim])
                       .keep();
     let logit32 = out_lm_logit.cast(f32::dtype());

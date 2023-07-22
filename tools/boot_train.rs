@@ -107,7 +107,7 @@ fn main() {
       for (cel, key) in inv_matches.iter() {
         resume_put_mem_fun(cel, |ty, mem| {
           let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
-          if ty != pickty {
+          if ty.unbroadcast() != pickty.unbroadcast() {
             panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
           }
           mem.copy_from_reader(pickfile);
