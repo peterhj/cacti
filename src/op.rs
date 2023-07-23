@@ -5,6 +5,7 @@ use crate::ctx::*;
 use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::{SpineRet, SpineEntry, SpineEntryName};
+use crate::thunk::{FutharkNdBroadcastMap2MonomorphicSpec};
 use crate::thunk::op::*;
 
 //use futhark_syntax::*;
@@ -675,7 +676,8 @@ impl<'l, R: Borrow<CellPtr>> Add<R> for &'l CellPtr {
       ctx_push_cell_arg(x0);
       ctx_push_cell_arg(x1);
       if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
-        ctx_pop_thunk(BroadcastAddFutThunkSpec)
+        let mono = FutharkNdBroadcastMap2MonomorphicSpec::from2(&x0_ty, &x1_ty);
+        ctx_pop_thunk(BroadcastAddFutThunkSpec{mono})
       } else {
         ctx_pop_thunk(AddFutThunkSpec)
       }
@@ -789,7 +791,8 @@ impl<'l, R: Borrow<CellPtr>> Sub<R> for &'l CellPtr {
       ctx_push_cell_arg(x0);
       ctx_push_cell_arg(x1);
       if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
-        ctx_pop_thunk(BroadcastSubFutThunkSpec)
+        let mono = FutharkNdBroadcastMap2MonomorphicSpec::from2(&x0_ty, &x1_ty);
+        ctx_pop_thunk(BroadcastSubFutThunkSpec{mono})
       } else {
         ctx_pop_thunk(SubFutThunkSpec)
       }
@@ -881,7 +884,8 @@ impl<'l, R: Borrow<CellPtr>> Mul<R> for &'l CellPtr {
       ctx_push_cell_arg(x0);
       ctx_push_cell_arg(x1);
       if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
-        ctx_pop_thunk(BroadcastMulFutThunkSpec)
+        let mono = FutharkNdBroadcastMap2MonomorphicSpec::from2(&x0_ty, &x1_ty);
+        ctx_pop_thunk(BroadcastMulFutThunkSpec{mono})
       } else {
         ctx_pop_thunk(MulFutThunkSpec)
       }
@@ -952,7 +956,8 @@ impl<'l, R: Borrow<CellPtr>> Div<R> for &'l CellPtr {
       ctx_push_cell_arg(x0);
       ctx_push_cell_arg(x1);
       if &x0_ty.shape != &x1_ty.shape || x0_ty.dtype != x1_ty.dtype {
-        ctx_pop_thunk(BroadcastDivFutThunkSpec)
+        let mono = FutharkNdBroadcastMap2MonomorphicSpec::from2(&x0_ty, &x1_ty);
+        ctx_pop_thunk(BroadcastDivFutThunkSpec{mono})
       } else {
         ctx_pop_thunk(DivFutThunkSpec)
       }

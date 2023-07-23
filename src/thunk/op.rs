@@ -1006,7 +1006,7 @@ impl FutharkThunkSpec for AddFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct BroadcastAddFutThunkSpec;
+pub struct BroadcastAddFutThunkSpec { pub mono: FutharkNdBroadcastMap2MonomorphicSpec }
 
 impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -1025,7 +1025,10 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkDimErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1037,7 +1040,10 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkTypeErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1063,7 +1069,11 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
     // FIXME
     //FutharkThunkCode::nd_broadcast_map2_v0(arg[0], arg[1], r"+")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
-    FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) + ({}.{} v)",
+    /*FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) + ({}.{} v)",
+        dtype.format_futhark(), arg[0].dtype.format_futhark(),
+        dtype.format_futhark(), arg[1].dtype.format_futhark(),
+    ))*/
+    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) + ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -1240,7 +1250,7 @@ impl FutharkThunkSpec for SubFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct BroadcastSubFutThunkSpec;
+pub struct BroadcastSubFutThunkSpec { pub mono: FutharkNdBroadcastMap2MonomorphicSpec }
 
 impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -1259,7 +1269,10 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkDimErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1271,7 +1284,10 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkTypeErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1297,7 +1313,11 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
     // FIXME
     //FutharkThunkCode::nd_broadcast_map2_v0(arg[0], arg[1], r"-")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
-    FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) - ({}.{} v)",
+    /*FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) - ({}.{} v)",
+        dtype.format_futhark(), arg[0].dtype.format_futhark(),
+        dtype.format_futhark(), arg[1].dtype.format_futhark(),
+    ))*/
+    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) - ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -1436,7 +1456,7 @@ impl FutharkThunkSpec for MulFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct BroadcastMulFutThunkSpec;
+pub struct BroadcastMulFutThunkSpec { pub mono: FutharkNdBroadcastMap2MonomorphicSpec }
 
 impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -1455,7 +1475,10 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkDimErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1467,7 +1490,10 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkTypeErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1491,93 +1517,15 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
 
   fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
     // FIXME
-    //FutharkThunkCode::nd_broadcast_map2_v0(arg[0], arg[1], r"*")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
-    FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
+    /*FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
+        dtype.format_futhark(), arg[0].dtype.format_futhark(),
+        dtype.format_futhark(), arg[1].dtype.format_futhark(),
+    ))*/
+    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
-    /*let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
-    match arg[0].ndim {
-      0 => {
-        let mut code = FutharkThunkCode::default();
-        //code.append(format!(r"let {{%2}} = {{%0}} * {{%1}} in"));
-        code.append(format!(r"let {{%2}} = ({}.{} {{%0}}) * ({}.{} {{%1}}) in",
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-        ));
-        code.into()
-      }
-      1 => {
-        let mut code = FutharkThunkCode::default();
-        code.cfg.emit_arg_shapes = true;
-        //code.append(format!(r"let f_inner = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (*) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> t0[0] * v) t1) else (\t0 t1 -> map (\u -> u * t1[0]) t0) in"));
-        code.append(format!(r"let f_inner = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> ({}.{} u) * ({}.{} v)) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> ({}.{} t0[0]) * ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}.{} u) * ({}.{} t1[0])) t0) in",
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-        ));
-        code.append(format!(r"let {{%2}} = f_inner {{%0}} {{%1}} in"));
-        code.into()
-      }
-      2 => {
-        let mut code = FutharkThunkCode::default();
-        code.cfg.emit_arg_shapes = true;
-        //code.append(format!(r"let f_inner = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (*) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> t0[0] * v) t1) else (\t0 t1 -> map (\u -> u * t1[0]) t0) in"));
-        code.append(format!(r"let f_inner = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> ({}.{} u) * ({}.{} v)) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> ({}.{} t0[0]) * ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}.{} u) * ({}.{} t1[0])) t0) in",
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-        ));
-        code.append(format!(r"let f_outer = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_inner u v) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v) t1) else (\t0 t1 -> map (\u -> f_inner u t1[0]) t0) in"));
-        code.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} in"));
-        code.into()
-      }
-      3 => {
-        let mut code = FutharkThunkCode::default();
-        code.cfg.emit_arg_shapes = true;
-        //code.append(format!(r"let f_inner = if {{%0.s[2]}} == {{%1.s[2]}} then (\t0 t1 -> map2 (*) t0 t1) else if {{%0.s[2]}} == 1 then (\t0 t1 -> map (\v -> t0[0] * v) t1) else (\t0 t1 -> map (\u -> u * t1[0]) t0) in"));
-        code.append(format!(r"let f_inner = if {{%0.s[2]}} == {{%1.s[2]}} then (\t0 t1 -> map2 (\u v -> ({}.{} u) * ({}.{} v)) t0 t1) else if {{%0.s[2]}} == 1 then (\t0 t1 -> map (\v -> ({}.{} t0[0]) * ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}.{} u) * ({}.{} t1[0])) t0) in",
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-        ));
-        code.append(format!(r"let f_dim_1 = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> f_inner u v) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v) t1) else (\t0 t1 -> map (\u -> f_inner u t1[0]) t0) in"));
-        code.append(format!(r"let f_outer = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_dim_1 u v) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_dim_1 t0[0] v) t1) else (\t0 t1 -> map (\u -> f_dim_1 u t1[0]) t0) in"));
-        code.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} in"));
-        code.into()
-      }
-      4 => {
-        let mut code = FutharkThunkCode::default();
-        code.cfg.emit_arg_shapes = true;
-        //code.append(format!(r"let f_inner = if {{%0.s[3]}} == {{%1.s[3]}} then (\t0 t1 -> map2 (*) t0 t1) else if {{%0.s[3]}} == 1 then (\t0 t1 -> map (\v -> t0[0] * v) t1) else (\t0 t1 -> map (\u -> u * t1[0]) t0) in"));
-        code.append(format!(r"let f_inner = if {{%0.s[3]}} == {{%1.s[3]}} then (\t0 t1 -> map2 (\u v -> ({}.{} u) * ({}.{} v)) t0 t1) else if {{%0.s[3]}} == 1 then (\t0 t1 -> map (\v -> ({}.{} t0[0]) * ({}.{} v)) t1) else (\t0 t1 -> map (\u -> ({}.{} u) * ({}.{} t1[0])) t0) in",
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-            dtype.format_futhark(), arg[0].dtype.format_futhark(),
-            dtype.format_futhark(), arg[1].dtype.format_futhark(),
-        ));
-        code.append(format!(r"let f_dim_2 = if {{%0.s[2]}} == {{%1.s[2]}} then (\t0 t1 -> map2 (\u v -> f_inner u v) t0 t1) else if {{%0.s[2]}} == 1 then (\t0 t1 -> map (\v -> f_inner t0[0] v) t1) else (\t0 t1 -> map (\u -> f_inner u t1[0]) t0) in"));
-        code.append(format!(r"let f_dim_1 = if {{%0.s[1]}} == {{%1.s[1]}} then (\t0 t1 -> map2 (\u v -> f_dim_2 u v) t0 t1) else if {{%0.s[1]}} == 1 then (\t0 t1 -> map (\v -> f_dim_2 t0[0] v) t1) else (\t0 t1 -> map (\u -> f_dim_2 u t1[0]) t0) in"));
-        code.append(format!(r"let f_outer = if {{%0.s[0]}} == {{%1.s[0]}} then (\t0 t1 -> map2 (\u v -> f_dim_1 u v) t0 t1) else if {{%0.s[0]}} == 1 then (\t0 t1 -> map (\v -> f_dim_1 t0[0] v) t1) else (\t0 t1 -> map (\u -> f_dim_1 u t1[0]) t0) in"));
-        code.append(format!(r"let {{%2}} = f_outer {{%0}} {{%1}} in"));
-        code.into()
-      }
-      _ => {
-        unimplemented!();
-      }
-    }*/
   }
 }
 
@@ -1713,7 +1661,7 @@ impl FutharkThunkSpec for DivFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct BroadcastDivFutThunkSpec;
+pub struct BroadcastDivFutThunkSpec { pub mono: FutharkNdBroadcastMap2MonomorphicSpec }
 
 impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -1732,7 +1680,10 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkDimErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1744,7 +1695,10 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].ndim() != arg[1].ndim() {
+    if arg[0].ndim() != self.mono.ndim() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    if arg[1].ndim() != self.mono.ndim() {
       return Err(ThunkTypeErr::_Bot);
     }
     let dtype = arg[0].dtype.max(arg[1].dtype);
@@ -1770,7 +1724,11 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
     // FIXME
     //FutharkThunkCode::nd_broadcast_map2_v0(arg[0], arg[1], r"/")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
-    FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) / ({}.{} v)",
+    /*FutharkThunkCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) / ({}.{} v)",
+        dtype.format_futhark(), arg[0].dtype.format_futhark(),
+        dtype.format_futhark(), arg[1].dtype.format_futhark(),
+    ))*/
+    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) / ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))

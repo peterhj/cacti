@@ -488,6 +488,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+    assert!(!out.is_nil());
     match FutharkThunkSpec::pop_adj(self, arg, out, out_clk, out_adj, arg_adj) {
       Ok(FutharkThunkAdj::Auto) => {
         // FIXME
@@ -655,6 +656,324 @@ impl FutharkNumFormatter {
     write!(&mut s, "{}", dtype.to_futhark()).unwrap();
     s
     */
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct FutharkNdBroadcastMap2MonomorphicSpec {
+  pub lmsk: u8,
+  pub rmsk: u8,
+  pub nd:   i8,
+}
+
+impl FutharkNdBroadcastMap2MonomorphicSpec {
+  pub fn from2(l_ty: &CellType, r_ty: &CellType) -> FutharkNdBroadcastMap2MonomorphicSpec {
+    assert_eq!(l_ty.ndim(), r_ty.ndim());
+    let nd = l_ty.ndim();
+    assert!(nd <= 7);
+    let mut lmsk = 0;
+    let mut rmsk = 0;
+    for d in 0 .. nd {
+      let l_len = l_ty.shape[d as usize];
+      let r_len = r_ty.shape[d as usize];
+      let o_len = max(l_len, r_len);
+      if l_len == o_len {
+      } else if l_len == 1 {
+        lmsk |= (1 << d);
+      } else {
+        panic!("bug");
+      }
+      if r_len == o_len {
+      } else if r_len == 1 {
+        rmsk |= (1 << d);
+      } else {
+        panic!("bug");
+      }
+    }
+    FutharkNdBroadcastMap2MonomorphicSpec{lmsk, rmsk, nd}
+  }
+
+  pub fn ndim(&self) -> i8 {
+    self.nd
+  }
+
+  pub fn gen_futhark<S: Borrow<str>>(&self, abi: &mut FutAbi, arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+    assert_eq!(arg0.ndim(), self.nd);
+    assert_eq!(arg1.ndim(), self.nd);
+    abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    abi.set_arg_arr(0, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    abi.set_arg_arr(1, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    let lam = lam.borrow();
+    match self.nd {
+      0 => {
+        let mut code = FutharkThunkCode::default();
+        code.append(format!(r"let {{%2}} = ({}) {{%0}} {{%1}} in", lam));
+        code.into()
+      }
+      1 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_out0_shape = true;
+        code.cfg.emit_out0_shape_param = true;
+        match self.lmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = t_0 :> [{{%2.s[0]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.rmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = t_0 :> [{{%2.s[0]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        code.append(format!(r"let t0 = f0_dim_0 {{%0}} {{%2.s*}} in"));
+        code.append(format!(r"let t1 = f1_dim_0 {{%1}} {{%2.s*}} in"));
+        code.append(format!(r"let {{%2}} = map2 ({}) t0 t1 in", lam));
+        code.into()
+      }
+      2 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_out0_shape = true;
+        code.cfg.emit_out0_shape_param = true;
+        match (self.lmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = t_0 :> [{{%2.s[1]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.lmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f0_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = t_0 :> [{{%2.s[1]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.rmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f1_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        code.append(format!(r"let t0 = flatten (f0_dim_0 {{%0}} {{%2.s*}}) in"));
+        code.append(format!(r"let t1 = flatten (f1_dim_0 {{%1}} {{%2.s*}}) in"));
+        code.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.append(format!(r"let {{%2}} = unflatten t2 in"));
+        code.into()
+      }
+      3 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_out0_shape = true;
+        code.cfg.emit_out0_shape_param = true;
+        match (self.lmsk >> 2) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_2 t_0 {{%2.s**}} = t_0 :> [{{%2.s[2]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_2 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[2]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.lmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_2 u {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} (f0_dim_2 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.lmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f0_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 2) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_2 t_0 {{%2.s**}} = t_0 :> [{{%2.s[2]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_2 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[2]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_2 u {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} (f1_dim_2 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.rmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f1_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        code.append(format!(r"let t0 = flatten_3d (f0_dim_0 {{%0}} {{%2.s*}}) in"));
+        code.append(format!(r"let t1 = flatten_3d (f1_dim_0 {{%1}} {{%2.s*}}) in"));
+        code.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.append(format!(r"let {{%2}} = unflatten_3d t2 in"));
+        code.into()
+      }
+      4 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_out0_shape = true;
+        code.cfg.emit_out0_shape_param = true;
+        match (self.lmsk >> 3) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_3 t_0 {{%2.s**}} = t_0 :> [{{%2.s[3]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_3 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[3]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.lmsk >> 2) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_2 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_3 u {{%2.s*}}) t) t_0 :> [{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_2 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[2]}} (f0_dim_3 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.lmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_2 u {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} (f0_dim_2 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.lmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f0_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg0.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f0_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f0_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 3) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_3 t_0 {{%2.s**}} = t_0 :> [{{%2.s[3]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_3 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[3]}} t[0]) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 2) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_2 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_3 u {{%2.s*}}) t) t_0 :> [{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_2 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[2]}} (f1_dim_3 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match (self.rmsk >> 1) & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_2 u {{%2.s*}}) t) t_0 :> [{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_1 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[1]}} (f1_dim_2 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        match self.rmsk & 1 {
+          0 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> map (\u -> f1_dim_1 u {{%2.s*}}) t) t_0 :> [{{%2.s[0]}}][{{%2.s[1]}}][{{%2.s[2]}}][{{%2.s[3]}}]{}",
+                arg1.dtype.format_futhark(),
+            ));
+          }
+          1 => {
+            code.pre_append(format!(r"def f1_dim_0 t_0 {{%2.s**}} = (\t -> replicate {{%2.s[0]}} (f1_dim_1 t[0] {{%2.s*}})) t_0"));
+          }
+          _ => unreachable!()
+        }
+        code.append(format!(r"let t0 = flatten_4d (f0_dim_0 {{%0}} {{%2.s*}}) in"));
+        code.append(format!(r"let t1 = flatten_4d (f1_dim_0 {{%1}} {{%2.s*}}) in"));
+        code.append(format!(r"let t2 = map2 ({}) t0 t1 in", lam));
+        code.append(format!(r"let {{%2}} = unflatten_4d t2 in"));
+        code.into()
+      }
+      _ => {
+        println!("WARNING: FutharkNdBroadcastMap2MonomorphicSpec::gen_futhark: not implemented: {:?} {:?}", arg0, arg1);
+        return Err(FutharkGenErr::NotImpl);
+      }
+    }
   }
 }
 
@@ -956,7 +1275,7 @@ impl FutharkThunkCode {
     Ok(())
   }*/
 
-  pub fn nd_broadcast_map2<S: Borrow<str>>(abi: &mut FutAbi, arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
+  /*pub fn nd_broadcast_map2<S: Borrow<str>>(abi: &mut FutAbi, arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkCode, FutharkGenErr> {
     abi.push_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
     abi.push_arg_arr(0, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
     abi.push_arg_arr(1, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
@@ -1056,7 +1375,7 @@ impl FutharkThunkCode {
       }
     }
     Ok(())
-  }
+  }*/
 
   pub fn pre_append<S: Into<String>>(&mut self, line: S) {
     self.head.push(line.into());
