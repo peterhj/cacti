@@ -1724,6 +1724,15 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: cfg...");
     obj.new_config();
     assert!(!obj.cfg.is_null());
+    TL_CFG_ENV.with(|cfg| {
+      if !cfg.no_kcache {
+        if let Some(kcache_path) = obj.kcache_path() {
+          println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: kcache path={:?}",
+              kcache_path.to_str().map(|s| safe_ascii(s.as_bytes())).unwrap());
+          obj.set_cache_file(kcache_path);
+        }
+      }
+    });
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
@@ -2192,14 +2201,14 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     let mut config = FutConfig::default();
     // FIXME FIXME: os-specific paths.
     config.cachedir = home_dir().unwrap().join(".cacti").join("cache");
-    TL_CFG_ENV.with(|env| {
-      if let Some(path) = env.cabalpath.first() {
+    TL_CFG_ENV.with(|cfg| {
+      if let Some(path) = cfg.cabalpath.first() {
         config.futhark = path.join("cacti-futhark");
       }
-      if let Some(prefix) = env.cudaprefix.first() {
+      if let Some(prefix) = cfg.cudaprefix.first() {
         config.include = prefix.join("include");
       }
-      if env.debug >= 3 {
+      if cfg.debug >= 3 {
         config.verbose = true;
       }
     });

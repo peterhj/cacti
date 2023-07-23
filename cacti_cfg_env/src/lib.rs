@@ -17,6 +17,7 @@ pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
   pub virtualenv: bool,
+  pub no_kcache:  bool,
   pub debug:      i8,
 }
 
@@ -68,6 +69,9 @@ impl CfgEnv {
     let virtualenv = var("VIRTUAL_ENV")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let no_kcache = var("CACTI_NO_KCACHE")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let debug = var("CACTI_DEBUG")
       .map(|s| match s.parse() {
         Ok(d) => d,
@@ -78,6 +82,7 @@ impl CfgEnv {
       cabalpath,
       cudaprefix,
       virtualenv,
+      no_kcache,
       debug,
     }
   }
