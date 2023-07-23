@@ -3166,7 +3166,7 @@ pub struct BlockMatrixMulThunkSpec {
 
 impl ThunkSpec for BlockMatrixMulThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("block_mm")
+    Some("block_matmul")
   }
 
   fn arity(&self) -> (u16, u16) {

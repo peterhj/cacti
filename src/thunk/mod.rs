@@ -330,9 +330,9 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
 }
 
 #[derive(Clone, Copy, Debug)]
-#[repr(u8)]
+//#[repr(u8)]
 pub enum FutharkGenErr {
-  NotImpl = 1,
+  NotImpl,
   Dim(ThunkDimErr),
   _Bot,
 }
@@ -528,6 +528,9 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           .map_err(|_| ThunkAdjErr::_Bot)?;
         let cost = FutharkThunkSpec::cost_r0(self);
         for k in 0 .. abi.arityin {
+          if arg_adj[k as usize].is_nil() {
+            continue;
+          }
           let mut adj_abi = FutAbi::default();
           adj_abi.arityin = abi.arityin + 1;
           adj_abi.arityout = 1;
@@ -1948,9 +1951,40 @@ impl FutharkThunkImpl<CudaBackend> {
     };
     //assert_eq!(extra, 0);
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", arg);
-    let mut arg_ty_ = Vec::with_capacity((self.abi.arityin + extrain) as usize);
+    let mut arg_ty_: Vec<CellType> = Vec::with_capacity((self.abi.arityin + extrain) as usize);
     let mut arg_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity((self.abi.arityin + extrain) as usize);
-    for k in 0 .. self.abi.arityin as usize {
+    'for_k: for k in 0 .. self.abi.arityin as usize {
+      let xroot = match env.lookup_ref(arg[k].0) {
+        None => panic!("bug"),
+        Some(e) => e.root
+      };
+      for j in 0 .. k {
+        match env.lookup_ref(arg[j].0) {
+          None => panic!("bug"),
+          Some(e_j) => {
+            let xroot_j = e_j.root;
+            if xroot_j == xroot {
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: aliased args: xroot[{}]={:?} xroot[{}]={:?}",
+                  j, xroot_j, k, xroot);
+              match env.lookup_ref(arg[k].0) {
+                None => panic!("bug"),
+                Some(e) => {
+                  if &arg_ty_[j] == e.ty {
+                    arg_ty_.push(arg_ty_[j].clone());
+                    let a = arg_arr[j].get_mut().clone();
+                    arg_arr.push(a.into());
+                  } else {
+                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: aliased args: xty[{}]={:?} xty[{}]={:?}",
+                        j, &arg_ty_[j], k, e.ty);
+                    unimplemented!();
+                  }
+                  continue 'for_k;
+                }
+              }
+            }
+          }
+        }
+      }
       let e = match env.pread_ref(arg[k].0, arg[k].1) {
         None => panic!("bug"),
         Some(e) => e
@@ -2012,6 +2046,7 @@ impl FutharkThunkImpl<CudaBackend> {
       assert_eq!(self.spec_dim[self.abi.arityin as usize + k], ty_.to_dim());
       match mode {
         ThunkMode::Accumulate => {
+          // FIXME: double check that out does not alias any args.
           let e = match env.pwrite_ref(out, oclk) {
             None => panic!("bug"),
             Some(e) => e
@@ -2295,7 +2330,7 @@ impl FutharkThunkImpl<CudaBackend> {
                     pcel.push_new_replica(optr, oclk, Locus::VMem, PMach::NvGpu, p);
                     *e.cel_ = Cell_::Phy(state, clo, pcel);
                     f = true;
-                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: new phy {:?} (--> {:?}) -> {:?}",
+                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: new phy {:?} --> {:?} -> {:?}",
                         out, optr, p);
                   }
                   // FIXME FIXME
@@ -2312,7 +2347,7 @@ impl FutharkThunkImpl<CudaBackend> {
                       pcel.push_new_replica(optr, oclk, Locus::VMem, PMach::NvGpu, p);
                     }
                     f = true;
-                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: old phy {:?} (--> {:?}) -> {:?}",
+                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: old phy {:?} --> {:?} -> {:?}",
                         out, optr, p);
                   }
                   _ => unimplemented!()

@@ -12,6 +12,7 @@ git clone -b patch "${cacti_remote_prefix}/cc" ../cc
 git clone -b patch "${cacti_remote_prefix}/cfg_if" ../cfg_if
 git clone "${cacti_remote_prefix}/cmake" ../cmake
 git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast
+git clone "${cacti_remote_prefix}/fast_float" ../fast_float
 git clone -b patch-0.26 "${cacti_remote_prefix}/futhark" ../futhark
 git clone "${cacti_remote_prefix}/futhark_ffi" ../futhark_ffi
 git clone "${cacti_remote_prefix}/futhark_syntax" ../futhark_syntax

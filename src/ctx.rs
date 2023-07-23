@@ -411,7 +411,7 @@ pub fn ctx_insert(ty: CellType) -> CellPtr {
   })
 }
 
-pub fn ctx_alias(og: CellPtr, new_ty: CellType) -> CellPtr {
+/*pub fn ctx_alias_new_type(og: CellPtr, new_ty: CellType) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     match env.lookup_ref(og) {
@@ -425,7 +425,7 @@ pub fn ctx_alias(og: CellPtr, new_ty: CellType) -> CellPtr {
       }
     }
   })
-}
+}*/
 
 pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
   TL_CTX.with(|ctx| {
@@ -470,6 +470,17 @@ pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
       }
     }
   })
+}
+
+impl Ctx {
+  pub fn const_(&self, og: CellPtr) -> CellPtr {
+    let x = self.ctr.fresh_cel();
+    let mut env = self.env.borrow_mut();
+    env.insert_const_(x, og);
+    let spine = self.spine.borrow();
+    spine.const_(x, og);
+    x
+  }
 }
 
 pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
@@ -1129,13 +1140,20 @@ pub struct CowCell {
   pub pclk: Clock,
 }
 
+pub enum CellAlias {
+  NewType,
+  Opaque,
+  Const_,
+  View(CellVOp),
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum CellName {
   Top,
   Phy,
   Cow,
   Alias,
-  VAlias,
+  //VAlias,
   Bot,
 }
 
@@ -1143,8 +1161,8 @@ pub enum Cell_ {
   Top(RefCell<CellState>, CellPtr),
   Phy(RefCell<CellState>, RefCell<CellClosure>, PCell),
   Cow(RefCell<CellState>, RefCell<CellClosure>, CowCell),
-  Alias(CellPtr),
-  VAlias(CellVOp, CellPtr),
+  Alias(CellAlias, CellPtr),
+  //VAlias(CellVOp, CellPtr),
   Bot,
 }
 
@@ -1155,7 +1173,7 @@ impl Cell_ {
       &Cell_::Phy(..) => CellName::Phy,
       &Cell_::Cow(..) => CellName::Cow,
       &Cell_::Alias(..) => CellName::Alias,
-      &Cell_::VAlias(..) => CellName::VAlias,
+      //&Cell_::VAlias(..) => CellName::VAlias,
       &Cell_::Bot => CellName::Bot,
     }
   }
@@ -1944,7 +1962,31 @@ impl CtxEnv {
       //snapshot: Cell::new(u32::max_value()),
       ty,
       eflag:    CellEFlag::default(),
-      cel_:     Cell_::Alias(og),
+      cel_:     Cell_::Alias(CellAlias::NewType, og),
+    };
+    self.celtab.insert(x, e);
+    let mut root = self.alias_root.borrow_mut();
+    match root.get(&x) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    root.insert(x, og);
+  }
+
+  pub fn insert_const_(&mut self, x: CellPtr, og: CellPtr) {
+    match self.celtab.get(&x) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    let ty = match self.lookup_ref(og) {
+      None => panic!("bug"),
+      Some(oe) => oe.ty.clone()
+    };
+    let e = CellEnvEntry{
+      stablect: Cell::new(u32::max_value()),
+      ty,
+      eflag:    CellEFlag::default(),
+      cel_:     Cell_::Alias(CellAlias::Const_, og),
     };
     self.celtab.insert(x, e);
     let mut root = self.alias_root.borrow_mut();

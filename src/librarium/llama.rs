@@ -227,7 +227,11 @@ impl Llama {
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
       let freq2 = freq.inner_concat(freq);
       let cos = freq2.cos().cast(dtype);
+               //.new_shape([1, seq_cap, 1, head_dim])
+               //.const_();
       let sin = freq2.sin().cast(dtype);
+               //.new_shape([1, seq_cap, 1, head_dim])
+               //.const_();
       (cos, sin)
     };
     let (cos, sin) = init_embed();
@@ -251,10 +255,10 @@ impl Llama {
       let num_head = self.cfg.num_head;
       let head_dim = self.cfg.head_dim;
       let x = x.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let m = x.cast(f32::dtype())
+      let v = x.cast(f32::dtype())
                .square().inner_mean()
                .new_shape([ubat_sz * seq_cap, 1]);
-      let t = x / (m + eps).sqrt();
+      let t = x / (v + eps).sqrt();
       let w = weight.new_shape([1, num_head * head_dim]);
       let y = (w * t).cast(dtype)
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
@@ -269,9 +273,11 @@ impl Llama {
       let seq_cap = self.cfg.seq_cap;
       let head_dim = self.cfg.head_dim;
       let cos = self.cos.as_ref().unwrap()
-               .new_shape([1, seq_cap, 1, head_dim]);
+               .new_shape([1, seq_cap, 1, head_dim])
+               .const_();
       let sin = self.sin.as_ref().unwrap()
-               .new_shape([1, seq_cap, 1, head_dim]);
+               .new_shape([1, seq_cap, 1, head_dim])
+               .const_();
       let q = (q * cos) + (q.inner_symplectic_map() * sin);
       let k = (k * cos) + (k.inner_symplectic_map() * sin);
       (q, k)

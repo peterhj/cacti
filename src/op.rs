@@ -35,6 +35,10 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
       // FIXME: alias semantics.
       let this = *self;
       let rhs = *rhs.borrow();
+      if this.is_nil() {
+        // FIXME: depending on set flags, clobber the rhs entry to a noop.
+        return;
+      }
       if TL_CTX.with(|ctx| {
         let mut success = false;
         if ctx.thunkenv.borrow().accumulate_in_place.get() {
@@ -1936,7 +1940,7 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
 
 impl<L: Borrow<CellPtr> + Sized> ArrayOps for L {}
 
-pub trait Ops_: Borrow<CellPtr> + Sized {
+/*pub trait Ops_: Borrow<CellPtr> + Sized {
   /*
   #[track_caller]
   fn yield_(self) -> CellPtr {
@@ -1961,18 +1965,21 @@ pub trait Ops_: Borrow<CellPtr> + Sized {
     ctx_profile_val(*self.as_ref())
   }*/
 
-  #[track_caller]
+  /*#[track_caller]
   fn opaque(self) -> CellPtr {
-    panick_wrap(|| ctx_opaque(*self.borrow()))
-  }
+    //panick_wrap(|| ctx_opaque(*self.borrow()))
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.opaque(*self.borrow())
+    }))
+  }*/
 
-  #[track_caller]
+  /*#[track_caller]
   fn const_(self) -> CellPtr {
     unimplemented!();
-  }
+  }*/
 }
 
-impl<L: Borrow<CellPtr> + Sized> Ops_ for L {}
+impl<L: Borrow<CellPtr> + Sized> Ops_ for L {}*/
 
 pub trait Ops: Borrow<CellPtr> + Sized {
   /*fn bar(self) -> Self {
@@ -2127,9 +2134,16 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   }
 
   #[track_caller]
+  fn const_(self) -> CellPtr {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.const_(*self.borrow())
+    }))
+  }
+
+  /*#[track_caller]
   fn snapshot(&self) -> CellPtr {
     panick_wrap(|| ctx_snapshot(*self.borrow()))
-  }
+  }*/
 
   /*#[track_caller]
   fn checkpoint(self) -> CellPtr {

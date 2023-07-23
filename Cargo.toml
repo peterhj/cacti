@@ -36,6 +36,7 @@ byteorder = { path = "../byteorder" }
 cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
+#fast_float = { path = "../fast_float" }
 futhark_ffi = { path = "../futhark_ffi" }
 futhark_syntax = { path = "../futhark_syntax" }
 glob = { path = "../glob" }
@@ -58,9 +59,9 @@ smol_str = { path = "../smol_str", default-features = false }
 name = "inspect_pth"
 path = "tools/inspect_pth.rs"
 
-[[bin]]
-name = "boot"
-path = "tools/boot.rs"
+#[[bin]]
+#name = "boot"
+#path = "tools/boot.rs"
 
 [[bin]]
 name = "boot_array"
