@@ -112,10 +112,14 @@ impl Drop for Ctx {
     let digest = self.timing.digest();
     if cfg_info() {
     println!("INFO:  Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
-    println!("INFO:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
     println!("INFO:  Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
+    println!("INFO:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
     println!("INFO:  Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
+    println!("INFO:  Ctx::drop: timing digest: f_build1: {:?}", digest.f_build1);
+    println!("INFO:  Ctx::drop: timing digest: f_setup1: {:?}", digest.f_setup1);
     println!("INFO:  Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
+    println!("INFO:  Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
+    println!("INFO:  Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
     println!("INFO:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
     }
   }
@@ -143,20 +147,28 @@ pub struct FutharkCtx {
 #[derive(Default)]
 pub struct TimingCtx {
   pub pregemm1: RefCell<Vec<f64>>,
-  pub pregemm:  RefCell<Vec<f64>>,
   pub gemm1:    RefCell<Vec<f64>>,
+  pub pregemm:  RefCell<Vec<f64>>,
   pub gemm:     RefCell<Vec<f64>>,
+  pub f_build1: RefCell<Vec<f64>>,
+  pub f_setup1: RefCell<Vec<f64>>,
   pub futhark1: RefCell<Vec<f64>>,
+  pub f_build:  RefCell<Vec<f64>>,
+  pub f_setup:  RefCell<Vec<f64>>,
   pub futhark:  RefCell<Vec<f64>>,
 }
 
 #[derive(Debug)]
 pub struct TimingDigest {
   pub pregemm1: StatDigest,
-  pub pregemm:  StatDigest,
   pub gemm1:    StatDigest,
+  pub pregemm:  StatDigest,
   pub gemm:     StatDigest,
+  pub f_build1: StatDigest,
+  pub f_setup1: StatDigest,
   pub futhark1: StatDigest,
+  pub f_build:  StatDigest,
+  pub f_setup:  StatDigest,
   pub futhark:  StatDigest,
 }
 
@@ -164,10 +176,14 @@ impl TimingCtx {
   pub fn digest(&self) -> TimingDigest {
     TimingDigest{
       pregemm1: StatDigest::from(&*self.pregemm1.borrow()),
-      pregemm:  StatDigest::from(&*self.pregemm.borrow()),
       gemm1:    StatDigest::from(&*self.gemm1.borrow()),
+      pregemm:  StatDigest::from(&*self.pregemm.borrow()),
       gemm:     StatDigest::from(&*self.gemm.borrow()),
+      f_build1: StatDigest::from(&*self.f_build1.borrow()),
+      f_setup1: StatDigest::from(&*self.f_setup1.borrow()),
       futhark1: StatDigest::from(&*self.futhark1.borrow()),
+      f_build:  StatDigest::from(&*self.f_build.borrow()),
+      f_setup:  StatDigest::from(&*self.f_setup.borrow()),
       futhark:  StatDigest::from(&*self.futhark.borrow()),
     }
   }

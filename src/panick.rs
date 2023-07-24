@@ -1,3 +1,5 @@
+use cacti_cfg_env::*;
+
 use once_cell::sync::{Lazy};
 
 use std::cell::{RefCell};
@@ -14,7 +16,7 @@ pub struct PanickOnceCtx {
 
 impl PanickOnceCtx {
   pub fn new() -> PanickOnceCtx {
-    println!("DEBUG: PanickOnceCtx::new: init...");
+    if cfg_debug() { println!("DEBUG: PanickOnceCtx::new: init..."); }
     let og_hook = take_hook();
     set_hook(Box::new(move |info| {
       PANICK_TL_CTX.with(|ctx| {
@@ -34,7 +36,7 @@ impl PanickOnceCtx {
       });
       og_hook(info)
     }));
-    println!("DEBUG: PanickOnceCtx::new: init... done!");
+    if cfg_debug() { println!("DEBUG: PanickOnceCtx::new: init... done!"); }
     PanickOnceCtx{
       init: true,
     }
@@ -61,10 +63,10 @@ pub struct PanickCtx {
 
 impl PanickCtx {
   pub fn new() -> PanickCtx {
-    println!("DEBUG: PanickCtx::new: init...");
+    if cfg_debug() { println!("DEBUG: PanickCtx::new: init..."); }
     let onceinit = PANICK_ONCE_CTX.init;
     assert!(onceinit);
-    println!("DEBUG: PanickCtx::new: init... done!");
+    if cfg_debug() { println!("DEBUG: PanickCtx::new: init... done!"); }
     PanickCtx{
       stack:    RefCell::new(Vec::new()),
       onceinit,

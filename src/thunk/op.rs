@@ -3445,7 +3445,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       _ => unimplemented!()
     }
     match mode {
-      ThunkMode::Apply0 => {
+      ThunkMode::Apply => {
         self.beta.set(0.0);
       }
       ThunkMode::Accumulate => {
@@ -3781,7 +3781,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply"); }
-    let mode = ThunkMode::Apply0;
+    let mode = ThunkMode::Apply;
     self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
   }
 

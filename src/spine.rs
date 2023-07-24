@@ -763,7 +763,7 @@ impl SpineEnv {
                             println!("DEBUG: SpineEnv::step: AdjMap:   pop adj: th={:?} {:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?}",
                                 th, pthunk.spec_.debug_name(), &arg, y, yclk, dy, &arg_adj);
                             }
-                            match pthunk.spec_.pop_adj(&arg, y, yclk, ThunkMode::Apply0, dy, &mut arg_adj) {
+                            match pthunk.spec_.pop_adj(&arg, y, yclk, ThunkMode::Apply, dy, &mut arg_adj) {
                               Err(_) => {
                                 println!("ERROR: SpineEnv::step: adj failure ({:?} th={:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?})",
                                     e.name(), th, &arg, y, yclk, dy, &arg_adj);

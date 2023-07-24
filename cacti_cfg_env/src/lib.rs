@@ -18,6 +18,7 @@ pub struct CfgEnv {
   pub cudaprefix: Vec<PathBuf>,
   pub virtualenv: bool,
   pub no_kcache:  bool,
+  pub futhark_pedantic: bool,
   pub futhark_trace: bool,
   pub silent:     bool,
   pub debug:      i8,
@@ -74,6 +75,9 @@ impl CfgEnv {
     let no_kcache = var("CACTI_NO_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let futhark_pedantic = var("CACTI_FUTHARK_PEDANTIC")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let futhark_trace = var("CACTI_FUTHARK_TRACE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -86,11 +90,20 @@ impl CfgEnv {
         Err(_) => 1
       })
       .unwrap_or_else(|_| 0);
+    if !silent && debug >= 0 {
+      for p in cabalpath.iter() {
+        println!("INFO:  cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      }
+      for p in cudaprefix.iter() {
+        println!("INFO:  cacti_cfg_env: CACTI_CUDA_PREFIX={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      }
+    }
     CfgEnv{
       cabalpath,
       cudaprefix,
       virtualenv,
       no_kcache,
+      futhark_pedantic,
       futhark_trace,
       silent,
       debug,
@@ -120,4 +133,46 @@ pub fn cfg_debug_(level: i8) -> bool {
   TL_CFG_ENV.with(|cfg| {
     !cfg.silent && cfg.debug >= level
   })
+}
+
+pub fn _safe_ascii(s: &[u8]) -> String {
+  let mut buf = Vec::new();
+  for &u in s.iter() {
+    if u >= b'0' && u <= b'9' {
+      buf.push(u);
+    } else if u >= b'A' && u <= b'Z' {
+      buf.push(u);
+    } else if u >= b'a' && u <= b'z' {
+      buf.push(u);
+    } else if u <= 0x20 {
+      buf.push(b' ');
+    } else {
+      match u {
+        b' ' |
+        b'.' |
+        b',' |
+        b':' |
+        b';' |
+        b'/' |
+        b'\\' |
+        b'|' |
+        b'-' |
+        b'_' |
+        b'<' |
+        b'>' |
+        b'[' |
+        b']' |
+        b'{' |
+        b'}' |
+        b'(' |
+        b')' => {
+          buf.push(u);
+        }
+        _ => {
+          buf.push(b'?');
+        }
+      }
+    }
+  }
+  String::from_utf8_lossy(&buf).into()
 }

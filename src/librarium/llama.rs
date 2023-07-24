@@ -291,7 +291,8 @@ impl Llama {
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
-    let mut stream = *in_tok.borrow();
+    let in_tok = (*in_tok.borrow()).const_();
+    let mut stream = in_tok;
     /*stream = stream.inner_one_hot(tok_dim, f16::dtype());
     stream = stream
             .new_shape([ubat_sz * seq_cap, tok_dim])
@@ -385,6 +386,7 @@ impl Llama {
                       .keep();
     let logit32 = out_lm_logit.cast(f32::dtype());
     let out_lm_prob = logit32.inner_softmax().keep();
+    let in_lm_tok = in_lm_tok.const_();
     /*let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();*/
     let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
     LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
