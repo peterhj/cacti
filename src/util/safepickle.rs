@@ -1,6 +1,7 @@
 use crate::algo::{HashMap, HashSet};
 use crate::algo::str::*;
 use crate::cell::{CellType, Dtype};
+use cacti_cfg_env::*;
 
 use glob::{glob};
 pub use repugnant_pickle::torch::{
@@ -119,7 +120,7 @@ impl PickleDir {
     };
     for file_or_p in files.into_iter() {
       let (p, file) = file_or_p.try_open().map_err(|_| PickleDirErr::File)?;
-      println!("DEBUG: PickleDir::_reopen: open \"{}\"...", safe_ascii(p.to_str().unwrap().as_bytes()));
+      if cfg_debug() { println!("DEBUG: PickleDir::_reopen: open \"{}\"...", safe_ascii(p.to_str().unwrap().as_bytes())); }
       let mut file = PickleFile::new(file).map_err(|_| PickleDirErr::PickleFile)?;
       let mut iter = file.iter_tensors_data();
       iter._fixup_offsets();
@@ -130,11 +131,11 @@ impl PickleDir {
         if self.tensor_key.contains(&t.name) {
           return Err(PickleDirErr::DuplicateName(t.name.clone()));
         }
-        println!("DEBUG: PickleDir::_reopen:   name=\"{}\"", safe_ascii(t.name.as_bytes()));
+        if cfg_debug() { println!("DEBUG: PickleDir::_reopen:   name=\"{}\"", safe_ascii(t.name.as_bytes())); }
         self.tensor_key.insert(t.name.clone());
         self.tensor_map.insert(t.name.clone(), (model_idx, t.clone()));
       }
-      println!("DEBUG: PickleDir::_reopen:   done");
+      if cfg_debug() { println!("DEBUG: PickleDir::_reopen:   done"); }
     }
     Ok(())
   }
@@ -162,7 +163,7 @@ impl PickleDir {
         // FIXME: mmap.
         let mut file = File::open(&self.model_paths[model_idx]).unwrap();
         file.seek(SeekFrom::Start(offset)).unwrap();
-        println!("DEBUG: PickleDir::open: offset={} size={}", offset, size);
+        if cfg_debug() { println!("DEBUG: PickleDir::open: offset={} size={}", offset, size); }
         let slice = PickleSlice{
           offset,
           size,

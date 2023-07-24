@@ -7,7 +7,7 @@ use once_cell::sync::{Lazy};
 use std::env::{var};
 use std::path::{PathBuf};
 
-pub static CFG_ENV: Lazy<CfgEnv> = Lazy::new(|| CfgEnv::get());
+pub static CFG_ENV: Lazy<CfgEnv> = Lazy::new(|| CfgEnv::get_once());
 thread_local! {
   pub static TL_CFG_ENV: CfgEnv = CFG_ENV.clone();
 }
@@ -18,11 +18,13 @@ pub struct CfgEnv {
   pub cudaprefix: Vec<PathBuf>,
   pub virtualenv: bool,
   pub no_kcache:  bool,
+  pub futhark_trace: bool,
+  pub silent:     bool,
   pub debug:      i8,
 }
 
 impl CfgEnv {
-  pub fn get() -> CfgEnv {
+  pub fn get_once() -> CfgEnv {
     let cabalpath = var("CACTI_CABAL_BIN_PATH").map(|s| {
       let mut ps = Vec::new();
       for s in s.split(":") {
@@ -72,6 +74,12 @@ impl CfgEnv {
     let no_kcache = var("CACTI_NO_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let futhark_trace = var("CACTI_FUTHARK_TRACE")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
+    let silent = var("CACTI_SILENT")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let debug = var("CACTI_DEBUG")
       .map(|s| match s.parse() {
         Ok(d) => d,
@@ -83,7 +91,33 @@ impl CfgEnv {
       cudaprefix,
       virtualenv,
       no_kcache,
+      futhark_trace,
+      silent,
       debug,
     }
   }
+}
+
+pub fn cfg_info() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.debug >= 0
+  })
+}
+
+pub fn cfg_debug() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.debug >= 1
+  })
+}
+
+pub fn cfg_trace() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.debug >= 3
+  })
+}
+
+pub fn cfg_debug_(level: i8) -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.debug >= level
+  })
 }

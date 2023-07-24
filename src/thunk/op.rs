@@ -2,6 +2,7 @@ use super::*;
 use crate::algo::fp::{TotalOrd};
 use crate::cell::{DtypeExt, Dim, ScalarVal_};
 use crate::op::*;
+use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::{cuda_memcpy_async, cublas_gemm_batched};
 use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F, CUDA_R_16BF};
 
@@ -3359,9 +3360,11 @@ impl BlockMatrixMulThunkSpec {
     } else {
       unreachable!();
     };
+    if cfg_debug() {
     println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: l nrow={} r nrow={} l ncol={} r ncol={}",
         l_nrow, r_nrow,
         l_ncol, r_ncol);
+    }
     if !(l_nrow == r_nrow || l_nrow == 1 || r_nrow == 1) {
       return Err(ThunkTypeErr::_Bot);
     }
@@ -3384,10 +3387,12 @@ impl BlockMatrixMulThunkSpec {
     } else {
       unreachable!();
     };
+    if cfg_debug() {
     println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: ({:?} / {:?}{}) x ({:?} / {:?}{}) = {:?}",
         &arg[0].shape, self.l_block, if self.l_blk_t { " T" } else { "" },
         &arg[1].shape, self.r_block, if self.r_blk_t { " T" } else { "" },
         &o_ty.shape);
+    }
     let tys = BlockMatrixMulTypes{
       l_nrow,
       l_ncol,
@@ -3419,7 +3424,7 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 #[cfg(feature = "nvgpu")]
 impl BlockMatrixMulF16F32GpuThunkImpl {
   pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, mode: ThunkMode) -> ThunkResult {
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter"); }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       let ret = gpu.compute.sync();
@@ -3459,11 +3464,13 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     }
     /*let out_ty_ = ThunkSpec::out_ty_(spec, &arg_ty_).unwrap();*/
     let tys = spec._calculate_out_ty(&arg_ty_).unwrap();
+    if cfg_debug() {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: arg_ty_={:?}", &arg_ty_);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemmtys={:?}", &tys);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: nrow={}", tys.nrow);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ncol={}", tys.ncol);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: nblk={}", tys.nrow * tys.ncol);
+    }
     let out_ty_ = tys.o_ty.clone();
     // FIXME FIXME: correct transposes, shapes, arg order for row major v col major.
     let colmajor_bt = spec.l_blk_t;
@@ -3471,9 +3478,11 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     let colmajor_n = tys.l_blk_outer;
     let colmajor_m = tys.r_blk_outer;
     let inner_len = tys.l_blk_inner;
+    if cfg_debug() {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: m={}", colmajor_m);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: n={}", colmajor_n);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: k={}", inner_len);
+    }
     assert_eq!(inner_len, tys.r_blk_inner);
     assert!(colmajor_m >= 0);
     assert!(colmajor_m <= i32::max_value() as _);
@@ -3495,9 +3504,11 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     } else {
       panic!("bug");
     };
+    if cfg_debug() {
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: lda={}", lda);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ldb={}", ldb);
     println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: ldc={}", ldc);
+    }
     assert!(lda >= 0);
     assert!(lda <= i32::max_value() as _);
     assert!(ldb >= 0);
@@ -3508,7 +3519,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.device_locus()
     });
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]...");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
     match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3545,7 +3556,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]...");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
     match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3582,7 +3593,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out...");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
     match env.pwrite_ref(out, oclk, /*CellEMode::Mutex,*/) {
       None => panic!("bug"),
       Some(e) => {
@@ -3639,7 +3650,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     };
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm...");
+      if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm..."); }
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
@@ -3649,7 +3660,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       let t1 = Stopwatch::tl_stamp();
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0);
+      if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0); }
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -3668,8 +3679,10 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       //let tmp_a_ptr = tmp_a.as_ptr() as usize;
       //let tmp_b_ptr = tmp_b.as_ptr() as usize;
       //let tmp_c_ptr = tmp_c.as_ptr() as usize;
+      if cfg_debug() {
       println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: alpha ptr=0x{:016x}", alpha_ptr);
       println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: beta ptr =0x{:016x}", beta_ptr);
+      }
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp a ptr=0x{:016x}", tmp_a_ptr);
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp b ptr=0x{:016x}", tmp_b_ptr);
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp c ptr=0x{:016x}", tmp_c_ptr);
@@ -3749,7 +3762,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       //drop(tmp_c);
       //drop(tmp_b);
       //drop(tmp_a);
-      println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0);
+      if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0); }
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -3767,13 +3780,13 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply"); }
     let mode = ThunkMode::Apply0;
     self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
   }
 
   fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate");
+    if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate"); }
     let mode = ThunkMode::Accumulate;
     self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
     /*let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
@@ -3839,7 +3852,7 @@ pub struct MemcpyNvgpuThunkImpl;
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MemcpyNvgpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    println!("DEBUG: MemcpyNvgpuThunkImpl::apply");
+    if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {

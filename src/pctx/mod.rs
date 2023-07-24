@@ -4,6 +4,7 @@ use crate::algo::{HashMap, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
 use crate::panick::*;
+use cacti_cfg_env::*;
 
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
@@ -229,7 +230,7 @@ pub struct PCtx {
 
 impl PCtx {
   pub fn new() -> PCtx {
-    println!("DEBUG: PCtx::new");
+    if cfg_debug() { println!("DEBUG: PCtx::new"); }
     let mut pctx = PCtx{
       ctr:      PCtxCtr::default(),
       pmset:    PMachSet::default(),

@@ -5,6 +5,7 @@ use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::*;
+use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::*;
 use cacti_gpu_cu_ffi::types::*;
 
@@ -189,7 +190,7 @@ impl InnerCell for NvGpuInnerCell {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct NvGpuInfo {
+pub struct NvGpuDeviceInfo {
   // NB: futhark needs the following.
   pub capability_major: i32,
   pub capability_minor: i32,
@@ -219,8 +220,8 @@ fn try_i32_to_bool(v: i32) -> Result<bool, i32> {
   })
 }
 
-impl NvGpuInfo {
-  pub fn new(dev: i32) -> NvGpuInfo {
+impl NvGpuDeviceInfo {
+  pub fn new(dev: i32) -> NvGpuDeviceInfo {
     let capability_major = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR).unwrap();
     let capability_minor = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR).unwrap();
     let compute_mode = cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_COMPUTE_MODE).unwrap().try_into().unwrap();
@@ -237,7 +238,7 @@ impl NvGpuInfo {
     let integrated = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_INTEGRATED).unwrap()).unwrap();
     let unified_address = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_UNIFIED_ADDRESSING).unwrap()).unwrap();
     let managed_memory = try_i32_to_bool(cuda_device_attribute_get(dev, CU_DEVICE_ATTRIBUTE_MANAGED_MEMORY).unwrap()).unwrap();
-    NvGpuInfo{
+    NvGpuDeviceInfo{
       capability_major,
       capability_minor,
       compute_mode,
@@ -263,7 +264,7 @@ pub type GpuPCtx = NvGpuPCtx;
 pub struct NvGpuPCtx {
   // FIXME FIXME: work threads for copying.
   pub pctx:         CudaPrimaryCtx,
-  pub info:         NvGpuInfo,
+  pub dev_info:     NvGpuDeviceInfo,
   pub blas_ctx:     CublasContext,
   pub compute:      CudartStream,
   pub copy_to:      CudartStream,
@@ -274,10 +275,10 @@ pub struct NvGpuPCtx {
 
 impl Drop for NvGpuPCtx {
   fn drop(&mut self) {
-    println!("DEBUG: NvGpuPCtx::drop: mem pool front={} back={}",
+    if cfg_debug() { println!("DEBUG: NvGpuPCtx::drop: mem pool front={} back={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.back_cursor.get(),
-    );
+    ); }
   }
 }
 
@@ -291,13 +292,15 @@ impl PCtxImpl for NvGpuPCtx {
   }
 
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>) {
-    if self.info.integrated {
+    if self.dev_info.integrated {
+      if cfg_debug() {
       println!("DEBUG: NvGpuPCtx::append_matrix: integrated: capability={}.{}",
-          self.info.capability_major, self.info.capability_minor);
-      if !self.info.unified_address {
+          self.dev_info.capability_major, self.dev_info.capability_minor);
+      }
+      if !self.dev_info.unified_address {
         println!("WARNING: NvGpuPCtx::append_matrix: integrated but not unified address space");
       }
-      if !self.info.managed_memory {
+      if !self.dev_info.managed_memory {
         println!("WARNING: NvGpuPCtx::append_matrix: integrated but not managed memory");
       }
     } else {
@@ -345,7 +348,7 @@ impl NvGpuPCtx {
   }
 
   pub fn new(dev: i32) -> Option<NvGpuPCtx> {
-    println!("DEBUG: NvGpuPCtx::new: dev={}", dev);
+    if cfg_info() { println!("INFO:  NvGpuPCtx::new: dev={}", dev); }
     if LIBCUDA._inner.is_none() {
       return None;
     }
@@ -353,8 +356,8 @@ impl NvGpuPCtx {
     let pctx = CudaPrimaryCtx::retain(dev).unwrap();
     // FIXME: confirm that SCHED_YIELD is what we really want.
     pctx.set_flags(CU_CTX_SCHED_YIELD).unwrap();
-    let info = NvGpuInfo::new(dev);
-    println!("DEBUG: NvGpuPCtx::new: info={:?}", &info);
+    let dev_info = NvGpuDeviceInfo::new(dev);
+    if cfg_info() { println!("INFO:  NvGpuPCtx::new: dev info={:?}", &dev_info); }
     let blas_ctx = CublasContext::create().unwrap();
     let compute = CudartStream::null();
     let copy_to = CudartStream::create_nonblocking().unwrap();
@@ -366,7 +369,7 @@ impl NvGpuPCtx {
     let mem_pool = NvGpuMemPool::new(dev);
     Some(NvGpuPCtx{
       pctx,
-      info,
+      dev_info,
       blas_ctx,
       compute,
       copy_to,
@@ -381,13 +384,15 @@ impl NvGpuPCtx {
   }
 
   pub fn device_locus(&self) -> Locus {
-    if self.info.integrated {
+    if self.dev_info.integrated {
+      if cfg_debug() {
       println!("DEBUG: NvGpuPCtx::device_locus: integrated: capability={}.{}",
-          self.info.capability_major, self.info.capability_minor);
-      if !self.info.unified_address {
+          self.dev_info.capability_major, self.dev_info.capability_minor);
+      }
+      if !self.dev_info.unified_address {
         println!("WARNING: NvGpuPCtx::device_locus: integrated but not unified address space");
       }
-      if !self.info.managed_memory {
+      if !self.dev_info.managed_memory {
         println!("WARNING: NvGpuPCtx::device_locus: integrated but not managed memory");
       }
       Locus::Mem
@@ -413,8 +418,10 @@ impl NvGpuPCtx {
         };
         assert!(dst_sz >= sz);
         assert!(src_sz >= sz);
+        if cfg_debug() {
         println!("DEBUG: NvGpuPCtx::hard_copy: dst dptr=0x{:016x} sz={} src ptr=0x{:016x} sz={} copy sz={}",
             dst_dptr, dst_sz, src_ptr as usize, src_sz, sz);
+        }
         self.compute.sync().unwrap();
         cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
         self.compute.sync().unwrap();
@@ -430,8 +437,10 @@ impl NvGpuPCtx {
         };
         assert!(dst_sz >= sz);
         assert!(src_sz >= sz);
+        if cfg_debug() {
         println!("DEBUG: NvGpuPCtx::hard_copy: dst ptr=0x{:016x} sz={} src dptr=0x{:016x} sz={} copy sz={}",
             dst_ptr as usize, dst_sz, src_dptr, src_sz, sz);
+        }
         self.compute.sync().unwrap();
         cuda_memcpy_d2h_async(dst_ptr, src_dptr, sz, &self.compute).unwrap();
         self.compute.sync().unwrap();
@@ -441,16 +450,20 @@ impl NvGpuPCtx {
   }
 
   pub fn hard_copy_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
+    if cfg_debug() {
     println!("DEBUG: NvGpuPCtx::hard_copy_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
         dst_dptr, src_ptr as usize, sz);
+    }
     self.compute.sync().unwrap();
     cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
     self.compute.sync().unwrap();
   }
 
   pub fn hard_copy_nb_raw_mem_to_vmem(&self, dst_dptr: u64, src_ptr: *const c_void, sz: usize) {
+    if cfg_debug() {
     println!("DEBUG: NvGpuPCtx::hard_copy_nb_raw_mem_to_vmem: dst dptr=0x{:016x} src ptr=0x{:016x} sz={}",
         dst_dptr, src_ptr as usize, sz);
+    }
     cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
   }
 
@@ -543,7 +556,7 @@ impl NvGpuPCtx {
       match page_tab.get(&p) {
         None => {}
         Some(icel) => {
-          assert!(self.info.unified_address);
+          assert!(self.dev_info.unified_address);
           #[cfg(not(target_pointer_width = "64"))]
           unimplemented!();
           #[cfg(target_pointer_width = "64")]
@@ -566,7 +579,7 @@ impl NvGpuPCtx {
       match page_tab.get(&p) {
         None => {}
         Some(icel) => {
-          assert!(self.info.unified_address);
+          assert!(self.dev_info.unified_address);
           #[cfg(not(target_pointer_width = "64"))]
           unimplemented!();
           #[cfg(target_pointer_width = "64")]
@@ -614,7 +627,7 @@ impl NvGpuMemCell {
     if ptr.is_null() {
       return Err(PMemErr::Bot);
     }
-    println!("DEBUG: NvGpuMemCell::try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz);
+    if cfg_debug() { println!("DEBUG: NvGpuMemCell::try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz); }
     Ok(NvGpuMemCell{
       root: Cell::new(CellPtr::nil()),
       flag: Cell::new(0),
@@ -752,8 +765,6 @@ pub struct NvGpuAlloc {
   pub reg:  Region,
 }
 
-pub type GpuMemPool = NvGpuMemPool;
-
 pub struct NvGpuMemPool {
   pub dev:          i32,
   pub reserve_base: u64,
@@ -779,7 +790,7 @@ pub struct NvGpuMemPool {
   // TODO
 }
 
-impl Drop for GpuMemPool {
+impl Drop for NvGpuMemPool {
   #[allow(non_upper_case_globals)]
   fn drop(&mut self) {
     // FIXME FIXME: wait for nonblocking transfers.
@@ -794,10 +805,10 @@ impl Drop for GpuMemPool {
   }
 }
 
-impl GpuMemPool {
+impl NvGpuMemPool {
   #[allow(unused_parens)]
-  pub fn new(dev: i32) -> GpuMemPool {
-    println!("DEBUG: NvGpuMemPool::new");
+  pub fn new(dev: i32) -> NvGpuMemPool {
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::new"); }
     cudart_set_cur_dev(dev).unwrap();
     let (free_sz, total_sz) = cudart_get_mem_info().unwrap();
     assert!(free_sz <= total_sz);
@@ -807,13 +818,13 @@ impl GpuMemPool {
     let reserve_sz = ((unrounded_reserve_sz + (1 << 16) - 1) >> 16) << 16;
     assert!(reserve_sz >= unrounded_reserve_sz);
     if reserve_sz > free_sz {
-      panic!("ERROR: GpuPCtx::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
+      panic!("ERROR: NvGpuMemPool::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
           reserve_sz, dev, free_sz, total_sz);
     }
-    println!("DEBUG: GpuMemPool::new: reserve sz={}", reserve_sz);
+    if cfg_info() { println!("INFO:  NvGpuMemPool::new: reserve sz={}", reserve_sz); }
     let reserve_base = cuda_mem_alloc(reserve_sz).unwrap();
     CudartStream::null().sync().unwrap();
-    println!("DEBUG: GpuMemPool::new: reserve base=0x{:016x}", reserve_base);
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::new: reserve base=0x{:016x}", reserve_base); }
     let reserve_warp_offset = reserve_base & (ALLOC_ALIGN as u64 - 1);
     if reserve_warp_offset != 0 {
       panic!("ERROR: GpuPCtx::new: gpu bug: misaligned alloc, offset by {} bytes (expected alignment {} bytes)",
@@ -827,9 +838,9 @@ impl GpuMemPool {
     let front_base = reserve_base + front_pad as u64;
     let extra_base = reserve_base + (front_pad + front_sz + boundary_pad) as u64;
     assert!(front_sz >= (1 << 26));
-    println!("DEBUG: NvGpuMemPool::new: front sz={}", front_sz);
-    println!("DEBUG: NvGpuMemPool::new: back sz={}", extra_sz);
-    GpuMemPool{
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::new: front sz={}", front_sz); }
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::new: back sz={}", extra_sz); }
+    NvGpuMemPool{
       dev,
       reserve_base,
       reserve_sz,
@@ -1019,7 +1030,7 @@ impl GpuMemPool {
       sz:   req_sz,
     });
     cel.set_back(true);
-    println!("DEBUG: NvGpuMemPool::_back_alloc: addr={:?} dptr=0x{:016x} size={} off={}", addr, dptr, req_sz, offset);
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::_back_alloc: addr={:?} dptr=0x{:016x} size={} off={}", addr, dptr, req_sz, offset); }
     let mut size_index = self.size_index.borrow_mut();
     match size_index.get_mut(&req_sz) {
       None => {
@@ -1060,7 +1071,7 @@ impl GpuMemPool {
       // FIXME
     });
     cel.set_front(true);
-    println!("DEBUG: NvGpuMemPool::_front_alloc: addr={:?} dptr=0x{:016x} size={} off={}", addr, dptr, req_sz, offset);
+    if cfg_debug() { println!("DEBUG: NvGpuMemPool::_front_alloc: addr={:?} dptr=0x{:016x} size={} off={}", addr, dptr, req_sz, offset); }
     let mut size_index = self.size_index.borrow_mut();
     match size_index.get_mut(&req_sz) {
       None => {
@@ -1242,10 +1253,10 @@ pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize,
       Some(CStr::from_ptr(raw_tag))
     }
   };
-  println!("DEBUG: tl_pctx_nvgpu_mem_alloc_hook: sz={} ctag={:?}",
+  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_alloc_hook: sz={} ctag={:?}",
       sz,
       ctag.map(|ctag| safe_ascii(ctag.to_bytes())),
-  );
+  ); }
   TL_PCTX.with(|pctx| {
     let gpu = pctx.nvgpu.as_ref().unwrap();
     let addr = pctx.ctr.fresh_addr();
@@ -1267,25 +1278,25 @@ pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize,
 
 pub extern "C" fn tl_pctx_nvgpu_mem_free_hook(ptr: *mut c_void) -> c_int {
   TL_PCTX.try_with(|pctx| {
-    println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x}",
+    if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x}",
         ptr as usize,
-    );
+    ); }
     let gpu = pctx.nvgpu.as_ref().unwrap();
     match gpu.page_map.rev_lookup(ptr) {
       None => panic!("bug"),
       Some(addr) => {
         let cel = gpu.page_map.release(addr).unwrap();
-        println!("DEBUG: tl_pctx_nvgpu_mem_free_hook:   addr={:?} ptr=0x{:016x} size={}",
+        if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_free_hook:   addr={:?} ptr=0x{:016x} size={}",
             addr, cel.ptr as usize, InnerCell::size(&*cel),
-        );
+        ); }
         assert_eq!(cel.ptr, ptr);
       }
     }
     0
   }).unwrap_or_else(|_| {
-    println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x} (pctx deinit)",
+    if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_free_hook: ptr=0x{:016x} (pctx deinit)",
         ptr as usize,
-    );
+    ); }
     0
   })
 }
@@ -1304,10 +1315,10 @@ pub extern "C" fn tl_pctx_nvgpu_mem_unify_hook(lhs_raw_tag: *mut c_char, rhs_raw
     };
     (lhs_ctag, rhs_ctag)
   };
-  println!("DEBUG: tl_pctx_nvgpu_mem_unify_hook: ltag={:?} rtag={:?}",
+  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_unify_hook: ltag={:?} rtag={:?}",
       lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
       rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
-  );
+  ); }
 }
 
 pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *const c_char) -> c_int {
@@ -1319,18 +1330,18 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *co
     );*/
     let gpu = pctx.nvgpu.as_ref().unwrap();
     let (req, tag) = if raw_tag.is_null() {
-      println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=(null)",
+      if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=(null)",
           sz,
-      );
+      ); }
       let req = gpu.mem_pool.try_pre_alloc(sz);
       (req, None)
     } else {
       unsafe {
         let ctag = CStr::from_ptr(raw_tag);
-        println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=\"{}\"",
+        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=\"{}\"",
             sz,
             safe_ascii(ctag.to_bytes()),
-        );
+        ); }
         //let tag = ctag.to_bytes();
         let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
         let mut unify = &mut *pctx.tagunify.borrow_mut();
@@ -1354,9 +1365,9 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *co
         unsafe {
           write(dptr, cel.dptr.get());
         }
-        println!("DEBUG: tl_pctx_gpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
+        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
             p, cel.dptr.get(), req.size(), tag,
-        );
+        ); }
       }
     }
     0
@@ -1365,9 +1376,9 @@ pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *co
 
 pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
   TL_PCTX.try_with(|pctx| {
-    println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x}",
+    if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x}",
         dptr,
-    );
+    ); }
     let gpu = pctx.nvgpu.as_ref().unwrap();
     let p = match gpu.mem_pool.rev_lookup(dptr) {
       Some((_, Some(p))) => p,
@@ -1377,16 +1388,16 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
     match gpu.mem_pool.cel_map.borrow().get(&p) {
       None => panic!("bug"),
       Some(cel) => {
-        println!("DEBUG: tl_pctx_gpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
+        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
             p, cel.dptr.get(), InnerCell::size(&**cel), InnerCell::tag(&**cel),
-        );
+        ); }
       }
     }
     0
   }).unwrap_or_else(|_| {
-    println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x} (pctx deinit)",
+    if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x} (pctx deinit)",
         dptr,
-    );
+    ); }
     0
   })
 }
@@ -1405,10 +1416,10 @@ pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag
     };
     (lhs_ctag, rhs_ctag)
   };
-  println!("DEBUG: tl_pctx_gpu_unify_hook: ltag={:?} rtag={:?}",
+  if cfg_debug() { println!("DEBUG: tl_pctx_gpu_unify_hook: ltag={:?} rtag={:?}",
       lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
       rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
-  );
+  ); }
   TL_PCTX.try_with(|pctx| {
     /*println!("DEBUG: tl_pctx_gpu_unify_hook: raw ltag=0x{:016x} raw rtag=0x{:016x}",
         lhs_raw_tag as usize,

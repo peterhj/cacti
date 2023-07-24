@@ -2,6 +2,7 @@ use super::*;
 use crate::algo::{RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
+use cacti_cfg_env::*;
 /*#[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::{GpuOuterCell};
 #[cfg(feature = "nvgpu")]
@@ -158,13 +159,13 @@ impl PCtxImpl for SmpPCtx {
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
     let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
+    if cfg_info() { println!("INFO:  SmpPCtx::new: blas num threads={}", n); }
     // FIXME FIXME: debugging.
     let n = 1;
     (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n);
-    println!("DEBUG: SmpPCtx::new: blas set num threads={}", n);
+    if cfg_info() { println!("INFO:  SmpPCtx::new: blas set num threads={}", n); }
     let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    println!("DEBUG: SmpPCtx::new: blas num threads={}", n);
+    if cfg_info() { println!("INFO:  SmpPCtx::new: blas num threads={}", n); }
     SmpPCtx{
     }
   }

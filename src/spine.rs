@@ -7,6 +7,7 @@ use crate::pctx::{TL_PCTX, Locus, MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::time::{Stopwatch};
+use cacti_cfg_env::*;
 
 use std::any::{Any};
 use std::cell::{Cell, RefCell};
@@ -290,7 +291,7 @@ pub struct SpineEnv {
 
 impl SpineEnv {
   pub fn reset(&mut self, ctr: Counter) {
-    println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr);
+    if cfg_debug() { println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr); }
     self.ctr = ctr;
     //self.alias.clear();
     self.state.clear();
@@ -423,7 +424,7 @@ impl SpineEnv {
   pub fn step(this: &RefCell<SpineEnv>, sp: u32, curp: &Cell<u32>, log: &RefCell<Vec<SpineEntry>>, ctr: Option<&CtxCtr>, thunkenv: Option<&RefCell<CtxThunkEnv>>) {
     // FIXME FIXME
     let e_sp = log.borrow()[sp as usize];
-    println!("DEBUG: SpineEnv::step: idx={} e={:?}", sp, &e_sp);
+    if cfg_debug() { println!("DEBUG: SpineEnv::step: idx={} e={:?}", sp, &e_sp); }
     match e_sp {
       SpineEntry::_Top => {}
       SpineEntry::OIntro(x, _) => {
@@ -610,7 +611,7 @@ impl SpineEnv {
             }*/
             SpineEntry::Initialize(y, yclk, th) |
             SpineEntry::Apply(y, yclk, th) => {
-              {
+              if cfg_debug() {
                 let thunkenv = thunkenv.map(|env| env.borrow()).unwrap();
                 match thunkenv.thunktab.get(&th) {
                   None => panic!("bug"),
@@ -623,7 +624,7 @@ impl SpineEnv {
               let self_ = this.borrow();
               let (yalias, yroot) = self_._deref_alias(y);
               if yalias.const_ {
-                println!("DEBUG: SpineEnv::step: AdjMap:   const_ yroot={:?} y={:?}", yroot, y);
+                if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   const_ yroot={:?} y={:?}", yroot, y); }
                 continue 'for_sp;
               }
               // FIXME
@@ -639,7 +640,7 @@ impl SpineEnv {
                   match self_.update.get(&(yroot, yclk.into())) {
                     None => panic!("bug"),
                     Some(&(y_ref, ref arg)) => {
-                      println!("DEBUG: SpineEnv::step: AdjMap:   yroot={:?} y_ref={:?} arg={:?}", yroot, y_ref, arg);
+                      if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   yroot={:?} y_ref={:?} arg={:?}", yroot, y_ref, arg); }
                       let arg = arg.clone();
                       let mut arg_adj: Vec<CellPtr> = Vec::with_capacity(arg.len());
                       drop(self_);
@@ -656,7 +657,7 @@ impl SpineEnv {
                           }
                           let (xalias, xroot) = self_._deref_alias(x);
                           if xalias.const_ {
-                            println!("DEBUG: SpineEnv::step: AdjMap:   const_ xroot={:?} x={:?}", xroot, x);
+                            if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   const_ xroot={:?} x={:?}", xroot, x); }
                             arg_adj.push(CellPtr::nil());
                             continue 'for_x;
                           }
@@ -702,7 +703,7 @@ impl SpineEnv {
                                             };
                                             //ctx_insert(xroot_ty)
                                             let dxroot = ctr.unwrap().fresh_cel();
-                                            println!("DEBUG: SpineEnv::step: AdjMap:   fresh: xroot={:?} dxroot={:?} ty={:?}", xroot, dxroot, xroot_ty);
+                                            if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   fresh: xroot={:?} dxroot={:?} ty={:?}", xroot, dxroot, xroot_ty); }
                                             ctx.env.borrow_mut().insert_top(dxroot, xroot_ty);
                                             dxroot
                                           });
@@ -718,8 +719,8 @@ impl SpineEnv {
                                       }*/
                                       //ctx_alias(dxroot, x_ty)
                                       let dx = ctr.unwrap().fresh_cel();
-                                      println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty);
-                                      println!("DEBUG: SpineEnv::step: AdjMap:          xroot={:?} dxroot={:?}", xroot, dxroot);
+                                      if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty); }
+                                      if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:          xroot={:?} dxroot={:?}", xroot, dxroot); }
                                       ctx.env.borrow_mut().insert_alias(dx, x_ty, dxroot);
                                       {
                                         let sp = {
@@ -738,7 +739,7 @@ impl SpineEnv {
                                       drop(env);
                                       //ctx_insert(x_ty)
                                       let dx = ctr.unwrap().fresh_cel();
-                                      println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty);
+                                      if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty); }
                                       ctx.env.borrow_mut().insert_top(dx, x_ty);
                                       dx
                                     }
@@ -758,8 +759,10 @@ impl SpineEnv {
                           Some(te) => {
                             let pthunk = te.pthunk.clone();
                             drop(thunkenv);
+                            if cfg_debug() {
                             println!("DEBUG: SpineEnv::step: AdjMap:   pop adj: th={:?} {:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?}",
                                 th, pthunk.spec_.debug_name(), &arg, y, yclk, dy, &arg_adj);
+                            }
                             match pthunk.spec_.pop_adj(&arg, y, yclk, ThunkMode::Apply0, dy, &mut arg_adj) {
                               Err(_) => {
                                 println!("ERROR: SpineEnv::step: adj failure ({:?} th={:?} x={:?} y={:?} yclk={:?} dy={:?} dx={:?})",
@@ -778,10 +781,10 @@ impl SpineEnv {
                       }
                       for (&(x, xclk), &dx) in arg.iter().zip(arg_adj.iter()).rev() {
                         if dx.is_nil() {
-                          println!("DEBUG: SpineEnv::step: AdjMap:   skip: x={:?} dx={:?}", x, dx);
+                          if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   skip: x={:?} dx={:?}", x, dx); }
                           continue;
                         }
-                        println!("DEBUG: SpineEnv::step: AdjMap:   add2: allsrc={:?} x={:?} dx={:?}", allsrc, x, dx);
+                        if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   add2: allsrc={:?} x={:?} dx={:?}", allsrc, x, dx); }
                         let sp = {
                           let sp = curp.get();
                           curp.set(sp + 1);
@@ -893,7 +896,7 @@ impl SpineEnv {
           }
           //rev_env.unstep(&log[sp as usize]);
         }
-        println!("DEBUG: SpineEnv::step: AdjMap: done");
+        if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap: done"); }
       }
       /*SpineEntry::AdjMap2(some_src, src_mask, sink) => {
         // FIXME FIXME
@@ -1322,8 +1325,10 @@ impl Default for Spine {
 
 impl Spine {
   pub fn _reset(&mut self) {
+    if cfg_debug() {
     println!("DEBUG: Spine::_reset: ctr={:?} ctlp={} hltp={} curp={}",
         self.ctr, self.ctlp, self.hltp, self.curp.get());
+    }
     self.ctr = self.ctr.advance();
     self.ctlp = 0;
     self.hltp = 0;
@@ -1653,8 +1658,10 @@ impl Spine {
   pub fn _resume(&mut self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock,*/ mut item: SpineResume) -> SpineRet {
     //self._start();
     let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+    if cfg_debug() {
     println!("DEBUG: Spine::_resume: ctr={:?} ctlp={} hltp={} curp={} retp={:?} item={:?}",
         self.ctr, self.ctlp, self.hltp, self.curp.get(), retp, item.key());
+    }
     self.hltp = self.curp.get();
     loop {
       let state = self._step(ctr, env, thunkenv, item.take());
@@ -1682,14 +1689,18 @@ impl Spine {
   pub fn _step(&self, ctr: &CtxCtr, env: &mut CtxEnv, thunkenv: &mut CtxThunkEnv, item: SpineResume) -> SpineRet {
     let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
     if self.ctlp >= self.hltp {
+      if cfg_debug() {
       println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} halt",
           self.ctr, self.ctlp, self.hltp, self.curp.get(), retp);
+      }
       return SpineRet::Halt;
     }
     let mut ret = SpineRet::_Top;
     let entry = self.log.borrow()[self.ctlp as usize];
+    if cfg_debug() {
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
         self.ctr, self.ctlp, self.hltp, self.curp.get(), retp, entry.name());
+    }
     let t0 = Stopwatch::tl_stamp();
     match entry {
       // TODO
@@ -1796,31 +1807,34 @@ impl Spine {
       SpineEntry::YieldSet(x, _xclk, loc) => {
         let ctlp = self.ctlp;
         let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+        if cfg_debug() {
         println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
             ctlp, retp, x, loc, item.key());
+        }
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
+            if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype); }
             match e.ty.dtype {
               Dtype::Fp32 => {
                 //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
                 match &item {
                   SpineResume::_Top => {
-                    println!("DEBUG: Spine::_step: YieldSet:   no value");
+                    if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   no value"); }
                   }
                   SpineResume::PutMemV(k, v) => {
                     match v.downcast_ref::<f32>() {
                       None => {
                         println!("DEBUG: Spine::_step: YieldSet:   wrong type");
+                        panic!("bug");
                       }
                       Some(v) => {
-                        println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v);
+                        if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v); }
                       }
                     }
                   }
                   SpineResume::PutMemF(k, _f) => {
-                    println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k);
+                    if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k); }
                     // TODO
                   }
                 }
@@ -1831,16 +1845,18 @@ impl Spine {
           }
         }
         if Some(ctlp) == retp {
-          println!("DEBUG: Spine::_step: YieldSet:   ...resume");
+          if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   ...resume"); }
           let xclk = match env.lookup_ref(x) {
             None => panic!("bug"),
             Some(e) => {
               let base_clk: Clock = self.ctr.into();
               let prev_clk = e.state().clk;
               let next_clk = base_clk.init_once();
+              if cfg_debug() {
               println!("DEBUG: Spine::_step: YieldSet:   prev clk={:?}", prev_clk);
               println!("DEBUG: Spine::_step: YieldSet:   base clk={:?}", base_clk);
               println!("DEBUG: Spine::_step: YieldSet:   next clk={:?}", next_clk);
+              }
               if prev_clk >= next_clk {
                 panic!("bug");
               } else if prev_clk < next_clk {
@@ -1886,12 +1902,12 @@ impl Spine {
             }
           }
         } else {
-          println!("DEBUG: Spine::_step: YieldSet:   yield...");
+          if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   yield..."); }
           ret = SpineRet::Yield_(());
         }
       }
       SpineEntry::YieldInit(x, _xclk, loc) => {
-        println!("DEBUG: Spine::_step: YieldInit: x={:?} loc={:?} key={:?}", x, loc, item.key());
+        if cfg_debug() { println!("DEBUG: Spine::_step: YieldInit: x={:?} loc={:?} key={:?}", x, loc, item.key()); }
         unimplemented!();
       }
       SpineEntry::Alias(x, og) => {
@@ -2015,8 +2031,10 @@ impl Spine {
             None => panic!("bug"),
             Some(tclo) => tclo
           };
+          if cfg_debug() {
           println!("DEBUG: Spine::_step: Apply: x={:?} xclk={:?} th={:?} tclo={:?}",
               x, xclk, th, tclo);
+          }
           assert_eq!(tclo.pthunk, th);
           let te = match thunkenv.thunktab.get(&th) {
             None => panic!("bug"),
@@ -2156,7 +2174,7 @@ impl Spine {
     let t1 = Stopwatch::tl_stamp();
     let d = t1 - t0;
     //println!("DEBUG: Spine::_step:   t1={}.{:09} s", t1.s(), t1.sub_ns());
-    println!("DEBUG: Spine::_step:   d={:.09} s", d);
+    if cfg_debug() { println!("DEBUG: Spine::_step:   d={:.09} s", d); }
     ret
   }
 

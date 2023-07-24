@@ -7,6 +7,7 @@ use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::{SpineRet, SpineEntry, SpineEntryName};
 use crate::thunk::{FutharkNdBroadcastMap2MonomorphicSpec};
 use crate::thunk::op::*;
+use cacti_cfg_env::*;
 
 //use futhark_syntax::*;
 
@@ -90,10 +91,10 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                       }
                       SpineEntryName::Apply => {
                         if this_clk.is_update() {
-                          println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Accumulate({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
+                          if cfg_debug() { println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Accumulate({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th); }
                           SpineEntry::Accumulate(this, this_clk, th)
                         } else if this_clk.is_init_once() {
-                          println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Apply({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th);
+                          if cfg_debug() { println!("DEBUG: AddAssign::add_assign: rewrite Apply({:?}, {:?}, {:?}) -> Apply({:?}, {:?}, {:?})", y, yclk, th, this, this_clk, th); }
                           SpineEntry::Apply(this, this_clk, th)
                         } else {
                           unreachable!();
@@ -164,7 +165,7 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                 (1, SpineEntry::Uninit(y, yclk)) => {
                   let yroot = spine.cur_env.borrow()._deref(y);
                   if yroot == rhs_root {
-                    println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name());
+                    if cfg_debug() { println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name()); }
                     //assert_eq!(yclk, rhs_clk);
                     spine.log.borrow_mut()[sp as usize] = match (this_clk.up, e_sp.name()) {
                       (0, SpineEntryName::Intro) => {
@@ -1169,10 +1170,12 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       assert_eq!(q_ty.ndim(), 4);
       let l_block = [p_ty.shape[1], p_ty.shape[3]];
       let r_block = [q_ty.shape[1], q_ty.shape[3]];
+      if cfg_debug() {
       println!("DEBUG: block_matmul_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
           &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
           &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
       );
+      }
       let l_nrow = p_ty.shape[0];
       let l_ncol = p_ty.shape[2];
       let r_nrow = q_ty.shape[0];
@@ -1201,11 +1204,13 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let l_dty_isz = p_ty.dtype.size_bytes() as i64;
       let l_pad = if (l_block[1] * l_dty_isz) % 16 != 0 {
         let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
+        if cfg_debug() {
         println!("WARNING: block_matmul_scale: left argument requires padding:");
         println!("WARNING: block_matmul_scale:   {:?}{} -> {:?}{}",
             l_block, if l_blk_t { " T" } else { "" },
             [l_block[0], l_pad], if l_blk_t { " T" } else { "" },
         );
+        }
         l_pad
       } else {
         l_block[1]
@@ -1214,11 +1219,13 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let r_dty_isz = q_ty.dtype.size_bytes() as i64;
       let r_pad = if (r_block[1] * r_dty_isz) % 16 != 0 {
         let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
+        if cfg_debug() {
         println!("WARNING: block_matmul_scale: right argument requires padding:");
         println!("WARNING: block_matmul_scale:   {:?}{} -> {:?}{}",
             r_block, if r_blk_t { " T" } else { "" },
             [r_block[0], r_pad], if r_blk_t { " T" } else { "" },
         );
+        }
         r_pad
       } else {
         r_block[1]
@@ -1260,12 +1267,14 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
          r_block != r_block_pad ||
          o_block != o_block_pad
       {
+        if cfg_debug() {
         println!("DEBUG: block_matmul_scale: after padding:");
         println!("DEBUG: block_matmul_scale:   {:?}{} x {:?}{} = {:?}",
             l_block_pad, if l_blk_t { " T" } else { "" },
             r_block_pad, if r_blk_t { " T" } else { "" },
             o_block_pad,
         );
+        }
       }
       let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
         None => {
@@ -1331,10 +1340,12 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       assert_eq!(q_ty.ndim(), 2);
       //println!("DEBUG: block_mm_scale: l_ty={:?} r_ty={:?}", p_ty, q_ty);
       //println!("DEBUG: block_mm_scale: lblk={:?} rblk={:?}", l_block, r_block);
+      if cfg_debug() {
       println!("DEBUG: block_mm_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
           &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
           &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
       );
+      }
       let l_nrow = p_ty.shape[0] / l_block[0];
       let l_ncol = p_ty.shape[1] / l_block[1];
       let r_nrow = q_ty.shape[0] / r_block[0];

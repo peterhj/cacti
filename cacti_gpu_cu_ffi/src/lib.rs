@@ -7,6 +7,7 @@ extern crate once_cell;
 
 use crate::bindings::*;
 use crate::types::*;
+use cacti_cfg_env::*;
 
 use libc::{c_void};
 use once_cell::sync::{Lazy};
@@ -33,7 +34,7 @@ pub static LIBCUDA: Lazy<Libcuda> = Lazy::new(|| {
       panic!("bug: cuda: init failed: {:?}", e);
     }
   }
-  println!("DEBUG: libcuda loaded");
+  if cfg_debug() { println!("DEBUG: libcuda loaded"); }
   lib
 });
 
@@ -687,7 +688,7 @@ pub fn cublas_gemm_batched(
     (CUDA_R_16F, CUDA_R_32F, CUDA_R_32F) |
     (CUDA_R_32F, CUDA_R_16F, CUDA_R_32F) |
     (CUDA_R_32F, CUDA_R_32F, CUDA_R_16F) => {
-      println!("DEBUG: cublas_gemm_batched: fp16/mixed-precision mode");
+      if cfg_debug() { println!("DEBUG: cublas_gemm_batched: fp16/mixed-precision mode"); }
       flags |= CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION;
       ctx.set_math_mode(flags).unwrap();
       (LIBCUBLAS.cublasGemmBatchedEx.as_ref().unwrap())(

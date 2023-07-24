@@ -9,6 +9,7 @@ use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::mmap::{MmapBuf};
 use crate::util::pickle::{TorchDtype};
+use cacti_cfg_env::*;
 
 use smol_str::{SmolStr};
 
@@ -1787,11 +1788,13 @@ impl PCell {
               panic!();
             }
             Some((o_loc, o_pm, o_addr)) => {
+              if cfg_debug() {
               println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
                   self.optr, &self.ogty,
                   prev_clk, q_clk, ty, q_locus, q_pmach, rep.addr.get(),
                   o_loc, o_pm, o_addr,
               );
+              }
               // FIXME FIXME: only set clock on successful copy.
               TL_PCTX.with(|pctx| {
                 pctx.hard_copy(q_locus, q_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
@@ -1854,11 +1857,13 @@ impl PCell {
               panic!();
             }
             Some((o_loc, o_pm, o_addr)) => {
+              if cfg_debug() {
               println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
                   self.optr, &self.ogty,
                   prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
                   o_loc, o_pm, o_addr,
               );
+              }
               // FIXME FIXME: only set clock on successful copy.
               TL_PCTX.with(|pctx| {
                 pctx.hard_copy(q_locus, f_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
@@ -1898,8 +1903,10 @@ impl PCell {
       None => panic!("bug"),
       Some((pmach, rep)) => {
         // FIXME FIXME: fixup causal ordering by replica copying.
+        if cfg_debug() {
         println!("DEBUG: PCell::get_loc: pmach={:?} rep clk={:?} q clk={:?} q loc={:?}",
             pmach, rep.clk.get(), q_clk, q_locus);
+        }
         if f_pmach.is_none() {
           //assert!(rep.clk.get().is_nil());
           rep.clk.set(q_clk);

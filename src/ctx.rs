@@ -7,6 +7,7 @@ use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::stat::*;
+use cacti_cfg_env::*;
 
 use futhark_syntax::re::{ReTrie};
 use futhark_syntax::tokenizing::{Token as FutToken};
@@ -36,7 +37,7 @@ pub struct CtxCfg {
 
 impl Default for CtxCfg {
   fn default() -> CtxCfg {
-    println!("DEBUG: CtxCfg::default");
+    if cfg_debug() { println!("DEBUG: CtxCfg::default"); }
     CtxCfg{
       swapfile_cap:     Cell::new(0),
       gpu_reserve:      Cell::new(9001),
@@ -109,18 +110,20 @@ pub struct Ctx {
 impl Drop for Ctx {
   fn drop(&mut self) {
     let digest = self.timing.digest();
-    println!("DEBUG: Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
-    println!("DEBUG: Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
-    println!("DEBUG: Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
-    println!("DEBUG: Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
-    println!("DEBUG: Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
-    println!("DEBUG: Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    if cfg_info() {
+    println!("INFO:  Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
+    println!("INFO:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
+    println!("INFO:  Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
+    println!("INFO:  Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
+    println!("INFO:  Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
+    println!("INFO:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    }
   }
 }
 
 impl Ctx {
   pub fn new() -> Ctx {
-    println!("DEBUG: Ctx::new");
+    if cfg_debug() { println!("DEBUG: Ctx::new"); }
     Ctx{
       ctr:      CtxCtr::new(),
       env:      RefCell::new(CtxEnv::default()),
@@ -1125,7 +1128,7 @@ impl CellClosure {
     } else if self.ctr < clk.ctr() {
       panic!("bug");
     }
-    if clk.up as usize != self.thunk.len() {
+    if !(clk.up as usize == self.thunk.len()) {
       println!("DEBUG: CellClosure::update: clk={:?} th={:?} self.ctr={:?} self.thunk={:?}",
           clk, th, &self.ctr, &self.thunk);
     }
@@ -1773,7 +1776,7 @@ impl CtxEnv {
             assert_eq!(root, optr);
             // FIXME: create a fresh PCell.
             let ty = e.ty.clone();
-            println!("DEBUG: CtxEnv::pwrite_ref: fresh pcel: ty={:?}", &ty);
+            if cfg_debug() { println!("DEBUG: CtxEnv::pwrite_ref: fresh pcel: ty={:?}", &ty); }
             let state = state.clone();
             match self.celtab.get_mut(&root) {
               None => panic!("bug"),

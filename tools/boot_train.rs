@@ -111,11 +111,11 @@ fn main() {
             panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
           }
           mem.copy_from_reader(pickfile);
-          if ty.dtype == f16::dtype() {
+          /*if ty.dtype == f16::dtype() {
             mem._debug_dump_f16();
           } else if ty.dtype == f32::dtype() {
             mem._debug_dump_f32();
-          }
+          }*/
         });
       }
     }
