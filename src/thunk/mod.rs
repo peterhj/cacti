@@ -1815,6 +1815,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       Ok(Some(mut obj)) => {
         let t1 = Stopwatch::tl_stamp();
         println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0);
+        let t0 = t1;
         // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
         let pstart = TL_PCTX.with(|pctx| {
@@ -1824,6 +1825,8 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           pctx.ctr.next_addr()
         });
         unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
+        let t1 = Stopwatch::tl_stamp();
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0);
         let pfin = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
           gpu.mem_pool.borrow().set_back_alloc(false);
@@ -2468,6 +2471,8 @@ impl FutharkThunkImpl<CudaBackend> {
     });
     let t0 = Stopwatch::tl_stamp();
     obj.reset();
+    let tmp_t1 = Stopwatch::tl_stamp();
+    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   reset elapsed: {:.09} s", tmp_t1 - t0);
     // FIXME FIXME: pre-entry setup.
     /*obj.unify_abi(self.abi).unwrap();*/
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: enter kernel...");
