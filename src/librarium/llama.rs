@@ -211,7 +211,8 @@ impl Llama {
     let seq_cap = self.cfg.seq_cap;
     let in_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
     let in_lm_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
-    LanguageModelIn{in_tok, in_lm_tok}
+    let in_lm_loss_scale = StableCell::array([ubat_sz, seq_cap], f32::dtype());
+    LanguageModelIn{in_tok, in_lm_tok, in_lm_loss_scale}
   }
 
   pub fn make_input(&self) -> LanguageModelIn {

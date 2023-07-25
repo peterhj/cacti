@@ -19,7 +19,7 @@ use std::cell::{Cell, RefCell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{forget, size_of, swap};
-use std::ops::{Deref, Range};
+use std::ops::{Deref, Neg, Range};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
@@ -831,6 +831,19 @@ pub enum ScalarVal_ {
   // TODO
 }
 
+impl Neg for ScalarVal_ {
+  type Output = ScalarVal_;
+
+  fn neg(self) -> ScalarVal_ {
+    match self {
+      ScalarVal_::F64(x) => ScalarVal_::F64(-x),
+      ScalarVal_::F32(x) => ScalarVal_::F32(-x),
+      ScalarVal_::F16(x) => ScalarVal_::F16(-x),
+      _ => unimplemented!()
+    }
+  }
+}
+
 impl ScalarVal_ {
   pub fn zero(dtype: Dtype) -> ScalarVal_ {
     match dtype {
@@ -1268,6 +1281,10 @@ impl CellType {
       shape:    Vec::new(),
       dtype:    Dtype::_Top,
     }
+  }
+
+  pub fn cast(&self, new_dtype: Dtype) -> CellType {
+    CellType{shape: self.shape.clone(), dtype: new_dtype}
   }
 
   pub fn to_dim(&self) -> Dim {

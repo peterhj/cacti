@@ -5,6 +5,7 @@ use std::cmp::{Ordering};
 use std::convert::{TryFrom};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::hash::{Hash, Hasher};
+use std::ops::{Neg};
 
 /* `TotalOrd` is derived from the implementation in libcore:
 
@@ -90,6 +91,14 @@ impl Hash for TotalOrd<f16> {
   }
 }
 
+impl Neg for TotalOrd<f16> {
+  type Output = TotalOrd<f16>;
+
+  fn neg(self) -> TotalOrd<f16> {
+    TotalOrd(-(self.0))
+  }
+}
+
 impl TotalOrd<f16> {
   #[inline]
   pub fn to_bits(&self) -> u16 {
@@ -141,6 +150,14 @@ impl Hash for TotalOrd<f32> {
   }
 }
 
+impl Neg for TotalOrd<f32> {
+  type Output = TotalOrd<f32>;
+
+  fn neg(self) -> TotalOrd<f32> {
+    TotalOrd(-(self.0))
+  }
+}
+
 impl TotalOrd<f32> {
   #[inline]
   pub fn to_bits(&self) -> u32 {
@@ -189,6 +206,14 @@ impl Ord for TotalOrd<f64> {
 impl Hash for TotalOrd<f64> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
     self.to_signed_bits().hash(hasher);
+  }
+}
+
+impl Neg for TotalOrd<f64> {
+  type Output = TotalOrd<f64>;
+
+  fn neg(self) -> TotalOrd<f64> {
+    TotalOrd(-(self.0))
   }
 }
 

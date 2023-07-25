@@ -8,6 +8,8 @@ use cacti::librarium::sentencepiece::*;
 use cacti::util::cell::*;
 use cacti::util::pickle::*;
 
+use std::borrow::{Borrow};
+
 fn main() {
   let mut cfg = LlamaConfig::open_llama_3b();
   //let mut cfg = LlamaConfig::open_llama_7b();
@@ -43,23 +45,30 @@ fn main() {
   println!("boot: tokenizer: text tok.len={}", text_tok.len());
   let mut model = Llama::from(cfg);
   let inv_matches = model.match_pickle_dir(&pickdir);
-  let input = model.make_input();
-  let in_tok = input.in_tok;
+  let in_ = model.fresh_input();
+  let in_tok = in_.in_tok;
   //println!("boot: matches: {:?}", &matches.mat);
   for &(ref cel, ref key) in inv_matches.mat.iter() {
     println!("boot: matches: key={:?} cel={:?}", key, cel);
   }
-  let param = model.param();
+  let param = model.clone_param();
   let mut grad = Vec::with_capacity(param.len());
   for p in param.iter().rev() {
     //let g = StableCell::new();
     let g = StableCell::from(p.type_());
+    //let g = StableCell::from(p.type_().cast(Dtype::Fp32));
     grad.push(g);
   }
   grad.reverse();
+  let mut param_log2_hist = Vec::with_capacity(param.len());
+  let mut param_nan_count = Vec::with_capacity(param.len());
+  let mut grad_log2_hist = Vec::with_capacity(param.len());
+  let mut grad_nan_count = Vec::with_capacity(param.len());
   for (p, g) in param.iter().zip(grad.iter()) {
     println!("boot: param={:?} grad={:?} ty={:?}", p, g, p.type_());
   }
+  let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
+  println!("boot: loss scale: {:?}", loss_scale);
   let mut adamw = AdamW::from(adamw_cfg);
   for iter_nr in 0 .. 1 {
     println!("boot: start iter...");
@@ -76,21 +85,42 @@ fn main() {
       model.cache();
     }
     in_tok.mem_set_yield_();
-    input.in_lm_tok.mem_set_yield_();
-    let out = model.apply(&in_tok, &input.in_lm_tok);
-    println!("boot: in_lm_tok.shape={:?}", input.in_lm_tok.shape());
-    println!("boot: in_lm_tok.dtype={:?}", input.in_lm_tok.dtype());
+    in_.in_lm_tok.mem_set_yield_();
+    in_.in_lm_loss_scale.mem_set_yield_();
+    let out = model.apply(&in_tok, &in_.in_lm_tok);
+    println!("boot: in_lm_tok.shape={:?}", in_.in_lm_tok.shape());
+    println!("boot: in_lm_tok.dtype={:?}", in_.in_lm_tok.dtype());
+    println!("boot: in_lm_loss_scale.shape={:?}", in_.in_lm_loss_scale.shape());
+    println!("boot: in_lm_loss_scale.dtype={:?}", in_.in_lm_loss_scale.dtype());
     println!("boot: out_lm_prob.shape={:?}", out.out_lm_prob.shape());
     println!("boot: out_lm_prob.dtype={:?}", out.out_lm_prob.dtype());
     println!("boot: out_lm_loss.shape={:?}", out.out_lm_loss.shape());
     println!("boot: out_lm_loss.dtype={:?}", out.out_lm_loss.dtype());
     let sink = CellMap::new();
-    sink.add(&out.out_lm_loss, out.out_lm_loss.type_().ones());
-    // FIXME: stable grad.
-    //let allsrc = sink.vjp();
+    //sink.add(&out.out_lm_loss, out.out_lm_loss.type_().ones() * loss_scale);
+    sink.add(&out.out_lm_loss, &in_.in_lm_loss_scale);
     let allsrc = CellMap::new();
     allsrc.vadd(&param, &grad);
     vjp(&allsrc, &sink);
+    param_log2_hist.clear();
+    param_nan_count.clear();
+    grad_log2_hist.clear();
+    grad_nan_count.clear();
+    for (p, g) in param.iter().zip(grad.iter()) {
+      let p = *p.borrow();
+      let g = *g.borrow();
+      if !(allsrc.get(p) == g) {
+        println!("boot: WARNING: grad mismatch");
+      }
+      let p_log2_hist = p.abs_log2_hist8();
+      param_log2_hist.push(p_log2_hist.keep());
+      let p_nan_count = p.nan_count();
+      param_nan_count.push(p_nan_count.keep());
+      let g_log2_hist = g.abs_log2_hist8();
+      grad_log2_hist.push(g_log2_hist.keep());
+      let g_nan_count = g.nan_count();
+      grad_nan_count.push(g_nan_count.keep());
+    }
     /*
     // TODO TODO
     //let grad = allsrc.vget(&param);
@@ -124,18 +154,30 @@ fn main() {
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.push(1_u16);
       tok_buf.extend_from_slice(text_tok.as_ref());
+      // FIXME: put end-of-sentence token.
       tok_buf.resize(seq_cap as _, 0_u16);
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_fun(&input.in_lm_tok, |_, mem| {
+    resume_put_mem_fun(&in_.in_lm_tok, |_, mem| {
       println!("boot: set in_lm_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
-      for _ in 0 .. seq_cap {
-        tok_buf.push(0_u16);
-      }
+      tok_buf.extend_from_slice(text_tok.as_ref());
+      // FIXME: put end-of-sentence token.
+      tok_buf.resize(seq_cap as _, 0_u16);
       mem.copy_from_slice(&tok_buf);
     });
+    resume_put_mem_fun(&in_.in_lm_loss_scale, |_, mem| {
+      println!("boot: set in_lm_loss_scale...");
+      let mut mask_buf = Vec::with_capacity(seq_cap as _);
+      mask_buf.push(0.0_f32);
+      for _ in 1 .. text_tok.len() {
+        mask_buf.push(loss_scale);
+      }
+      mask_buf.resize(seq_cap as _, 0.0_f32);
+      mem.copy_from_slice(&mask_buf);
+    });
     let out_lm_prob_mem = out.out_lm_prob._get_mem();
+    let out_lm_loss_mem = out.out_lm_loss._get_mem();
     println!("boot: out lm prob type   ={:?}", out.out_lm_prob.type_());
     println!("boot: out lm prob version={:?}", out.out_lm_prob.version());
     println!("boot: out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);
@@ -150,6 +192,7 @@ fn main() {
           pos, tok_id, tokenizer.id_to_piece(tok_id as _).map(|s| sane_ascii(s.as_bytes())));
     }*/
     let out_lm_prob_f32 = out_lm_prob_mem._as_slice_f32();
+    let out_lm_loss_f32 = out_lm_loss_mem._as_slice_f32();
     fn argmax(xs: &[f32]) -> Option<(usize, f32)> {
       let mut kv = None;
       for (k, &v) in xs.iter().enumerate() {
@@ -176,16 +219,82 @@ fn main() {
         0
       };
       let (arg_max, max_prob) = argmax(&out_lm_prob_f32[pos * ntok .. (pos + 1) * ntok]).unwrap();
-      println!("boot: pos={} prev tok={} next tok={} max p={:.06} act p={:.06} prev str={:?} next str={:?}",
+      println!("boot: pos={} prev tok={} next tok={} max p={:.06} act p={:.06} loss={:.06} prev str={:?} next str={:?}",
           pos, prev_tok, arg_max, max_prob,
           (if (pos * ntok + act_next_tok as usize) < ((pos + 1) * ntok) {
             out_lm_prob_f32[pos * ntok + act_next_tok as usize]
           } else {
             -f32::inf()
           }),
+          out_lm_loss_f32[pos as usize],
           tokenizer.id_to_piece(prev_tok as _).map(|s| sane_ascii(s.as_bytes())),
           tokenizer.id_to_piece(arg_max as _).map(|s| sane_ascii(s.as_bytes())),
       );
+    }
+    // TODO
+    println!("boot: inspect param");
+    for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
+      let p_log2_hist_mem = p_log2_hist._get_mem();
+      if !(p_log2_hist_mem._as_slice_i64().len() == 0x100) {
+        println!("boot: WARNING: param log2 hist: unexpected len: {}", p_log2_hist_mem._as_slice_i64().len());
+        continue;
+      }
+      let p_nan_count_mem = p_nan_count._get_mem();
+      if !(p_nan_count_mem._as_slice_i64().len() == 1) {
+        println!("boot: WARNING: param log2 hist: unexpected len: {}", p_nan_count_mem._as_slice_i64().len());
+        continue;
+      }
+      let h = p_log2_hist_mem._as_slice_i64();
+      let nan = p_nan_count_mem._as_slice_i64()[0];
+      println!("boot: param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} label={:?}",
+          h[0],
+          &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
+          &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
+          &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
+          h[0xff],
+          nan,
+          inv_matches.get(param),
+      );
+      if h[0xff] != 0 {
+        println!("boot: param log2 hist: WARNING: fp blowup: label={:?}",
+            inv_matches.get(param),
+        );
+      }
+    }
+    println!("boot: inspect gradient");
+    for (((param, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
+      let p = *param.borrow();
+      let g = *g.borrow();
+      if !(allsrc.get(p) == g) {
+        println!("boot: WARNING: grad mismatch");
+        continue;
+      }
+      let g_log2_hist_mem = g_log2_hist._get_mem();
+      if !(g_log2_hist_mem._as_slice_i64().len() == 0x100) {
+        println!("boot: WARNING: grad log2 hist: unexpected len: {}", g_log2_hist_mem._as_slice_i64().len());
+        continue;
+      }
+      let g_nan_count_mem = g_nan_count._get_mem();
+      if !(g_nan_count_mem._as_slice_i64().len() == 1) {
+        println!("boot: WARNING: param log2 hist: unexpected len: {}", g_nan_count_mem._as_slice_i64().len());
+        continue;
+      }
+      let h = g_log2_hist_mem._as_slice_i64();
+      let nan = g_nan_count_mem._as_slice_i64()[0];
+      println!("boot: grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} label={:?}",
+          h[0],
+          &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
+          &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
+          &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
+          h[0xff],
+          nan,
+          inv_matches.get(param),
+      );
+      if h[0xff] != 0 {
+        println!("boot: param log2 hist: WARNING: fp blowup: label={:?}",
+            inv_matches.get(param),
+        );
+      }
     }
     // TODO
     println!("boot: end iter");

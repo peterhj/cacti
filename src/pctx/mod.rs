@@ -515,6 +515,10 @@ impl MemReg {
     unsafe { from_raw_parts(self.ptr as *const f32, self.sz / 4) }
   }
 
+  pub fn _as_slice_i64(&self) -> &[i64] {
+    unsafe { from_raw_parts(self.ptr as *const i64, self.sz / 8) }
+  }
+
   pub fn _debug_dump_f32(&self) {
     let len = self.sz / 4;
     assert_eq!(0, self.sz % 4);

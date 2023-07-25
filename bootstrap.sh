@@ -12,7 +12,7 @@ git clone -b patch "${cacti_remote_prefix}/cc" ../cc
 git clone -b patch "${cacti_remote_prefix}/cfg_if" ../cfg_if
 git clone "${cacti_remote_prefix}/cmake" ../cmake
 git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast
-git clone "${cacti_remote_prefix}/fast_float" ../fast_float
+#git clone "${cacti_remote_prefix}/fast_float" ../fast_float
 git clone -b patch-0.26 "${cacti_remote_prefix}/futhark" ../futhark
 git clone "${cacti_remote_prefix}/futhark_ffi" ../futhark_ffi
 git clone "${cacti_remote_prefix}/futhark_syntax" ../futhark_syntax
@@ -23,6 +23,7 @@ git clone "${cacti_remote_prefix}/libc" ../libc
 git clone -b patch-0.7 "${cacti_remote_prefix}/libloading" ../libloading
 git clone "${cacti_remote_prefix}/memchr" ../memchr
 git clone -b patch "${cacti_remote_prefix}/minimal_lexical" ../minimal_lexical
+#git clone -b patch "${cacti_remote_prefix}/ndarray" ../ndarray
 git clone -b patch "${cacti_remote_prefix}/nom" ../nom
 git clone -b patch "${cacti_remote_prefix}/once_cell" ../once_cell
 git clone -b patch "${cacti_remote_prefix}/regex" ../regex

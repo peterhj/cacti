@@ -6,6 +6,7 @@ pub type LanguageModelIn = LanguageModelInput;
 pub struct LanguageModelInput {
   pub in_tok: StableCell,
   pub in_lm_tok: StableCell,
+  pub in_lm_loss_scale: StableCell,
 }
 
 impl LanguageModelIn {

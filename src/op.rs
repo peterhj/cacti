@@ -921,6 +921,29 @@ impl<R: Borrow<CellPtr>> Mul<R> for StableCell {
   }
 }
 
+impl<'l> Div<CellPtr> for &'l ScalarVal_ {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| {
+      let op = LDivScalarFutThunkSpec{val: (*self).try_into().unwrap()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Div<CellPtr> for ScalarVal_ {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| (&self).div(rhs))
+  }
+}
+
 impl<'l> Div<f32> for &'l CellPtr {
   type Output = CellPtr;
 
@@ -1155,6 +1178,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   #[track_caller]
   fn block_matmul(&self, l_blk_t: bool, rhs: R, r_blk_t: bool) -> CellPtr {
     panick_wrap(|| {
+      // FIXME: scalar dtype.
       self.block_matmul_scale(l_blk_t, rhs, r_blk_t, 1.0_f32)
     })
   }
@@ -1458,6 +1482,36 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
 impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> MathBinaryOps<R> for L {}
 
 pub trait MathUnaryOps: Borrow<CellPtr> {
+  #[track_caller]
+  fn nan_count(&self) -> CellPtr {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(NanCountFutThunkSpec)
+    })
+  }
+
+  #[track_caller]
+  fn abs_log2_hist8(&self) -> CellPtr {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(AbsLog2Hist8FutThunkSpec)
+    })
+  }
+
+  #[track_caller]
+  fn abs_log2_hist16(&self) -> CellPtr {
+    panick_wrap(|| {
+      let x = *self.borrow();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      ctx_pop_thunk(AbsLog2Hist16FutThunkSpec)
+    })
+  }
+
   #[track_caller]
   fn square(&self) -> CellPtr {
     panick_wrap(|| {
@@ -2139,6 +2193,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   fn tag(self, /*_: ???*/) -> Self {
     unimplemented!();
   }*/
+
 
   #[track_caller]
   fn _memcpy(&self) -> CellPtr {
