@@ -2400,8 +2400,7 @@ impl FutharkThunkSpec for LogisticFutThunkSpec {
     let x = arg[0].0;
     let x_ty = x.type_();
     let y = x.logistic();
-    // FIXME: check sign.
-    arg_adj[0] += out_adj * y * (ScalarVal_::one(x_ty.dtype) - y);
+    arg_adj[0] += out_adj * (y * (ScalarVal_::one(x_ty.dtype) - y));
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -2438,14 +2437,11 @@ impl FutharkThunkSpec for StandardSiluFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
-    // FIXME: scalar dtype.
     let x = arg[0].0;
     let x_ty = x.type_();
-    //let y = x.standard_silu();
-    /*arg_adj[0] += out_adj * y * (x * (1.0_f32 - y) + 1.0_f32);*/
-    //arg_adj[0] += out_adj * y * (x * (ScalarVal_::one(x_ty.dtype) - y) + ScalarVal_::one(x_ty.dtype));
+    let y = x.standard_silu();
     let t = x.logistic();
-    arg_adj[0] += out_adj * t * (x * (ScalarVal_::one(x_ty.dtype) - t) + ScalarVal_::one(x_ty.dtype));
+    arg_adj[0] += out_adj * (y * (ScalarVal_::one(x_ty.dtype) - t) + t);
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -2847,12 +2843,74 @@ impl FutharkThunkSpec for InnerSoftmaxFutThunkSpec {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
+    // FIXME
     let x = arg[0].0;
-    let x_ty = x.type_();
     let y = x.inner_softmax();
-    // FIXME: check sign.
-    arg_adj[0] += out_adj * y * (ScalarVal_::one(x_ty.dtype) - y);
+    arg_adj[0] += inner_softmax_post_adj(y, out_adj);
     Ok(FutharkThunkAdj::Spec)
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct InnerSoftmaxPostAdjFutThunkSpec;
+
+impl FutharkThunkSpec for InnerSoftmaxPostAdjFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_softmax_post_adj")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 2;
+    abi.arityout = 1;
+    abi
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(arg[0].clone())
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(arg[0].clone())
+  }
+
+  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkCode, FutharkGenErr> {
+    abi.push_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    abi.push_arg_arr(0, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    abi.push_arg_arr(1, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
+    match out.ndim {
+      // TODO
+      4 => {
+        let mut code = FutharkThunkCode::default();
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} in"));
+        code.append(format!(r"let a_suf = {{%0.s[3]}} in"));
+        code.append(format!(r"let t0 = flatten_4d {{%0}} :> [a_pre * a_suf]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let t0 = unflatten t0 in"));
+        code.append(format!(r"let t1 = flatten_4d {{%1}} :> [a_pre * a_suf]{} in",
+            arg[1].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let t1 = unflatten t1 in"));
+        code.append(format!(r"let t2 = map2 (\y dy -> map2 (*) y dy) t0 t1 in"));
+        code.append(format!(r"let t2_sum = map (\t -> reduce (+) 0 t) t2 in"));
+        code.append(format!(r"let t3 = map3 (\t t_sum y -> map2 (\u v -> u - t_sum * v) t y) t2 t2_sum t0 in"));
+        code.append(format!(r"let t3 = flatten t3 :> [{{%0.s[0]}} * {{%0.s[1]}} * {{%0.s[2]}} * {{%0.s[3]}}]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let {{%2}} = unflatten_4d t3 in"));
+        code.into()
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
   }
 }
 
@@ -2954,7 +3012,6 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     let y = x.inner_softmax();
     let rank = arg[1].0;
     let target = rank.inner_one_hot(inner_len, dtype);
-    // FIXME: check sign.
     arg_adj[0] += out_adj.new_shape(dy_shape) * (y - target);
     Ok(FutharkThunkAdj::Spec)
   }

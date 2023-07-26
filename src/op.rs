@@ -1850,6 +1850,16 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
 
 impl<P: Borrow<CellPtr>> MathUnaryOps for P {}
 
+#[track_caller]
+pub fn inner_softmax_post_adj<Y: Borrow<CellPtr>, Dy: Borrow<CellPtr>>(y: Y, dy: Dy) -> CellPtr {
+  panick_wrap(|| {
+    assert!(ctx_clean_arg());
+    ctx_push_cell_arg(*y.borrow());
+    ctx_push_cell_arg(*dy.borrow());
+    ctx_pop_thunk(InnerSoftmaxPostAdjFutThunkSpec)
+  })
+}
+
 pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   panick_wrap(|| {
     let dtype = dtype.into();

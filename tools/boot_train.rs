@@ -168,13 +168,11 @@ fn main() {
     });
     resume_put_mem_fun(&in_.in_lm_loss_scale, |_, mem| {
       println!("boot: set in_lm_loss_scale...");
-      let mut mask_buf = Vec::with_capacity(seq_cap as _);
-      mask_buf.push(0.0_f32);
-      for _ in 1 .. text_tok.len() {
-        mask_buf.push(loss_scale);
-      }
-      mask_buf.resize(seq_cap as _, 0.0_f32);
-      mem.copy_from_slice(&mask_buf);
+      let mut scale_buf = Vec::with_capacity(seq_cap as _);
+      scale_buf.push(0.0_f32);
+      scale_buf.resize(text_tok.len(), loss_scale);
+      scale_buf.resize(seq_cap as _, 0.0_f32);
+      mem.copy_from_slice(&scale_buf);
     });
     let out_lm_prob_mem = out.out_lm_prob._get_mem();
     let out_lm_loss_mem = out.out_lm_loss._get_mem();
@@ -276,7 +274,7 @@ fn main() {
       }
       let g_nan_count_mem = g_nan_count._get_mem();
       if !(g_nan_count_mem._as_slice_i64().len() == 1) {
-        println!("boot: WARNING: param log2 hist: unexpected len: {}", g_nan_count_mem._as_slice_i64().len());
+        println!("boot: WARNING: grad log2 hist: unexpected len: {}", g_nan_count_mem._as_slice_i64().len());
         continue;
       }
       let h = g_log2_hist_mem._as_slice_i64();
