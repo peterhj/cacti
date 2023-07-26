@@ -7,6 +7,7 @@ use std::mem::{swap};
 pub mod fp;
 pub mod hash;
 pub mod int;
+//pub mod nd;
 pub mod str;
 pub mod sync;
 
@@ -511,5 +512,18 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
       }
       return SortKey8{key, probe: Cell::new(p)};
     }
+  }
+}
+
+pub trait StdCellExt<T> {
+  fn fetch_add(&self, val: T) -> T;
+}
+
+impl StdCellExt<i64> for Cell<i64> {
+  fn fetch_add(&self, val: i64) -> i64 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
   }
 }

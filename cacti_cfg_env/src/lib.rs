@@ -21,6 +21,8 @@ pub struct CfgEnv {
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
   pub silent:     bool,
+  pub debug_accumulate: i8,
+  pub debug_apply: i8,
   pub debug:      i8,
 }
 
@@ -84,6 +86,18 @@ impl CfgEnv {
     let silent = var("CACTI_SILENT")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let debug_accumulate = var("CACTI_DEBUG_ACCUMULATE")
+      .map(|s| match s.parse() {
+        Ok(d) => d,
+        Err(_) => 1
+      })
+      .unwrap_or_else(|_| 0);
+    let debug_apply = var("CACTI_DEBUG_APPLY")
+      .map(|s| match s.parse() {
+        Ok(d) => d,
+        Err(_) => 1
+      })
+      .unwrap_or_else(|_| 0);
     let debug = var("CACTI_DEBUG")
       .map(|s| match s.parse() {
         Ok(d) => d,
@@ -106,6 +120,8 @@ impl CfgEnv {
       futhark_pedantic,
       futhark_trace,
       silent,
+      debug_accumulate,
+      debug_apply,
       debug,
     }
   }

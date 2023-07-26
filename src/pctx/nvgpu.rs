@@ -781,7 +781,7 @@ pub struct NvGpuMemPool {
   pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
   pub front_tag:    RefCell<Option<u32>>,
-  pub free_list:    RefCell<Vec<PAddr>>,
+  pub tmp_freelist: RefCell<Vec<PAddr>>,
   pub free_index:   RefCell<BTreeSet<Region>>,
   pub size_index:   RefCell<HashMap<usize, BTreeSet<PAddr>>>,
   pub alloc_index:  RefCell<BTreeMap<Region, PAddr>>,
@@ -856,7 +856,7 @@ impl NvGpuMemPool {
       back_alloc:   Cell::new(false),
       alloc_pin:    Cell::new(false),
       front_tag:    RefCell::new(None),
-      free_list:    RefCell::new(Vec::new()),
+      tmp_freelist: RefCell::new(Vec::new()),
       free_index:   RefCell::new(BTreeSet::new()),
       size_index:   RefCell::new(HashMap::new()),
       alloc_index:  RefCell::new(BTreeMap::new()),
@@ -1384,7 +1384,7 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
       Some((_, Some(p))) => p,
       _ => panic!("bug"),
     };
-    gpu.mem_pool.free_list.borrow_mut().push(p);
+    gpu.mem_pool.tmp_freelist.borrow_mut().push(p);
     match gpu.mem_pool.cel_map.borrow().get(&p) {
       None => panic!("bug"),
       Some(cel) => {

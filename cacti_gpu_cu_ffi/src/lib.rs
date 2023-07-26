@@ -641,6 +641,7 @@ pub fn cublas_gemm_batched(
   //assert!(c.len() <= i32::max_value() as usize);
   ctx.set_stream(stream_raw).unwrap();
   ctx.set_pointer_mode(CublasPointerMode::Host).unwrap();
+  ctx.set_atomics_mode(CublasAtomicsMode::NotAllowed).unwrap();
   let mut flags = CUBLAS_DEFAULT_MATH;
   let e = match (a_ty, b_ty, c_ty) {
     (CUDA_R_64F, CUDA_R_64F, CUDA_R_64F) => {

@@ -105,12 +105,13 @@ pub struct Ctx {
   pub spine:    RefCell<Spine>,
   pub futhark:  RefCell<FutharkCtx>,
   pub timing:   TimingCtx,
+  pub debugctr: DebugCtrs,
 }
 
 impl Drop for Ctx {
   fn drop(&mut self) {
-    let digest = self.timing.digest();
     if cfg_info() {
+    let digest = self.timing.digest();
     println!("INFO:  Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
     println!("INFO:  Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
     println!("INFO:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
@@ -121,6 +122,8 @@ impl Drop for Ctx {
     println!("INFO:  Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
     println!("INFO:  Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
     println!("INFO:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    println!("INFO:  Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
+    println!("INFO:  Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
     }
   }
 }
@@ -135,6 +138,7 @@ impl Ctx {
       spine:    RefCell::new(Spine::default()),
       futhark:  RefCell::new(FutharkCtx::default()),
       timing:   TimingCtx::default(),
+      debugctr: DebugCtrs::default(),
     }
   }
 }
@@ -187,6 +191,12 @@ impl TimingCtx {
       futhark:  StatDigest::from(&*self.futhark.borrow()),
     }
   }
+}
+
+#[derive(Default)]
+pub struct DebugCtrs {
+  pub accumulate_in_place: Cell<i64>,
+  pub accumulate_not_in_place: Cell<i64>,
 }
 
 #[track_caller]

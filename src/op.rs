@@ -1229,8 +1229,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let l_pad = if (l_block[1] * l_dty_isz) % 16 != 0 {
         let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
         if cfg_debug() {
-        println!("WARNING: block_matmul_scale: left argument requires padding:");
-        println!("WARNING: block_matmul_scale:   {:?}{} -> {:?}{}",
+        println!("DEBUG: block_matmul_scale: left argument requires padding:");
+        println!("DEBUG: block_matmul_scale:   {:?}{} -> {:?}{}",
             l_block, if l_blk_t { " T" } else { "" },
             [l_block[0], l_pad], if l_blk_t { " T" } else { "" },
         );
@@ -1244,8 +1244,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let r_pad = if (r_block[1] * r_dty_isz) % 16 != 0 {
         let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
         if cfg_debug() {
-        println!("WARNING: block_matmul_scale: right argument requires padding:");
-        println!("WARNING: block_matmul_scale:   {:?}{} -> {:?}{}",
+        println!("DEBUG: block_matmul_scale: right argument requires padding:");
+        println!("DEBUG: block_matmul_scale:   {:?}{} -> {:?}{}",
             r_block, if r_blk_t { " T" } else { "" },
             [r_block[0], r_pad], if r_blk_t { " T" } else { "" },
         );

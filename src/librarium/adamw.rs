@@ -7,7 +7,8 @@ pub struct AdamWConfig {
   pub beta: f32,
   pub gamma: f32,
   pub eps: f32,
-  //pub lamda: f32,
+  pub lamda: f32,
+  pub dtype: Dtype,
 }
 
 impl Default for AdamWConfig {
@@ -15,10 +16,11 @@ impl Default for AdamWConfig {
     AdamWConfig{
       // FIXME: check these numbers.
       lr: 1.0e-4,
-      beta: 1.0e-2,
+      beta: 1.0e-1,
       gamma: 1.0e-3,
       eps: 1.0e-12,
-      //lamda: _,
+      lamda: 1.0e-2,
+      dtype: f32::dtype(),
     }
   }
 }

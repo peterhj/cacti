@@ -33,7 +33,9 @@ fn main() {
     lr: 1.0e-5,
     beta: 0.1,
     gamma: 0.001,
-    eps: 1.0e-12,
+    eps: 1.0e-8,
+    lamda: 0.1,
+    dtype: f32::dtype(),
   };
   //let text_str = "Thucydides, an Athenian, wrote the history of";
   //let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its";
