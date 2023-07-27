@@ -122,6 +122,7 @@ impl Drop for Ctx {
     println!("INFO:  Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
     println!("INFO:  Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
     println!("INFO:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    println!("INFO:  Ctx::drop: debug counter: accumulate hashes:       {:?}", self.debugctr.accumulate_hashes.borrow());
     println!("INFO:  Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
     println!("INFO:  Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
     }
@@ -195,6 +196,7 @@ impl TimingCtx {
 
 #[derive(Default)]
 pub struct DebugCtrs {
+  pub accumulate_hashes: RefCell<HashMap<String, i32>>,
   pub accumulate_in_place: Cell<i64>,
   pub accumulate_not_in_place: Cell<i64>,
 }

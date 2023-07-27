@@ -60,6 +60,10 @@ pub struct Libcuda {
   pub cuStreamCreate:           Option<Symbol<extern "C" fn (*mut CUstream, c_uint) -> CUresult>>,
   pub cuStreamDestroy:          Option<Symbol<extern "C" fn (CUstream) -> CUresult>>,
   pub cuStreamSynchronize:      Option<Symbol<extern "C" fn (CUstream) -> CUresult>>,
+  pub cuEventCreate:            Option<Symbol<extern "C" fn (*mut CUevent, c_uint) -> CUresult>>,
+  pub cuEventDestroy:           Option<Symbol<extern "C" fn (CUevent) -> CUresult>>,
+  pub cuEventRecord:            Option<Symbol<extern "C" fn (CUevent, CUstream) -> CUresult>>,
+  pub cuEventElapsedTime:       Option<Symbol<extern "C" fn (*mut f32, CUevent, CUevent) -> CUresult>>,
   pub cuModuleLoadData:         Option<Symbol<extern "C" fn (*mut CUmodule, *const c_void) -> CUresult>>,
   pub cuModuleUnload:           Option<Symbol<extern "C" fn (CUmodule) -> CUresult>>,
   pub cuModuleGetFunction:      Option<Symbol<extern "C" fn (*mut CUfunction, CUmodule, *const c_char) -> CUresult>>,
@@ -117,6 +121,10 @@ impl Libcuda {
     self.cuStreamCreate = library.get(b"cuStreamCreate").ok();
     self.cuStreamDestroy = library.get(b"cuStreamDestroy_v2").ok();
     self.cuStreamSynchronize = library.get(b"cuStreamSynchronize").ok();
+    self.cuEventCreate = library.get(b"cuEventCreate").ok();
+    self.cuEventDestroy = library.get(b"cuEventDestroy_v2").ok();
+    self.cuEventRecord = library.get(b"cuEventRecord").ok();
+    self.cuEventElapsedTime = library.get(b"cuEventElapsedTime").ok();
     self.cuModuleLoadData = library.get(b"cuModuleLoadData").ok();
     self.cuModuleUnload = library.get(b"cuModuleUnload").ok();
     self.cuModuleGetFunction = library.get(b"cuModuleGetFunction").ok();

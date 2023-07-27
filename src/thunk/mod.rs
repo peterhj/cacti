@@ -1526,10 +1526,10 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     (obj.ffi.ctx_cfg_set_cuMemcpyHtoDAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyHtoDAsync.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuMemcpyDtoHAsync.as_ref().unwrap())(obj.cfg, LIBCUDA.cuMemcpyDtoHAsync.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuStreamSynchronize.as_ref().unwrap())(obj.cfg, LIBCUDA.cuStreamSynchronize.as_ref().unwrap().as_ptr() as _);
-    (obj.ffi.ctx_cfg_set_cudaEventCreate.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventCreate.as_ref().unwrap().as_ptr() as _);
-    (obj.ffi.ctx_cfg_set_cudaEventDestroy.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventDestroy.as_ref().unwrap().as_ptr() as _);
-    (obj.ffi.ctx_cfg_set_cudaEventRecord.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventRecord.as_ref().unwrap().as_ptr() as _);
-    (obj.ffi.ctx_cfg_set_cudaEventElapsedTime.as_ref().unwrap())(obj.cfg, LIBCUDART.cudaEventElapsedTime.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuEventCreate.as_ref().unwrap())(obj.cfg, LIBCUDA.cuEventCreate.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuEventDestroy.as_ref().unwrap())(obj.cfg, LIBCUDA.cuEventDestroy.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuEventRecord.as_ref().unwrap())(obj.cfg, LIBCUDA.cuEventRecord.as_ref().unwrap().as_ptr() as _);
+    (obj.ffi.ctx_cfg_set_cuEventElapsedTime.as_ref().unwrap())(obj.cfg, LIBCUDA.cuEventElapsedTime.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_nvrtcGetErrorString.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcGetErrorString.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_nvrtcCreateProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcCreateProgram.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_nvrtcDestroyProgram.as_ref().unwrap())(obj.cfg, LIBNVRTC.nvrtcDestroyProgram.as_ref().unwrap().as_ptr() as _);
@@ -2025,6 +2025,22 @@ impl FutharkThunkImpl<CudaBackend> {
     let mut object = objects.find_mut(mode).unwrap().1;
     let &mut FutharkThunkObject{ref mut obj, ref mut out0_tag, ..} = &mut object;
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: hash={}", &obj.src_hash); }
+    match mode {
+      ThunkMode::Accumulate => {
+        TL_CTX.with(|ctx| {
+          let mut h = ctx.debugctr.accumulate_hashes.borrow_mut();
+          match h.get_mut(&obj.src_hash) {
+            None => {
+              h.insert(obj.src_hash.clone(), 1);
+            }
+            Some(ct) => {
+              *ct += 1;
+            }
+          }
+        });
+      }
+      _ => {}
+    }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
