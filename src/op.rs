@@ -1069,13 +1069,36 @@ impl Neg for StableCell {
   }
 }
 
-pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
+pub trait MathInitOps: Borrow<CellPtr> {
   #[track_caller]
-  fn pow(&self, rhs: R) -> CellPtr {
+  fn init_online_moving_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T) {
     panick_wrap(|| {
       unimplemented!();
     })
   }
+
+  #[track_caller]
+  fn init_online_moving_average_squared<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T) {
+    panick_wrap(|| {
+      unimplemented!();
+    })
+  }
+
+  #[track_caller]
+  fn init_online_adamw_update<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, emavg: V, emavg2: V, lr: T, alpha1: T, alpha2: T, lamda: T, eps: T) {
+    panick_wrap(|| {
+      unimplemented!();
+    })
+  }
+}
+
+pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
+  /*#[track_caller]
+  fn pow(&self, rhs: R) -> CellPtr {
+    panick_wrap(|| {
+      unimplemented!();
+    })
+  }*/
 
   #[track_caller]
   fn inner_concat(&self, rhs: R) -> CellPtr {

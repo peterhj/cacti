@@ -1121,10 +1121,17 @@ impl NvGpuMemPool {
     assert_eq!(self.alloc_index.borrow_mut().remove(&old_reg), Some(addr));
     let new_off = (new_dptr - self.front_base) as usize;
     let new_reg = Region{off: new_off, sz: old_reg.sz};
+    if !(self.front_cursor.get() == new_reg.off) {
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: front cursor=0x{:016x}", self.front_cursor.get());
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: old reg off =0x{:016x}", old_reg.off);
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: old reg sz  =0x{:016x}", old_reg.sz);
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: new reg off =0x{:016x}", new_reg.off);
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: new reg sz  =0x{:016x}", new_reg.sz);
+    }
     assert_eq!(self.front_cursor.get(), new_reg.off);
     //assert!(self.alloc_index.borrow_mut().insert(new_reg, addr).is_none());
     if let Some(addr2) = self.alloc_index.borrow_mut().insert(new_reg, addr) {
-      println!("DEBUG: NvGpuMemPool::try_front_relocate: addr={:?} new dptr=0x{:016x} old reg={:?} new reg={:?} addr2={:?}",
+      println!("DEBUG: NvGpuMemPool::_try_front_relocate: addr={:?} new dptr=0x{:016x} old reg={:?} new reg={:?} addr2={:?}",
           addr, new_dptr, old_reg, new_reg, addr2);
       panic!("bug");
     }
@@ -1171,6 +1178,10 @@ impl NvGpuMemPool {
   }
 
   pub fn try_free(&self, addr: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+    if cfg_debug() {
+    println!("DEBUG: NvGpuMemPool::try_free: addr={:?}", addr);
+    println!("DEBUG: NvGpuMemPool::try_free: old front cursor=0x{:016x}", self.front_cursor.get());
+    }
     let mut front_prefix = self.front_offset();
     let old_alloc = match self.alloc_map.borrow_mut().remove(&addr) {
       None => return None,
@@ -1240,6 +1251,10 @@ impl NvGpuMemPool {
     let icel = self.cel_map.borrow_mut().remove(&addr).unwrap();
     let old_dptr = self.front_base + old_reg.off as u64;
     assert_eq!(old_dptr, icel.dptr.get());
+    if cfg_debug() {
+    println!("DEBUG: NvGpuMemPool::try_free: OK");
+    println!("DEBUG: NvGpuMemPool::try_free: new front cursor=0x{:016x}", self.front_cursor.get());
+    }
     Some(icel)
   }
 }

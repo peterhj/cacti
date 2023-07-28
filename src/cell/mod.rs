@@ -1311,17 +1311,27 @@ impl CellType {
     self.ndim() == 0
   }
 
+  pub fn outer_len(&self) -> i64 {
+    assert!(self.shape.len() > 0);
+    self.shape[0]
+  }
+
   pub fn inner_len(&self) -> i64 {
     assert!(self.shape.len() > 0);
     self.shape[self.shape.len() - 1]
   }
 
-  pub fn packed_span_bytes(&self) -> u64 {
+  pub fn flat_len(&self) -> i64 {
     let nd = self.ndim() as usize;
     let mut span = if nd == 0 { 1 } else { self.shape[(nd - 1)] };
     for d in 1 .. nd {
       span = self.shape[(nd - 1) - d] * span;
     }
+    span
+  }
+
+  pub fn packed_span_bytes(&self) -> u64 {
+    let span = self.flat_len();
     (span * self.dtype.size_bytes() as i64) as u64
   }
 
@@ -2031,8 +2041,10 @@ impl PCell {
 
 pub trait InnerCell {
   // TODO
+  //fn try_borrow(&self) -> () { unimplemented!(); }
+  //fn try_borrow_mut(&self) -> () { unimplemented!(); }
   fn as_mem_reg(&self) -> Option<MemReg> { None }
-  fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
   fn size(&self) -> usize { unimplemented!(); }
   fn root(&self) -> Option<CellPtr> { unimplemented!(); }
   fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
@@ -2046,7 +2058,7 @@ pub trait InnerCell_ {
   fn as_any(&self) -> &dyn Any;
   // TODO
   fn as_mem_reg(&self) -> Option<MemReg>;
-  fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
   fn size(&self) -> usize;
   fn root(&self) -> Option<CellPtr>;
   fn set_root(&self, _root: Option<CellPtr>);

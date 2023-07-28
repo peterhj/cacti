@@ -31,10 +31,10 @@ fn main() {
   println!("boot: tokenizer: pad={:?}", tokenizer.pad_id());
   let adamw_cfg = AdamWConfig{
     lr: 1.0e-5,
-    beta: 0.1,
-    gamma: 0.001,
-    eps: 1.0e-8,
+    alpha1: 0.1,
+    alpha2: 0.001,
     lamda: 0.1,
+    eps: 3.0e-6,
     dtype: f32::dtype(),
   };
   //let text_str = "Thucydides, an Athenian, wrote the history of";
@@ -246,13 +246,29 @@ fn main() {
       }
       let h = p_log2_hist_mem._as_slice_i64();
       let nan = p_nan_count_mem._as_slice_i64()[0];
-      println!("boot: param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} label={:?}",
+      let mut total = 0;
+      /*for &x in h.iter() {
+        total += x;
+      }*/
+      total += h[0];
+      for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
+        total += x;
+      }
+      for &x in (&h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize]).iter() {
+        total += x;
+      }
+      for &x in (&h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize]).iter() {
+        total += x;
+      }
+      total += h[0xff];
+      println!("boot: param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
           h[0],
           &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
           &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
           &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
           h[0xff],
           nan,
+          total,
           inv_matches.get(param),
       );
       if h[0xff] != 0 {
@@ -281,13 +297,29 @@ fn main() {
       }
       let h = g_log2_hist_mem._as_slice_i64();
       let nan = g_nan_count_mem._as_slice_i64()[0];
-      println!("boot: grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} label={:?}",
+      let mut total = 0;
+      /*for &x in h.iter() {
+        total += x;
+      }*/
+      total += h[0];
+      for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
+        total += x;
+      }
+      for &x in (&h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize]).iter() {
+        total += x;
+      }
+      for &x in (&h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize]).iter() {
+        total += x;
+      }
+      total += h[0xff];
+      println!("boot: grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
           h[0],
           &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
           &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
           &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
           h[0xff],
           nan,
+          total,
           inv_matches.get(param),
       );
       if h[0xff] != 0 {
