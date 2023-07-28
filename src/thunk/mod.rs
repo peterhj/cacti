@@ -498,11 +498,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, out_clk: Clock, out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
-    assert!(!out.is_nil());
+    assert!(!out_adj.is_nil());
     match FutharkThunkSpec::pop_adj(self, arg, out, out_clk, out_adj, arg_adj) {
       Ok(FutharkThunkAdj::Auto) => {
         // FIXME
-        //println!("DEBUG: FutharkThunkSpec::pop_adj: auto adj not implemented: name={:?}", self.debug_name());
+        if cfg_debug() { println!("DEBUG: <FutharkThunkSpec as ThunkSpec>::pop_adj: name={:?}", self.debug_name()); }
         let abi = FutharkThunkSpec::abi(self);
         assert_eq!(1, abi.arityout);
         assert_eq!(arg.len(), abi.arityin as usize);
@@ -535,8 +535,14 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         let restore_cfg = code.cfg;
         code.cfg.emit_primal_def = true;
         // FIXME
-        let (_adj_genabi, adj_source) = code.gen_source(&abi, &dim, out_mode, FutharkThunkGenConfig::default(), code.abi.clone())
+        if code.abi.param_ct != 0 {
+          unimplemented!();
+        }
+        let (primal_genabi, primal_source) = code.gen_source(&abi, &dim, out_mode, FutharkThunkGenConfig::default(), code.abi.clone())
           .map_err(|_| ThunkAdjErr::_Bot)?;
+        if cfg_debug() { println!("DEBUG: <FutharkThunkSpec as ThunkSpec>::pop_adj: primal genabi={:?}", &primal_genabi); }
+        assert_eq!(primal_genabi.arityout, abi.arityout);
+        assert_eq!(primal_genabi.arityin, abi.arityin);
         let cost = FutharkThunkSpec::cost_r0(self);
         for k in 0 .. abi.arityin {
           if arg_adj[k as usize].is_nil() {
@@ -554,6 +560,13 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           assert_eq!(adj_dim.len(), (abi.arityin + abi.arityout + 1) as usize);
           assert_eq!(adj_ty_.len(), (abi.arityin + abi.arityout + 1) as usize);
           let mut adj_code = FutharkThunkGenCode::default();
+          adj_code.abi.arityout = 1;
+          adj_code.abi.arityin = primal_genabi.arityin + 1;
+          adj_code.abi.set_out(0, primal_genabi.get_arg(k));
+          for j in 0 .. primal_genabi.arityin {
+            adj_code.abi.set_arg(j, primal_genabi.get_arg(j));
+          }
+          adj_code.abi.set_arg(primal_genabi.arityin, primal_genabi.get_out(0));
           // FIXME: NB if emit_out0_shape{_param} was set in restore_cfg,
           // then in adj code, that corresponds to the arityin-th input...
           adj_code.cfg = restore_cfg;
@@ -564,7 +577,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           }
           adj_code.cfg.emit_out0_shape = false;
           adj_code.cfg.emit_out0_shape_param = false;
-          for line in adj_source.iter() {
+          for line in primal_source.iter() {
             adj_code.pre_append(line);
           }
           // FIXME
@@ -577,8 +590,13 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
             write!(&mut line, r" {{%{}}}", j).unwrap();
           }
           if restore_cfg.emit_out0_shape_param {
-            let out0_dim = adj_dim[abi.arityin as usize];
-            for d in 0 .. out0_dim.ndim {
+            let dim = adj_dim[abi.arityin as usize];
+            let nd = match adj_code.abi.get_arg(abi.arityin) {
+              FutharkArrayRepr::Nd => dim.ndim,
+              FutharkArrayRepr::Flat => min(1, dim.ndim),
+              _ => unimplemented!()
+            };
+            for d in 0 .. nd {
               write!(&mut line, " {{%{}.s[{}]}}", abi.arityin, d).unwrap();
             }
           }
@@ -1000,8 +1018,8 @@ impl FutharkThunkGenCode {
   pub fn flat_map_<S: Borrow<str>>(x0: &str, arg0: Dim, y: &str, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
-    code.abi.arityin = 1;
     code.abi.set_out(0, FutharkArrayRepr::Flat);
+    code.abi.arityin = 1;
     code.abi.set_arg(0, FutharkArrayRepr::Flat);
     code.append_flat_map(x0, arg0, y, lam)?;
     code.into()
@@ -1020,7 +1038,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {} = map ({}) {} in", y, lam, x0));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::flat_map: not implemented: {:?}", arg0);
+        println!("WARNING: FutharkThunkGenCode::append_flat_map: not implemented: {:?}", arg0);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1037,8 +1055,8 @@ impl FutharkThunkGenCode {
   pub fn flat_map2_<S: Borrow<str>>(x0: &str, arg0: Dim, x1: &str, arg1: Dim, y: &str, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
-    code.abi.arityin = 2;
     code.abi.set_out(0, FutharkArrayRepr::Flat);
+    code.abi.arityin = 2;
     code.abi.set_arg(0, FutharkArrayRepr::Flat);
     code.abi.set_arg(1, FutharkArrayRepr::Flat);
     code.append_flat_map2(x0, arg0, x1, arg1, y, lam)?;
@@ -1058,7 +1076,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {} = map2 ({}) {} {} in", y, lam, x0, x1));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::flat_map2: not implemented: {:?} {:?}", arg0, arg1);
+        println!("WARNING: FutharkThunkGenCode::append_flat_map2: not implemented: {:?} {:?}", arg0, arg1);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1076,8 +1094,8 @@ impl FutharkThunkGenCode {
   pub fn flat_map3_<S: Borrow<str>>(x0: &str, arg0: Dim, x1: &str, arg1: Dim, x2: &str, arg2: Dim, y: &str, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
-    code.abi.arityin = 3;
     code.abi.set_out(0, FutharkArrayRepr::Flat);
+    code.abi.arityin = 3;
     code.abi.set_arg(0, FutharkArrayRepr::Flat);
     code.abi.set_arg(1, FutharkArrayRepr::Flat);
     code.abi.set_arg(2, FutharkArrayRepr::Flat);
@@ -1098,7 +1116,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {} = map3 ({}) {} {} {} in", y, lam, x0, x1, x2));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::flat_map3: not implemented: {:?} {:?} {:?}", arg0, arg1, arg2);
+        println!("WARNING: FutharkThunkGenCode::append_flat_map3: not implemented: {:?} {:?} {:?}", arg0, arg1, arg2);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1149,7 +1167,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {{%0}} = unflatten_4d t0 in"));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::nd_replicate: not implemented: {:?}", out0);
+        println!("WARNING: FutharkThunkGenCode::append_nd_replicate: not implemented: {:?}", out0);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1193,7 +1211,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {{%1}} = unflatten_4d t1 in"));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::nd_map: not implemented: {:?}", arg0);
+        println!("WARNING: FutharkThunkGenCode::append_nd_map: not implemented: {:?}", arg0);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1246,7 +1264,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {} = unflatten_4d t2 in", y));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::nd_map2: not implemented: {:?} {:?}", arg0, arg1);
+        println!("WARNING: FutharkThunkGenCode::append_nd_map2: not implemented: {:?} {:?}", arg0, arg1);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1296,7 +1314,7 @@ impl FutharkThunkGenCode {
         self.append(format!(r"let {} = unflatten_4d t3 in", y));
       }
       _ => {
-        println!("WARNING: FutharkThunkGenCode::nd_map3: not implemented: {:?} {:?} {:?}", arg0, arg1, arg2);
+        println!("WARNING: FutharkThunkGenCode::append_nd_map3: not implemented: {:?} {:?} {:?}", arg0, arg1, arg2);
         return Err(FutharkThunkGenErr::NotImpl);
       }
     }
@@ -1314,6 +1332,35 @@ impl FutharkThunkGenCode {
   //pub fn gen_source(&self, abi: &FutAbi, spec_dim: &[Dim], mode: ThunkMode, mut cfg: FutharkThunkGenConfig) -> Result<Vec<String>, ()> {}
   pub fn gen_source(&self, abi: &FutAbi, spec_dim: &[Dim], mode: ThunkMode, mut cfg: FutharkThunkGenConfig, mut genabi: FutharkThunkGenAbi) -> Result<(FutharkThunkGenAbi, Vec<String>), ()> {
     // TODO
+    let mut warn = false;
+    for k in 0 .. genabi.arityout {
+      match genabi.get_out(k) {
+        FutharkArrayRepr::Nd |
+        FutharkArrayRepr::Flat => {}
+        _ => {
+          println!("WARNING: FutharkThunkGenCode::gen_source: invalid array repr: out={}", k);
+          warn = true;
+        }
+      }
+    }
+    for k in 0 .. genabi.arityin {
+      match genabi.get_arg(k) {
+        FutharkArrayRepr::Nd |
+        FutharkArrayRepr::Flat => {}
+        _ => {
+          println!("WARNING: FutharkThunkGenCode::gen_source: invalid array repr: arg={}", k);
+          warn = true;
+        }
+      }
+    }
+    if warn {
+      for line in self.head.iter() {
+        println!("DEBUG: FutharkThunkGenCode::gen_source: dump head: {}", line);
+      }
+      for line in self.body.iter() {
+        println!("DEBUG: FutharkThunkGenCode::gen_source: dump body: {}", line);
+      }
+    }
     cfg = self.cfg.merge(cfg);
     let mut pats = Vec::new();
     let mut reps = Vec::new();
@@ -1325,7 +1372,14 @@ impl FutharkThunkGenCode {
         let nd = match genabi.get_arg(k) {
           FutharkArrayRepr::Nd => dim.ndim,
           FutharkArrayRepr::Flat => min(1, dim.ndim),
-          _ => unimplemented!()
+          //_ => unimplemented!()
+          _ => {
+            println!("DEBUG: FutharkThunkGenCode::gen_source: spec_dim={:?} mode={:?} cfg={:?}",
+                spec_dim, mode, cfg);
+            println!("DEBUG: FutharkThunkGenCode::gen_source: futabi={:?}", abi);
+            println!("DEBUG: FutharkThunkGenCode::gen_source: genabi={:?}", genabi);
+            unimplemented!()
+          }
         };
         for d in 0 .. nd {
           pats.push(format!(r"{{%{}.s[{}]}}", k, d));
@@ -1639,6 +1693,15 @@ impl FutharkThunkGenCode {
     for line in s.split('\n') {
       lines_out.push(line.into());
     }
+    match mode {
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => {
+        let arityin = genabi.arityin;
+        genabi.arityin += 1;
+        genabi.set_arg(arityin, genabi.get_out(0));
+      }
+      _ => {}
+    }
     if cfg.emit_out0_shape_param {
       let dim = spec_dim[abi.arityin as usize];
       let prev_np = genabi.param_ct;
@@ -1925,8 +1988,8 @@ impl FutharkParam {
   }
 }
 
-//#[derive(Clone)]
-#[derive(Clone, PartialEq, Eq, Hash)]
+//#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FutharkThunkGenAbi {
   // TODO
   pub arityout: u16,
@@ -2146,6 +2209,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
   pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, rst: Counter) {
     let gencfg = FutharkThunkGenConfig::default();
     // FIXME: gen abi.
+    if cfg_debug() { println!("DEBUG: FutharkThunkImpl::_try_build: name={:?}", self.name); }
     //let source = self.code.gen_source(&self.abi, &self.spec_dim, mode, gencfg).unwrap();
     let (genabi, source) = self.code.gen_source(&self.abi, &self.spec_dim, mode, gencfg, self.code.abi.clone()).unwrap();
     let mut config = FutConfig::default();
