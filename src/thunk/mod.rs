@@ -33,6 +33,7 @@ use futhark_ffi::{
   AbiScalarType as FutAbiScalarType,
   AbiScalar as FutAbiScalar,
   AbiSpace as FutAbiSpace,
+  EntryAbi as FutEntryAbi,
   FutharkFloatFormatter,
 };
 #[cfg(feature = "nvgpu")]
@@ -2010,15 +2011,19 @@ impl Default for FutharkThunkGenAbi {
 }
 
 impl FutharkThunkGenAbi {
-  pub fn from_eabi(eabi: &FutAbi) -> FutharkThunkGenAbi {
-    // FIXME
-    unimplemented!();
-  }
-
-  pub fn to_eabi(&self) -> FutAbi {
-  //pub fn to_eabi(&self) -> FutEntryAbi {}
-    // FIXME
-    unimplemented!();
+  pub fn to_eabi(&self, space: FutAbiSpace) -> FutEntryAbi {
+    let mut eabi = FutEntryAbi{
+      arityout: self.arityout,
+      arityin:  self.arityin,
+      param_ct: self.param_ct,
+      space,
+      data: Vec::new(),
+    };
+    for idx in 0 .. self.param_ct {
+      let (_, sty) = self.get_param(idx);
+      eabi.set_param(idx, sty);
+    }
+    eabi
   }
 
   pub fn get_out(&self, idx: u16) -> FutharkArrayRepr {
@@ -2049,10 +2054,10 @@ impl FutharkThunkGenAbi {
     self.data[(self.arityout + idx) as usize] = rep as u8;
   }
 
-  pub fn get_param(&self, idx: u16) -> (FutharkArrayRepr, FutAbiScalarType) {
+  pub fn get_param(&self, idx: u16) -> (FutharkParam, FutAbiScalarType) {
     assert!(idx < self.param_ct);
     let u = self.data[(self.arityout + self.arityin + idx) as usize];
-    (FutharkArrayRepr::from_bits(u & 3), FutAbiScalarType::from_bits(u >> 4))
+    (FutharkParam::from_bits(u & 3), FutAbiScalarType::from_bits(u >> 4))
   }
 
   pub fn set_param(&mut self, idx: u16, param: FutharkParam, sty: FutAbiScalarType) {
@@ -2284,7 +2289,11 @@ impl FutharkThunkImpl<CudaBackend> {
     if self.objects.borrow().find(mode).is_none() {
       panic!("BUG: FutharkThunkImpl::<CudaBackend>::_enter: build error");
     }
-    assert_eq!(arg.len(), self.abi.arityin as usize);
+    let mut objects = self.objects.borrow_mut();
+    let mut object = objects.find_mut(mode).unwrap().1;
+    let &mut FutharkThunkObject{ref genabi, ref mut obj, ref mut out0_tag, ..} = &mut object;
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: hash={}", &obj.src_hash); }
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", arg); }
     let extrain = match mode {
       ThunkMode::Apply => {
         if 1 != self.abi.arityout {
@@ -2292,20 +2301,17 @@ impl FutharkThunkImpl<CudaBackend> {
         }
         0
       }
-      ThunkMode::Accumulate => {
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => {
         assert_eq!(1, self.abi.arityout);
         1
       }
       _ => unimplemented!()
     };
-    //assert_eq!(extra, 0);
-    let mut objects = self.objects.borrow_mut();
-    let mut object = objects.find_mut(mode).unwrap().1;
-    let &mut FutharkThunkObject{ref genabi, ref mut obj, ref mut out0_tag, ..} = &mut object;
-    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: hash={}", &obj.src_hash); }
-    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", arg); }
-    let mut arg_ty_: Vec<CellType> = Vec::with_capacity((self.abi.arityin + extrain) as usize);
-    let mut arg_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity((self.abi.arityin + extrain) as usize);
+    assert_eq!(arg.len(), self.abi.arityin as usize);
+    assert_eq!(genabi.arityin, self.abi.arityin + extrain);
+    let mut arg_ty_: Vec<CellType> = Vec::with_capacity(genabi.arityin as usize);
+    let mut arg_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity(genabi.arityin as usize);
     'for_k: for k in 0 .. self.abi.arityin {
       let xroot = match env.lookup_ref(arg[k as usize].0) {
         None => panic!("bug"),
@@ -2392,10 +2398,10 @@ impl FutharkThunkImpl<CudaBackend> {
       arg_ndim.push(arr.get_mut()._unset_ndim());
     }
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?} oclk={:?}", out, oclk); }
-    let mut out_ty_ = Vec::with_capacity(self.abi.arityout as usize);
-    let mut out_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity(self.abi.arityout as usize);
+    let mut out_ty_ = Vec::with_capacity(genabi.arityout as usize);
+    let mut out_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity(genabi.arityout as usize);
     let mut out_org = None;
-    for k in 0 .. self.abi.arityout {
+    for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
       let ty_ = match env.lookup_ref(out) {
         None => panic!("bug"),
@@ -2411,10 +2417,12 @@ impl FutharkThunkImpl<CudaBackend> {
           }
         }
       };
-      //let ty_ = &out_ty_[k];
       assert_eq!(self.spec_dim[(self.abi.arityin + k) as usize], ty_.to_dim());
       match mode {
-        ThunkMode::Accumulate => {
+        // FIXME: if we no longer match on mode, then the pwrite check
+        // needs to test which of the args are also outs.
+        ThunkMode::Accumulate |
+        ThunkMode::Initialize => {
           // FIXME: double check that out does not alias any args.
           let e = match env.pwrite_ref(out, oclk) {
             None => panic!("bug"),
@@ -2479,7 +2487,7 @@ impl FutharkThunkImpl<CudaBackend> {
     }
     }
     // FIXME: implicit output shape params during gen.
-    let np = self.abi.num_param();
+    let np = genabi.param_ct as usize;
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
     //param.resize(np, FutAbiScalar::Empty);
     //spec_.set_param(&mut param);
@@ -2506,7 +2514,7 @@ impl FutharkThunkImpl<CudaBackend> {
       unimplemented!();
     }
     // FIXME: should distinguish the "spec" abi from the "real" abi.
-    let restore_out = match mode {
+    /*let restore_out = match mode {
       ThunkMode::Accumulate => {
         let (out, rep, dty) = self.abi.get_out_arr(0);
         assert_eq!(out, FutAbiOutput::Pure);
@@ -2514,7 +2522,7 @@ impl FutharkThunkImpl<CudaBackend> {
         Some((out, rep, dty))
       }
       _ => None
-    };
+    };*/
     match mode {
       ThunkMode::Accumulate => {
         TL_CTX.with(|ctx| {
@@ -2559,7 +2567,8 @@ impl FutharkThunkImpl<CudaBackend> {
       (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_offset())
     });
     /*obj.unify_abi(self.abi).unwrap();*/
-    let o_ret = obj.enter_kernel(&self.abi, &param, &arg_arr, &out_arr);
+    let eabi = genabi.to_eabi(FutAbiSpace::Device);
+    let o_ret = obj.enter_kernel(/*&self.abi,*/ eabi, &param, &arg_arr, &out_arr);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::_enter: runtime error");
@@ -2611,13 +2620,13 @@ impl FutharkThunkImpl<CudaBackend> {
     drop(obj);
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: ret={:?}", o_ret); }
     //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?} oclk={:?}", out, oclk);
-    match mode {
+    /*match mode {
       ThunkMode::Accumulate => {
         let (out, rep, dty) = restore_out.unwrap();
         let _ = self.abi.set_out_arr(0, out, rep, dty);
       }
       _ => {}
-    }
+    }*/
     for (k, arr) in (&mut arg_arr[ .. self.abi.arityin as usize]).iter_mut().enumerate() {
       arr.get_mut()._set_ndim(arg_ndim[k]);
       if _cfg_debug_mode(mode) {
@@ -2636,7 +2645,7 @@ impl FutharkThunkImpl<CudaBackend> {
     // FIXME: at this point, the remaining memblocks are the outputs.
     // but, if any of the inputs were clobbered, then we have to unset those.
     // so, do some kind of unification here.
-    for k in 0 .. self.abi.arityout {
+    for k in 0 .. genabi.arityout {
       assert!(!out_arr[k as usize].get_mut().as_ptr().is_null());
       match genabi.get_out(k) {
         FutharkArrayRepr::Nd => {
