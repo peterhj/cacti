@@ -741,10 +741,13 @@ pub fn ctx_pop_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType) -> Cel
     let odim = out_ty.to_dim();
     let oty_ = out_ty;
     dims.push(odim);
-    let (ar_in, ar_out) = th.arity();
+    let (lar, rar) = match th.arity() {
+      None => unimplemented!(),
+      Some(ar) => ar
+    };
     // FIXME FIXME
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
-    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
+    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, lar, rar, dims, th);
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
@@ -810,10 +813,13 @@ pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_
     let odim = out_ty.to_dim();
     let oty_ = out_ty;
     dims.push(odim);
-    let (ar_in, ar_out) = th.arity();
+    let (lar, rar) = match th.arity() {
+      None => unimplemented!(),
+      Some(ar) => ar
+    };
     // FIXME FIXME
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
-    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
+    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, lar, rar, dims, th);
     let y = out;
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
@@ -878,10 +884,13 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
     let odim = out_ty.to_dim();
     let oty_ = out_ty;
     dims.push(odim);
-    let (ar_in, ar_out) = th.arity();
-    assert_eq!(ar_out, 1);
+    let (lar, rar) = match th.arity() {
+      None => unimplemented!(),
+      Some(ar) => ar
+    };
+    assert_eq!(rar, 1);
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
-    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
+    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, lar, rar, dims, th);
     let y = ctx.ctr.fresh_cel();
     ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
@@ -925,10 +934,13 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
     };
     assert_eq!(odim, oty_.to_dim());
     dims.push(odim);
-    let (ar_in, ar_out) = th.arity();
-    assert_eq!(ar_out, 1);
+    let (lar, rar) = match th.arity() {
+      None => unimplemented!(),
+      Some(ar) => ar
+    };
+    assert_eq!(rar, 1);
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
-    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, ar_in, ar_out, dims, th);
+    let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, lar, rar, dims, th);
     let y = out;
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
@@ -1056,8 +1068,8 @@ impl CtxThunkEnv {
       None => panic!("bug"),
       Some(te) => {
         // FIXME: where to typecheck?
-        assert_eq!(arg.len(), te.pthunk.arityin as usize);
-        assert_eq!(1, te.pthunk.arityout);
+        assert_eq!(arg.len(), te.pthunk.lar as usize);
+        assert_eq!(1, te.pthunk.rar);
         let tclo = ThunkClosure{pthunk: tp, arg, out: y};
         self.update.insert((yroot, yclk), tclo);
       }
@@ -1082,7 +1094,7 @@ impl CtxThunkEnv {
         }
       }
     }
-    let (ar_in, ar_out, spec_dim, tk, ) = key;
+    let (lar, rar, spec_dim, tk, ) = key;
     if tp_.is_none() {
       let tp = ctr.fresh_thunk();
       /*let mut arg = Vec::new();
@@ -1090,7 +1102,7 @@ impl CtxThunkEnv {
       assert_eq!(arg.len(), ar_in as usize);*/
       let pthunk = Rc::new(PThunk::new(tp, spec_dim.clone(), (tk.0).clone()));
       let te = ThunkEnvEntry{/*arg,*/ pthunk};
-      self.thunkidx.insert((ar_in, ar_out, spec_dim, tk, ), tp);
+      self.thunkidx.insert((lar, rar, spec_dim, tk, ), tp);
       self.thunktab.insert(tp, te);
       tp_ = Some(tp);
     }

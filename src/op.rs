@@ -17,7 +17,7 @@ use std::iter::{repeat};
 use std::ops::{AddAssign, BitXor, Index, IndexMut, RangeFull, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
-impl AddAssign<f32> for CellPtr {
+/*impl AddAssign<f32> for CellPtr {
   #[track_caller]
   fn add_assign(&mut self, rhs: f32) {
     // FIXME FIXME
@@ -28,7 +28,7 @@ impl AddAssign<f32> for CellPtr {
       ctx_pop_thunk_mux(op, self.into())
     })*/
   }
-}
+}*/
 
 impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
   #[track_caller]
@@ -629,7 +629,7 @@ impl<'l> Add<f32> for &'l CellPtr {
   #[track_caller]
   fn add(self, rhs: f32) -> CellPtr {
     panick_wrap(|| {
-      let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      let op = AddScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
@@ -716,7 +716,7 @@ impl<'l> Sub<CellPtr> for &'l ScalarVal_ {
   #[track_caller]
   fn sub(self, rhs: CellPtr) -> CellPtr {
     panick_wrap(|| {
-      let op = LSubScalarFutThunkSpec{val: (*self).try_into().unwrap()};
+      let op = LSubScalarFutThunkSpec{val: self.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);
       ctx_pop_thunk(op)
@@ -739,7 +739,7 @@ impl<'l> Sub<CellPtr> for &'l f32 {
   #[track_caller]
   fn sub(self, rhs: CellPtr) -> CellPtr {
     panick_wrap(|| {
-      let op = LSubScalarF32FutThunkSpec{val: (*self).try_into().unwrap()};
+      let op = LSubScalarFutThunkSpec{val: self.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);
       ctx_pop_thunk(op)
@@ -762,7 +762,7 @@ impl<'l> Sub<f32> for &'l CellPtr {
   #[track_caller]
   fn sub(self, rhs: f32) -> CellPtr {
     panick_wrap(|| {
-      let op = RSubScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      let op = RSubScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
@@ -854,7 +854,7 @@ impl<'l> Mul<f32> for &'l CellPtr {
   #[track_caller]
   fn mul(self, rhs: f32) -> CellPtr {
     panick_wrap(|| {
-      let op = MulScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      let op = MulScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
@@ -927,7 +927,7 @@ impl<'l> Div<CellPtr> for &'l ScalarVal_ {
   #[track_caller]
   fn div(self, rhs: CellPtr) -> CellPtr {
     panick_wrap(|| {
-      let op = LDivScalarFutThunkSpec{val: (*self).try_into().unwrap()};
+      let op = LDivScalarFutThunkSpec{val: self.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);
       ctx_pop_thunk(op)
@@ -944,13 +944,58 @@ impl Div<CellPtr> for ScalarVal_ {
   }
 }
 
+impl<'l> Div<CellPtr> for &'l f32 {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| {
+      let op = LDivScalarFutThunkSpec{val: self.into_scalar_val_()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Div<CellPtr> for f32 {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: CellPtr) -> CellPtr {
+    panick_wrap(|| (&self).div(rhs))
+  }
+}
+
+impl<'l> Div<ScalarVal_> for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn div(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| {
+      let op = RDivScalarFutThunkSpec{val: rhs.into_scalar_val_()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Div<ScalarVal_> for CellPtr {
+  type Output = CellPtr;
+
+  fn div(self, rhs: ScalarVal_) -> CellPtr {
+    panick_wrap(|| (&self).div(rhs))
+  }
+}
+
 impl<'l> Div<f32> for &'l CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
   fn div(self, rhs: f32) -> CellPtr {
     panick_wrap(|| {
-      let op = RDivScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
+      let op = RDivScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(*self.borrow());
       ctx_pop_thunk(op)

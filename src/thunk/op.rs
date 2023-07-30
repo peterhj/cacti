@@ -75,10 +75,12 @@ pub struct FutharkCodeThunkSpec {
   // TODO
   pub primal_mode: ThunkMode,
   pub cost: Option<ThunkCostR0>,
-  pub abi: FutAbi,
+  pub lar:  u16,
+  pub rar:  u16,
+  //pub abi: FutAbi,
   //pub param: _,
-  pub dim: Vec<Dim>,
-  pub ty_: Vec<CellType>,
+  pub dim:  Vec<Dim>,
+  pub ty_:  Vec<CellType>,
   pub code: FutharkThunkGenCode,
 }
 
@@ -87,41 +89,46 @@ impl FutharkThunkSpec for FutharkCodeThunkSpec {
     self.cost
   }
 
-  fn abi(&self) -> Abi {
-    self.abi.clone()
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((self.lar, self.rar))
   }
+
+  /*fn abi(&self) -> Abi {
+    //self.abi.clone()
+    unimplemented!();
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // TODO
-    if arg.len() != self.abi.arityin as usize {
+    if arg.len() != self.lar as usize {
       return Err(ThunkDimErr::_Bot);
     }
-    if arg != &self.dim[ .. self.abi.arityin as usize] {
+    if arg != &self.dim[ .. self.lar as usize] {
       return Err(ThunkDimErr::_Bot);
     }
-    assert_eq!(1, self.abi.arityout);
-    Ok(self.dim[self.abi.arityin as usize])
+    assert_eq!(1, self.rar);
+    Ok(self.dim[self.lar as usize])
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
     // TODO
-    if arg.len() != self.abi.arityin as usize {
+    if arg.len() != self.lar as usize {
       return Err(ThunkTypeErr::_Bot);
     }
-    if arg != &self.ty_[ .. self.abi.arityin as usize] {
+    if arg != &self.ty_[ .. self.lar as usize] {
       return Err(ThunkTypeErr::_Bot);
     }
-    assert_eq!(1, self.abi.arityout);
-    Ok(self.ty_[self.abi.arityin as usize].clone())
+    assert_eq!(1, self.rar);
+    Ok(self.ty_[self.lar as usize].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // TODO
-    assert_eq!(1, abi.arityout);
+    /*assert_eq!(1, abi.arityout);
     abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     for k in 0 .. abi.arityin {
       abi.set_arg_arr(k, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    }
+    }*/
     Ok(self.code.clone())
   }
 }
@@ -138,12 +145,16 @@ impl FutharkThunkSpec for IdentityFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -153,13 +164,13 @@ impl FutharkThunkSpec for IdentityFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     /*abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.append(r"let {%1} = {%0} in");
     code.into()*/
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> u")
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> u")
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -181,12 +192,16 @@ impl FutharkThunkSpec for IotaFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((0, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 0;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: 1, dtype: Dtype::Int64})
@@ -196,9 +211,9 @@ impl FutharkThunkSpec for IotaFutThunkSpec {
     Ok(CellType{shape: vec![self.len], dtype: Dtype::Int64})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: use param.
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -220,12 +235,16 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((0, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 0;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, _arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Err(ThunkDimErr::Nondeterm)
@@ -239,7 +258,7 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
     Some(&self.val)
   }*/
 
-  fn gen_futhark(&self, abi: &mut FutAbi, _arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ _arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     /*// FIXME FIXME: rank polymorphic.
     //let fmt = FutharkNumFormatter::default();
     let mut code = FutharkThunkGenCode::default();
@@ -248,7 +267,7 @@ impl FutharkThunkSpec for SetScalarFutThunkSpec {
     //code.body.push(format!("let {{%0}} = {} in", fmt.format(&self.val)));
     code.append(format!(r"let {{%0}} = {} in", self.val.format_futhark()));
     code.into()*/
-    FutharkThunkGenCode::nd_replicate(abi, out[0], format!(r"{}", self.val.format_futhark()))
+    FutharkThunkGenCode::flat_replicate(out[0], format!(r"{}", self.val.format_futhark()))
   }
 }
 
@@ -264,12 +283,16 @@ impl FutharkThunkSpec for NanCountFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: 0, dtype: Dtype::Int64})
@@ -279,9 +302,9 @@ impl FutharkThunkSpec for NanCountFutThunkSpec {
     Ok(CellType{shape: vec![], dtype: Dtype::Int64})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -341,12 +364,16 @@ impl FutharkThunkSpec for AbsLog2Hist8FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: 1, dtype: Dtype::Int64})
@@ -356,9 +383,9 @@ impl FutharkThunkSpec for AbsLog2Hist8FutThunkSpec {
     Ok(CellType{shape: vec![0x100], dtype: Dtype::Int64})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -426,12 +453,16 @@ impl FutharkThunkSpec for AbsLog2Hist16FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: 1, dtype: Dtype::Int64})
@@ -441,9 +472,9 @@ impl FutharkThunkSpec for AbsLog2Hist16FutThunkSpec {
     Ok(CellType{shape: vec![0x10000], dtype: Dtype::Int64})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -511,12 +542,16 @@ impl FutharkThunkSpec for CastFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: self.new_dtype})
@@ -526,11 +561,11 @@ impl FutharkThunkSpec for CastFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: self.new_dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     assert_eq!(out[0].dtype, self.new_dtype);
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {}.{} u",
-                                                       self.new_dtype.format_futhark(),
-                                                       arg[0].dtype.format_futhark()))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {}.{} u",
+                                                  self.new_dtype.format_futhark(),
+                                                  arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -552,12 +587,16 @@ impl FutharkThunkSpec for CastBf16F16FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].dtype != Dtype::Bfloat16 {
@@ -573,8 +612,8 @@ impl FutharkThunkSpec for CastBf16F16FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Fp16})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> f16.f32 (f32.from_bits ((u32.u16 u) << 16))")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> f16.f32 (f32.from_bits ((u32.u16 u) << 16))")
   }
 }
 
@@ -590,12 +629,16 @@ impl FutharkThunkSpec for CastBf16F32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].dtype != Dtype::Bfloat16 {
@@ -611,8 +654,8 @@ impl FutharkThunkSpec for CastBf16F32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Fp32})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> f32.from_bits ((u32.u16 u) << 16)")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> f32.from_bits ((u32.u16 u) << 16)")
   }
 }
 
@@ -628,12 +671,16 @@ impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].dtype != Dtype::Fp32 {
@@ -649,8 +696,8 @@ impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Bfloat16})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> u16.u32 ((f32.to_bits u) >> 16)")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> u16.u32 ((f32.to_bits u) >> 16)")
   }
 }
 
@@ -666,12 +713,16 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     /*if arg[0].dtype != self.org_dtype {
@@ -695,9 +746,9 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
     Ok(CellType{shape, dtype: self.new_dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     //let fmt = FutharkNumFormatter::default();
     let mut code = FutharkThunkGenCode::default();
@@ -779,12 +830,16 @@ impl FutharkThunkSpec for InnerSelectFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // FIXME
@@ -812,10 +867,10 @@ impl FutharkThunkSpec for InnerSelectFutThunkSpec {
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -894,12 +949,16 @@ impl FutharkThunkSpec for InnerInvSelectFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // FIXME
@@ -928,10 +987,10 @@ impl FutharkThunkSpec for InnerInvSelectFutThunkSpec {
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -999,12 +1058,16 @@ impl FutharkThunkSpec for OuterSelectFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // FIXME
@@ -1031,10 +1094,10 @@ impl FutharkThunkSpec for OuterSelectFutThunkSpec {
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -1082,12 +1145,16 @@ impl FutharkThunkSpec for OuterMulFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != 1 {
@@ -1121,10 +1188,10 @@ impl FutharkThunkSpec for OuterMulFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -1155,12 +1222,16 @@ impl FutharkThunkSpec for AddScalarFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -1170,9 +1241,9 @@ impl FutharkThunkSpec for AddScalarFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     //let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u + {}", self.val.format_futhark()))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u + {}", self.val.format_futhark()))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1182,7 +1253,7 @@ impl FutharkThunkSpec for AddScalarFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct AddScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
@@ -1194,12 +1265,16 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1209,9 +1284,9 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u + {}", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u + {}", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1219,7 +1294,7 @@ impl FutharkThunkSpec for AddScalarF32FutThunkSpec {
     arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct AddFutThunkSpec;
@@ -1233,12 +1308,16 @@ impl FutharkThunkSpec for AddFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != arg[1].ndim() {
@@ -1263,8 +1342,8 @@ impl FutharkThunkSpec for AddFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map2(abi, arg[0], arg[1], r"+")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map2(arg[0], arg[1], r"+")
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1287,12 +1366,16 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != self.mono.ndim() {
@@ -1335,7 +1418,7 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME
     //FutharkThunkGenCode::nd_broadcast_map2_v0(arg[0], arg[1], r"+")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
@@ -1343,7 +1426,7 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))*/
-    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) + ({}.{} v)",
+    self.mono.gen_futhark(arg[0], arg[1], format!(r"\u v -> ({}.{} u) + ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -1362,12 +1445,16 @@ impl FutharkThunkSpec for LSubScalarFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -1377,9 +1464,9 @@ impl FutharkThunkSpec for LSubScalarFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     //let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {} - u", self.val.format_futhark()))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} - u", self.val.format_futhark()))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1388,7 +1475,7 @@ impl FutharkThunkSpec for LSubScalarFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct LSubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for LSubScalarF32FutThunkSpec {
@@ -1400,12 +1487,12 @@ impl FutharkThunkSpec for LSubScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1415,18 +1502,60 @@ impl FutharkThunkSpec for LSubScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {} - u", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} - u", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += -out_adj;
     Ok(FutharkThunkAdj::Spec)
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RSubScalarFutThunkSpec { pub val: ScalarVal_ }
+
+impl FutharkThunkSpec for RSubScalarFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.right_sub_scalar")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }*/
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(arg[0])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(arg[0].clone())
+  }
+
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u - {}", self.val.format_futhark()))
+  }
+
+  fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
+    // FIXME: snapshot.
+    arg_adj[0] += out_adj._memcpy();
+    Ok(FutharkThunkAdj::Spec)
+  }
+}
+
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct RSubScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
@@ -1438,12 +1567,16 @@ impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1453,9 +1586,9 @@ impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u - {}", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u - {}", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1463,7 +1596,7 @@ impl FutharkThunkSpec for RSubScalarF32FutThunkSpec {
     arg_adj[0] += out_adj._memcpy();
     Ok(FutharkThunkAdj::Spec)
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct SubFutThunkSpec;
@@ -1477,12 +1610,16 @@ impl FutharkThunkSpec for SubFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != arg[1].ndim() {
@@ -1507,8 +1644,8 @@ impl FutharkThunkSpec for SubFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map2(abi, arg[0], arg[1], r"-")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map2(arg[0], arg[1], r"-")
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1531,12 +1668,16 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != self.mono.ndim() {
@@ -1579,7 +1720,7 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME
     //FutharkThunkGenCode::nd_broadcast_map2_v0(arg[0], arg[1], r"-")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
@@ -1587,7 +1728,7 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))*/
-    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) - ({}.{} v)",
+    self.mono.gen_futhark(arg[0], arg[1], format!(r"\u v -> ({}.{} u) - ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -1606,12 +1747,16 @@ impl FutharkThunkSpec for MulScalarFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -1621,10 +1766,10 @@ impl FutharkThunkSpec for MulScalarFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
     //let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u * {}", self.val.format_futhark()))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u * {}", self.val.format_futhark()))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1633,7 +1778,7 @@ impl FutharkThunkSpec for MulScalarFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct MulScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
@@ -1645,12 +1790,12 @@ impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1660,17 +1805,17 @@ impl FutharkThunkSpec for MulScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u * {}", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u * {}", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj * self.val.0;
     Ok(FutharkThunkAdj::Spec)
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct MulFutThunkSpec;
@@ -1684,12 +1829,16 @@ impl FutharkThunkSpec for MulFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != arg[1].ndim() {
@@ -1714,8 +1863,8 @@ impl FutharkThunkSpec for MulFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map2(abi, arg[0], arg[1], r"*")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map2(arg[0], arg[1], r"*")
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1737,12 +1886,16 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != self.mono.ndim() {
@@ -1785,14 +1938,14 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
     /*FutharkThunkGenCode::nd_broadcast_map2(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))*/
-    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
+    self.mono.gen_futhark(arg[0], arg[1], format!(r"\u v -> ({}.{} u) * ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -1811,12 +1964,16 @@ impl FutharkThunkSpec for LDivScalarFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: self.val.dtype()})
@@ -1826,10 +1983,10 @@ impl FutharkThunkSpec for LDivScalarFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: self.val.dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {} / u", self.val.format_futhark()))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} / u", self.val.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1850,12 +2007,12 @@ impl FutharkThunkSpec for LDivScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1865,10 +2022,10 @@ impl FutharkThunkSpec for LDivScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {} / u", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} / u", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1879,6 +2036,48 @@ impl FutharkThunkSpec for LDivScalarF32FutThunkSpec {
 }*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct RDivScalarFutThunkSpec { pub val: ScalarVal_ }
+
+impl FutharkThunkSpec for RDivScalarFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.right_div_scalar")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
+    let mut abi = Abi::default();
+    abi.arityin = 1;
+    abi.arityout = 1;
+    abi
+  }*/
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: arg[0].ndim, dtype: self.val.dtype()})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: self.val.dtype()})
+  }
+
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    // FIXME: param.
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u / {}", self.val.format_futhark()))
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
+    arg_adj[0] += out_adj / self.val;
+    Ok(FutharkThunkAdj::Spec)
+  }
+}
+
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct RDivScalarF32FutThunkSpec { pub val: TotalOrd<f32> }
 
 impl FutharkThunkSpec for RDivScalarF32FutThunkSpec {
@@ -1890,12 +2089,12 @@ impl FutharkThunkSpec for RDivScalarF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -1905,17 +2104,17 @@ impl FutharkThunkSpec for RDivScalarF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: f32::dtype()})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
     let fmt = FutharkNumFormatter::default();
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u / {}", fmt.format(&self.val)))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u / {}", fmt.format(&self.val)))
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     arg_adj[0] += out_adj / self.val.0;
     Ok(FutharkThunkAdj::Spec)
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct DivFutThunkSpec;
@@ -1929,12 +2128,16 @@ impl FutharkThunkSpec for DivFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != arg[1].ndim() {
@@ -1959,8 +2162,8 @@ impl FutharkThunkSpec for DivFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map2(abi, arg[0], arg[1], r"/")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map2(arg[0], arg[1], r"/")
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -1983,12 +2186,16 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != self.mono.ndim() {
@@ -2031,7 +2238,7 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME
     //FutharkThunkGenCode::nd_broadcast_map2_v0(arg[0], arg[1], r"/")
     let dtype = arg[0].dtype.max(arg[1].dtype).unwrap();
@@ -2039,7 +2246,7 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))*/
-    self.mono.gen_futhark(abi, arg[0], arg[1], format!(r"\u v -> ({}.{} u) / ({}.{} v)",
+    self.mono.gen_futhark(arg[0], arg[1], format!(r"\u v -> ({}.{} u) / ({}.{} v)",
         dtype.format_futhark(), arg[0].dtype.format_futhark(),
         dtype.format_futhark(), arg[1].dtype.format_futhark(),
     ))
@@ -2058,12 +2265,16 @@ impl FutharkThunkSpec for NegFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2073,8 +2284,8 @@ impl FutharkThunkSpec for NegFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> -u")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> -u")
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2095,12 +2306,16 @@ impl FutharkThunkSpec for NegF16FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     assert_eq!(arg[0].dtype, Dtype::Fp16);
@@ -2112,8 +2327,8 @@ impl FutharkThunkSpec for NegF16FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> f16.from_bits ((f16.to_bits u) ^ 0x8000u16)")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> f16.from_bits ((f16.to_bits u) ^ 0x8000u16)")
   }
 
   fn pop_adj(&self, _arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2134,12 +2349,16 @@ impl FutharkThunkSpec for SquareFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2149,8 +2368,8 @@ impl FutharkThunkSpec for SquareFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], r"\u -> u * u")
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> u * u")
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2176,12 +2395,16 @@ impl FutharkThunkSpec for RecipFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2191,8 +2414,8 @@ impl FutharkThunkSpec for RecipFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.recip", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.recip", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2213,12 +2436,16 @@ impl FutharkThunkSpec for SqrtFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2228,8 +2455,8 @@ impl FutharkThunkSpec for SqrtFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.sqrt", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.sqrt", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2252,12 +2479,16 @@ impl FutharkThunkSpec for RsqrtFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2267,9 +2498,9 @@ impl FutharkThunkSpec for RsqrtFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME FIXME
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> {}.recip ({}.sqrt u)",
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {}.recip ({}.sqrt u)",
         arg[0].dtype.format_futhark(),
         arg[0].dtype.format_futhark(),
     ))
@@ -2294,12 +2525,16 @@ impl FutharkThunkSpec for CosFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2309,8 +2544,8 @@ impl FutharkThunkSpec for CosFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.cos", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.cos", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2331,12 +2566,16 @@ impl FutharkThunkSpec for SinFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2346,8 +2585,8 @@ impl FutharkThunkSpec for SinFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.sin", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.sin", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2368,12 +2607,16 @@ impl FutharkThunkSpec for ExpFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2383,8 +2626,8 @@ impl FutharkThunkSpec for ExpFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.exp", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.exp", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2405,12 +2648,16 @@ impl FutharkThunkSpec for LogisticFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -2420,8 +2667,8 @@ impl FutharkThunkSpec for LogisticFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> 1 / (1 + ({}.exp (-u)))",
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> 1 / (1 + ({}.exp (-u)))",
         arg[0].dtype.format_futhark(),
     ))
   }
@@ -2447,12 +2694,16 @@ impl FutharkThunkSpec for StandardSiluFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -2462,8 +2713,8 @@ impl FutharkThunkSpec for StandardSiluFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u / (1 + ({}.exp (-u)))", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u / (1 + ({}.exp (-u)))", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2488,12 +2739,16 @@ impl FutharkThunkSpec for TanhFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2503,8 +2758,8 @@ impl FutharkThunkSpec for TanhFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> (({}.exp u) - ({}.exp (-u))) / (({}.exp u) + ({}.exp (-u)))",
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> (({}.exp u) - ({}.exp (-u))) / (({}.exp u) + ({}.exp (-u)))",
         arg[0].dtype.format_futhark(),
         arg[0].dtype.format_futhark(),
         arg[0].dtype.format_futhark(),
@@ -2525,12 +2780,16 @@ impl FutharkThunkSpec for PowiF32FutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: f32::dtype()})
@@ -2540,9 +2799,9 @@ impl FutharkThunkSpec for PowiF32FutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME FIXME
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"\u -> u ** (f32.i64 {})", self.exp))
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u ** (f32.i64 {})", self.exp))
   }
 }
 
@@ -2558,12 +2817,16 @@ impl FutharkThunkSpec for LogFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: arg[0].ndim, dtype: arg[0].dtype})
@@ -2573,8 +2836,8 @@ impl FutharkThunkSpec for LogFutThunkSpec {
     Ok(CellType{shape: arg[0].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    FutharkThunkGenCode::flat_map(abi, arg[0], format!(r"{}.log", arg[0].dtype.format_futhark()))
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"{}.log", arg[0].dtype.format_futhark()))
   }
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
@@ -2595,12 +2858,16 @@ impl FutharkThunkSpec for FlatSumFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(Dim{ndim: 0, dtype: arg[0].dtype})
@@ -2610,9 +2877,9 @@ impl FutharkThunkSpec for FlatSumFutThunkSpec {
     Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     /*match arg[0].ndim {
       0 => {
         let mut code = FutharkThunkGenCode::default();
@@ -2675,12 +2942,16 @@ impl FutharkThunkSpec for InnerMeanFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     let mut ndim = arg[0].ndim();
@@ -2703,9 +2974,9 @@ impl FutharkThunkSpec for InnerMeanFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -2777,12 +3048,16 @@ impl FutharkThunkSpec for InnerSoftmaxFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0].clone())
@@ -2792,9 +3067,9 @@ impl FutharkThunkSpec for InnerSoftmaxFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -2902,12 +3177,16 @@ impl FutharkThunkSpec for InnerSoftmaxPostAdjFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // FIXME
@@ -2919,10 +3198,10 @@ impl FutharkThunkSpec for InnerSoftmaxPostAdjFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -2972,12 +3251,16 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if !arg[1].dtype.is_uint() {
@@ -2999,10 +3282,10 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     Ok(CellType{shape: arg[1].shape.clone(), dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -3080,12 +3363,16 @@ impl FutharkThunkSpec for InnerConcatFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() != arg[1].ndim() {
@@ -3117,10 +3404,10 @@ impl FutharkThunkSpec for InnerConcatFutThunkSpec {
     Ok(CellType{shape, dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -3163,12 +3450,16 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0].clone())
@@ -3178,9 +3469,9 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -3245,12 +3536,16 @@ impl FutharkThunkSpec for InnerTransposeFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() < 2 {
@@ -3269,9 +3564,9 @@ impl FutharkThunkSpec for InnerTransposeFutThunkSpec {
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -3310,12 +3605,16 @@ impl FutharkThunkSpec for OnlineMovingAverageInitFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -3325,10 +3624,10 @@ impl FutharkThunkSpec for OnlineMovingAverageInitFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> {} * (u - v) + v", self.scale.format_futhark())
     )
@@ -3349,12 +3648,16 @@ impl FutharkThunkSpec for OnlineMovingAverageSquareInitFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -3364,10 +3667,10 @@ impl FutharkThunkSpec for OnlineMovingAverageSquareInitFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> {} * (u * u - v) + v", self.scale.format_futhark())
     )
@@ -3392,12 +3695,16 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 2;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -3407,11 +3714,11 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
         format!(r"\u v w -> (1 - {}) * w + ({} * ({} / {})) * (u / (({}.sqrt v) + {} * {}))",
             self.lamda.format_futhark(),
@@ -3442,12 +3749,16 @@ impl FutharkThunkSpec for BlockPadFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].ndim() < 3 {
@@ -3475,9 +3786,9 @@ impl FutharkThunkSpec for BlockPadFutThunkSpec {
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let pad_outer = self.new_block[0] - self.org_block[0];
     let pad_inner = self.new_block[1] - self.org_block[1];
@@ -3564,12 +3875,16 @@ impl FutharkThunkSpec for BlockTriElemAffineFutThunkSpec {
     Some(ThunkCostR0::Space)
   }
 
-  fn abi(&self) -> Abi {
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  /*fn abi(&self) -> Abi {
     let mut abi = Abi::default();
     abi.arityin = 1;
     abi.arityout = 1;
     abi
-  }
+  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     // FIXME
@@ -3581,9 +3896,9 @@ impl FutharkThunkSpec for BlockTriElemAffineFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, abi: &mut FutAbi, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
@@ -3657,8 +3972,8 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     Some("block_matmul")
   }
 
-  fn arity(&self) -> (u16, u16) {
-    (2, 1)
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -4352,8 +4667,8 @@ impl ThunkSpec for MemcpyThunkSpec {
     Some("memcpy")
   }
 
-  fn arity(&self) -> (u16, u16) {
-    (1, 1)
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
