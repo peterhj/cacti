@@ -6,7 +6,6 @@ use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::{cuda_memcpy_async, cublas_gemm_batched};
 use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F, CUDA_R_16BF};
 
-use futhark_ffi::{Abi, AbiOutput, AbiInput, AbiArrayRepr, AbiScalarType};
 //use futhark_syntax::{Exp};
 
 use std::borrow::{Cow};

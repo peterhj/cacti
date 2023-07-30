@@ -26,10 +26,10 @@ use futhark_ffi::{
   bindings::ObjectFFI,
   Backend as FutBackend,
   MulticoreBackend,
-  Abi as FutAbi,
-  AbiOutput as FutAbiOutput,
-  AbiInput as FutAbiInput,
-  AbiArrayRepr as FutAbiArrayRepr,
+  //Abi as FutAbi,
+  //AbiOutput as FutAbiOutput,
+  //AbiInput as FutAbiInput,
+  //AbiArrayRepr as FutAbiArrayRepr,
   AbiScalarType as FutAbiScalarType,
   AbiScalar as FutAbiScalar,
   AbiSpace as FutAbiSpace,
@@ -1155,8 +1155,8 @@ impl FutharkThunkGenCode {
     Ok(())
   }
 
-  pub fn nd_replicate<S: Borrow<str>>(abi: &mut FutAbi, out0: Dim, val: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
-    abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+  pub fn nd_replicate<S: Borrow<str>>(/*abi: &mut FutAbi,*/ out0: Dim, val: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
+    //abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -1206,9 +1206,9 @@ impl FutharkThunkGenCode {
     Ok(())
   }
 
-  pub fn nd_map<S: Borrow<str>>(abi: &mut FutAbi, arg0: Dim, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
-    abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
-    abi.set_arg_arr(0, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+  pub fn nd_map<S: Borrow<str>>(/*abi: &mut FutAbi,*/ arg0: Dim, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
+    //abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    //abi.set_arg_arr(0, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -1250,10 +1250,10 @@ impl FutharkThunkGenCode {
     Ok(())
   }
 
-  pub fn nd_map2<S: Borrow<str>>(abi: &mut FutAbi, arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
-    abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
-    abi.set_arg_arr(0, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
-    abi.set_arg_arr(1, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+  pub fn nd_map2<S: Borrow<str>>(/*abi: &mut FutAbi,*/ arg0: Dim, arg1: Dim, lam: S) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
+    //abi.set_out_arr(0, FutAbiOutput::Pure, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    //abi.set_arg_arr(0, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
+    //abi.set_arg_arr(1, FutAbiInput::Shared, FutAbiArrayRepr::Nd, FutAbiScalarType::Unspec);
     FutharkThunkGenCode::nd_map2_(r"{%0}", arg0, r"{%1}", arg1, r"{%2}", lam)
   }
 
