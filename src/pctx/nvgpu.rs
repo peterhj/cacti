@@ -275,10 +275,11 @@ pub struct NvGpuPCtx {
 
 impl Drop for NvGpuPCtx {
   fn drop(&mut self) {
-    if cfg_debug() { println!("DEBUG: NvGpuPCtx::drop: mem pool front={} back={}",
+    println!("INFO:  NvGpuPCtx::drop: mem pool usage: front={} back={} out of total reserve={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.back_cursor.get(),
-    ); }
+        self.mem_pool.reserve_sz,
+    );
   }
 }
 

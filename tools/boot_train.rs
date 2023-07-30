@@ -62,28 +62,82 @@ fn main() {
     grad.push(g);
   }
   grad.reverse();
+  for (p, g) in param.iter().zip(grad.iter()) {
+    println!("boot: param={:?} grad={:?} ty={:?}", p, g, p.type_());
+  }
+  let mut adamw = AdamW::from(adamw_cfg);
+  adamw.master = Vec::with_capacity(param.len());
+  adamw.grad_avg = Vec::with_capacity(param.len());
+  adamw.grad2_avg = Vec::with_capacity(param.len());
+  for p in param.iter() {
+    let p_ = StableCell::from(p.type_().cast(f32::dtype()));
+    let g_ = StableCell::from(p.type_().cast(f32::dtype()));
+    let g2 = StableCell::from(p.type_().cast(f32::dtype()));
+    println!("boot: master={:?} ty={:?} grad avg={:?} ty={:?} grad2 avg={:?} ty={:?}",
+        p_, p_.type_(), g_, g_.type_(), g2, g2.type_());
+    adamw.master.push(p_);
+    adamw.grad_avg.push(g_);
+    adamw.grad2_avg.push(g2);
+  }
   let mut param_log2_hist = Vec::with_capacity(param.len());
   let mut param_nan_count = Vec::with_capacity(param.len());
   let mut grad_log2_hist = Vec::with_capacity(param.len());
   let mut grad_nan_count = Vec::with_capacity(param.len());
-  for (p, g) in param.iter().zip(grad.iter()) {
-    println!("boot: param={:?} grad={:?} ty={:?}", p, g, p.type_());
-  }
-  let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
+  let grad_upscale = 1024.0_f32;
+  println!("boot: grad upscale: {:?}", grad_upscale);
+  //let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
+  //let loss_scale = (1.0_f32 / 256.0_f32) * grad_upscale;
+  let loss_scale = grad_upscale / (text_tok.len() - 1) as f32;
   println!("boot: loss scale: {:?}", loss_scale);
-  let mut adamw = AdamW::from(adamw_cfg);
   for iter_nr in 0 .. 1 {
-    println!("boot: start iter...");
+    println!("boot: start iter_nr={}", iter_nr);
     reset();
     if iter_nr == 0 {
       for (cel, _) in inv_matches.iter() {
         cel.mem_set_yield_();
       }
+      smp_scope().with(|_| {
+        for (p, p_) in param.iter().zip(adamw.master.iter()) {
+          println!("boot: param={:?} ty={:?} master={:?} ty={:?}",
+              p, p.type_(), p_, p_.type_());
+          p_.set_cast(p);
+        }
+        for g_ in adamw.grad_avg.iter() {
+          g_.set_zeros();
+        }
+        for g2 in adamw.grad2_avg.iter() {
+          g2.set_zeros();
+        }
+      });
       model.init();
     } else {
-      for (cel, _) in inv_matches.iter() {
+      /*for (cel, _) in inv_matches.iter() {
         cel.cache();
-      }
+      }*/
+      smp_scope().with(|_| {
+        adamw.state.iter_nr += 1;
+        assert_eq!(adamw.state.iter_nr, iter_nr);
+        // FIXME: zero out the zero-th row of the embed grad.
+        for ((((g, g_), g2), p_), p) in
+            grad.iter()
+            .zip(adamw.grad_avg.iter())
+            .zip(adamw.grad2_avg.iter())
+            .zip(adamw.master.iter())
+            .zip(param.iter())
+            .rev()
+        {
+          g_.init_online_prescale_average(g, 1.0 / grad_upscale, adamw.state.alpha1);
+          g2.init_online_prescale_square_average(g, 1.0 / grad_upscale, adamw.state.alpha2);
+          p_.init_online_adamw_update32(g_, g2,
+              adamw.state.iter_nr,
+              adamw.state.lr,
+              adamw.state.alpha1,
+              adamw.state.alpha2,
+              adamw.state.lamda,
+              adamw.state.eps);
+          p.set_cast(p_);
+        }
+      });
       model.cache();
     }
     in_tok.mem_set_yield_();

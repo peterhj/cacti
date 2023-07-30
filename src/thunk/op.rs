@@ -3591,13 +3591,14 @@ impl FutharkThunkSpec for InnerTransposeFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct OnlineMovingAverageInitFutThunkSpec {
+pub struct OnlineAverageScaleInitFutThunkSpec {
+  pub rate: ScalarVal_,
   pub scale: ScalarVal_,
 }
 
-impl FutharkThunkSpec for OnlineMovingAverageInitFutThunkSpec {
+impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.online_moving_average.init")
+    Some("futhark.online_average_scale.init")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -3624,23 +3625,26 @@ impl FutharkThunkSpec for OnlineMovingAverageInitFutThunkSpec {
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
-        format!(r"\u v -> {} * (u - v) + v", self.scale.format_futhark())
+        format!(r"\u v -> v + {} * ({} * ({}.{} u) - v)",
+            self.rate.format_futhark(),
+            self.scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
     )
   }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct OnlineMovingAverageSquareInitFutThunkSpec {
+pub struct OnlineAverageSquareScaleInitFutThunkSpec {
+  pub rate: ScalarVal_,
   pub scale: ScalarVal_,
 }
 
-impl FutharkThunkSpec for OnlineMovingAverageSquareInitFutThunkSpec {
+impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.online_moving_average_square.init")
+    Some("futhark.online_average_square_scale.init")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -3667,11 +3671,16 @@ impl FutharkThunkSpec for OnlineMovingAverageSquareInitFutThunkSpec {
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
-        format!(r"\u v -> {} * (u * u - v) + v", self.scale.format_futhark())
+        format!(r"\u v -> v + {} * (({} * ({}.{} u)) * ({} * ({}.{} u)) - v)",
+            self.rate.format_futhark(),
+            self.scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+            self.scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
     )
   }
 }
@@ -3679,8 +3688,6 @@ impl FutharkThunkSpec for OnlineMovingAverageSquareInitFutThunkSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OnlineAdamWUpdateInitFutThunkSpec {
   pub signed_lr: ScalarVal_,
-  pub unbias1: ScalarVal_,
-  pub unbias2: ScalarVal_,
   pub lamda: ScalarVal_,
   pub eps: ScalarVal_,
 }
@@ -3718,14 +3725,12 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
     //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+    // FIXME: params.
     FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
-        format!(r"\u v w -> (1 - {}) * w + ({} * ({} / {})) * (u / (({}.sqrt v) + {} * {}))",
+        format!(r"\u v w -> (1 - {}) * w + {} * (u / (({}.sqrt v) + {}))",
             self.lamda.format_futhark(),
             self.signed_lr.format_futhark(),
-            self.unbias2.format_futhark(),
-            self.unbias1.format_futhark(),
             arg[1].dtype.format_futhark(),
-            self.unbias2.format_futhark(),
             self.eps.format_futhark(),
         )
     )

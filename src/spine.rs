@@ -109,6 +109,8 @@ pub enum SpineEntry {
   //Uneval(CellPtr),
   Unlive(CellPtr),
   Unsync(CellPtr),
+  //Fetch(_),
+  //Unfetch(_),
   // TODO
   Bot,
 }
@@ -186,6 +188,8 @@ pub enum SpineEntryName {
   //Uneval,
   Unlive,
   Unsync,
+  //Fetch,
+  //Unfetch,
   // TODO
   Bot,
 }
@@ -1951,7 +1955,7 @@ impl Spine {
               CellMode::Init => {}
               _ => panic!("bug")
             }*/
-            assert_eq!(e.state().clk.ctr(), self.ctr);
+            //assert_eq!(e.state().clk.ctr(), self.ctr);
             //assert!(e.state().flag.intro());
             assert!(!e.state().flag.seal());
             e.state().flag.set_intro();
@@ -1975,7 +1979,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.initialize(ctr, env, &tclo.arg, th, x, xclk);
+          let ret = te.pthunk.initialize(ctr, env, &tclo.arg, th, x, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Initialize: thunk not implemented");
@@ -2040,7 +2044,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.apply(ctr, env, &tclo.arg, th, x, xclk);
+          let ret = te.pthunk.apply(ctr, env, &tclo.arg, th, x, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Apply: thunk not implemented");
@@ -2100,7 +2104,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, xclk);
+          let ret = te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Accumulate: thunk not implemented");

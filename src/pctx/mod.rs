@@ -271,6 +271,16 @@ impl PCtx {
     max_locus
   }
 
+  #[cfg(not(feature = "nvgpu"))]
+  pub fn fastest_pmach(&self) -> PMach {
+    PMach::Smp
+  }
+
+  #[cfg(feature = "nvgpu")]
+  pub fn fastest_pmach(&self) -> PMach {
+    PMach::NvGpu
+  }
+
   /*//pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Weak<dyn InnerCell_>>, PMemErr> {}
   pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Rc<dyn InnerCell_>>, PMemErr> {
     match self.lpmatrix.find_lub((locus, PMach::_Top)) {

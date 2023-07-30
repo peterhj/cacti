@@ -1116,26 +1116,105 @@ impl Neg for StableCell {
 
 pub trait MathInitOps: Borrow<CellPtr> {
   #[track_caller]
-  fn init_online_moving_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T) {
+  fn init_online_prescale_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T, rate: T) {
     panick_wrap(|| {
-      unimplemented!();
+      let this = *self.borrow();
+      let val = *val.borrow();
+      let rate = rate.into_scalar_val_();
+      let scale = scale.into_scalar_val_();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(val);
+      ctx_pop_initialize_thunk(OnlineAverageScaleInitFutThunkSpec{rate, scale}, this)
     })
   }
 
   #[track_caller]
-  fn init_online_moving_average_squared<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T) {
+  fn init_online_prescale_square_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T, rate: T) {
     panick_wrap(|| {
-      unimplemented!();
+      let this = *self.borrow();
+      let val = *val.borrow();
+      let rate = rate.into_scalar_val_();
+      let scale = scale.into_scalar_val_();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(val);
+      ctx_pop_initialize_thunk(OnlineAverageSquareScaleInitFutThunkSpec{rate, scale}, this)
     })
   }
 
   #[track_caller]
-  fn init_online_adamw_update<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, emavg: V, emavg2: V, lr: T, alpha1: T, alpha2: T, lamda: T, eps: T) {
+  //fn init_online_adamw_update<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, emavg: V, emavg2: V, iter_nr: i64, lr: T, alpha1: T, alpha2: T, lamda: T, eps: T) {}
+  fn init_online_adamw_update32<V: Borrow<CellPtr>>(&self, emavg: V, emavg2: V, iter_nr: i32, lr: f32, alpha1: f32, alpha2: f32, lamda: f32, eps: f32) {
+    let unbias1 = if iter_nr <= 0 {
+      println!("ERROR: iter_online_adamw_update: invalid iter_nr={} (should be positive)", iter_nr);
+      panic!();
+    } else if iter_nr == 1 {
+      alpha1
+    } else {
+      1.0 - (1.0 - alpha1).powi(iter_nr)
+    };
+    let unbias2 = if iter_nr <= 0 {
+      println!("ERROR: iter_online_adamw_update: invalid iter_nr={} (should be positive)", iter_nr);
+      panic!();
+    } else if iter_nr == 1 {
+      alpha2.sqrt()
+    } else {
+      (1.0 - (1.0 - alpha2).powi(iter_nr)).sqrt()
+    };
     panick_wrap(|| {
-      unimplemented!();
+      let this = *self.borrow();
+      let emavg = *emavg.borrow();
+      let emavg2 = *emavg2.borrow();
+      let signed_lr = (-lr * (unbias2 / unbias1)).into_scalar_val_();
+      let lamda = lamda.into_scalar_val_();
+      let eps = (eps * unbias2).into_scalar_val_();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(emavg);
+      ctx_push_cell_arg(emavg2);
+      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lamda, eps}, this)
     })
   }
 }
+
+impl<L: Borrow<CellPtr>> MathInitOps for L {}
+
+pub trait MathSetOps: Borrow<CellPtr> {
+  #[track_caller]
+  fn set<R: Borrow<CellPtr>>(&self, rhs: R) {
+    panick_wrap(|| {
+      let this = *self.borrow();
+      let rhs = *rhs.borrow();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_apply_thunk(IdentityFutThunkSpec, this)
+    })
+  }
+
+  #[track_caller]
+  fn set_cast<R: Borrow<CellPtr>>(&self, rhs: R) {
+    panick_wrap(|| {
+      let this = *self.borrow();
+      let rhs = *rhs.borrow();
+      let ty = ctx_lookup_type(this);
+      let new_dtype = ty.dtype;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_apply_thunk(CastFutThunkSpec{new_dtype}, this)
+    })
+  }
+
+  #[track_caller]
+  fn set_zeros(&self) {
+    panick_wrap(|| {
+      let this = *self.borrow();
+      let ty = ctx_lookup_type(this);
+      assert!(ctx_clean_arg());
+      let val = ScalarVal_::zero(ty.dtype);
+      ctx_pop_apply_thunk_(SetScalarFutThunkSpec{val}, this, ty)
+    })
+  }
+}
+
+impl<L: Borrow<CellPtr>> MathSetOps for L {}
 
 pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   /*#[track_caller]
@@ -2009,6 +2088,15 @@ pub trait CastOps: Borrow<CellPtr> {
       }
     })
   }
+
+  /*#[track_caller]
+  fn set_cast<R: Borrow<CellPtr>>(&self, rhs: R) {
+    panick_wrap(|| {
+      let y = *self.borrow();
+      let x = *rhs.borrow();
+      unimplemented!();
+    })
+  }*/
 }
 
 impl<L: Borrow<CellPtr>> CastOps for L {}

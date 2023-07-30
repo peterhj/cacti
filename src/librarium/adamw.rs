@@ -26,7 +26,7 @@ impl Default for AdamWConfig {
 }
 
 pub struct AdamWState {
-  pub iter_nr: i64,
+  pub iter_nr: i32,
   pub lr: f32,
   pub alpha1: f32,
   pub alpha2: f32,
@@ -49,10 +49,12 @@ impl From<AdamWConfig> for AdamWState {
 
 pub struct AdamW {
   pub state: AdamWState,
-  //pub master: Vec<StableCell>,
-  pub master: HashSet<StableCell>,
+  pub master: Vec<StableCell>,
+  pub grad_avg: Vec<StableCell>,
+  pub grad2_avg: Vec<StableCell>,
+  /*pub master: HashSet<StableCell>,
   pub grad_avg: HashMap<StableCell, StableCell>,
-  pub grad2_avg: HashMap<StableCell, StableCell>,
+  pub grad2_avg: HashMap<StableCell, StableCell>,*/
 }
 
 impl From<AdamWConfig> for AdamW {
@@ -60,9 +62,12 @@ impl From<AdamWConfig> for AdamW {
     let state = AdamWState::from(cfg);
     AdamW{
       state,
-      master: HashSet::new(),
+      master: Vec::new(),
+      grad_avg: Vec::new(),
+      grad2_avg: Vec::new(),
+      /*master: HashSet::new(),
       grad_avg: HashMap::new(),
-      grad2_avg: HashMap::new(),
+      grad2_avg: HashMap::new(),*/
     }
   }
 }

@@ -2,7 +2,7 @@ use crate::algo::{HashMap, HashSet};
 use crate::cell::*;
 use crate::clock::*;
 use crate::panick::{panick_wrap};
-use crate::pctx::{Locus, MemReg};
+use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::*;
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
@@ -100,6 +100,7 @@ pub fn ctx_cfg_set_gpu_workspace_mem_per_10k(m: u16) {
 
 pub struct Ctx {
   pub ctr:      CtxCtr,
+  pub primary:  Cell<Option<PMach>>,
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
@@ -134,6 +135,7 @@ impl Ctx {
     if cfg_debug() { println!("DEBUG: Ctx::new"); }
     Ctx{
       ctr:      CtxCtr::new(),
+      primary:  Cell::new(None),
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
@@ -141,6 +143,18 @@ impl Ctx {
       timing:   TimingCtx::default(),
       debugctr: DebugCtrs::default(),
     }
+  }
+
+  pub fn _set_primary(&self, pmach: PMach) -> Option<PMach> {
+    let prev = self.primary.get();
+    self.primary.set(Some(pmach));
+    prev
+  }
+
+  pub fn _unset_primary(&self) -> Option<PMach> {
+    let prev = self.primary.get();
+    self.primary.set(None);
+    prev
   }
 }
 
@@ -283,6 +297,79 @@ pub fn break_() {
     spine.log.push(SpineEntry::Break_);*/
   }))
 }*/
+
+/*pub struct LocusScope {
+  pub loc: Locus,
+}
+
+impl Drop for LocusScope {
+  fn drop(&mut self) {
+  }
+}
+
+impl LocusScope {
+  #[track_caller]
+  pub fn new(loc: Locus) -> LocusScope {
+    TL_CTX.with(|ctx| {
+      unimplemented!();
+    })
+  }
+}
+
+#[track_caller]
+pub fn mem_scope() -> LocusScope {
+  panick_wrap(|| LocusScope::new(Locus::Mem))
+}*/
+
+pub struct PMachScope {
+  pub prev: Option<PMach>,
+}
+
+impl Drop for PMachScope {
+  fn drop(&mut self) {
+    TL_CTX.with(|ctx| {
+      match self.prev {
+        None => {
+          ctx._unset_primary();
+        }
+        Some(pm) => {
+          ctx._set_primary(pm);
+        }
+      }
+    })
+  }
+}
+
+impl PMachScope {
+  #[track_caller]
+  pub fn new(pmach: PMach) -> PMachScope {
+    TL_CTX.with(|ctx| {
+      let prev = ctx._set_primary(pmach);
+      PMachScope{prev}
+    })
+  }
+
+  pub fn with<F: FnMut(&PMachScope)>(&self, mut f: F) {
+    (f)(self);
+  }
+}
+
+#[track_caller]
+pub fn smp_scope() -> PMachScope {
+  panick_wrap(|| PMachScope::new(PMach::Smp))
+}
+
+#[cfg(feature = "nvgpu")]
+#[track_caller]
+pub fn gpu_scope() -> PMachScope {
+  nvgpu_scope()
+}
+
+#[cfg(feature = "nvgpu")]
+#[track_caller]
+pub fn nvgpu_scope() -> PMachScope {
+  panick_wrap(|| PMachScope::new(PMach::NvGpu))
+}
 
 pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
   TL_CTX.with(f)
@@ -824,7 +911,7 @@ pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
-        assert_eq!(e.ty, &oty_);
+        //assert_eq!(e.ty, &oty_);
         e.root
       }
     };
@@ -838,7 +925,7 @@ pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_
   })
 }
 
-pub fn ctx_pop_init_thunk<Th: ThunkSpec_ + 'static>(th: Th, /*out: CellPtr*/) -> CellPtr {
+pub fn ctx_pop_initialize_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) {
   TL_CTX.with(|ctx| {
     let mut dims = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
     let mut tys_ = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
@@ -865,11 +952,11 @@ pub fn ctx_pop_init_thunk<Th: ThunkSpec_ + 'static>(th: Th, /*out: CellPtr*/) ->
       Ok(ty_) => ty_
     };
     assert_eq!(odim, oty_.to_dim());
-    ctx_pop_init_thunk_(th, oty_)
+    ctx_pop_initialize_thunk_(th, out, oty_)
   })
 }
 
-pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /*out: CellPtr*/) -> CellPtr {
+pub fn ctx_pop_initialize_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_ty: CellType) {
   TL_CTX.with(|ctx| {
     let mut dims = Vec::with_capacity(ctx.thunkenv.borrow().arg.len());
     for &(arg, _) in ctx.thunkenv.borrow().arg.iter() {
@@ -891,16 +978,24 @@ pub fn ctx_pop_init_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType, /
     assert_eq!(rar, 1);
     //let tp = ctx.thunkenv.borrow_mut().insert_(ctx, ar_in, ar_out, dims, th);
     let tp = ctx.thunkenv.borrow_mut().lookup_or_insert(&ctx.ctr, lar, rar, dims, th);
-    let y = ctx.ctr.fresh_cel();
+    //let y = ctx.ctr.fresh_cel();
+    let y = out;
+    let yroot = match ctx.env.borrow().lookup_ref(y) {
+      None => panic!("bug"),
+      Some(e) => {
+        //assert_eq!(e.ty, &oty_);
+        e.root
+      }
+    };
     ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
+    assert_eq!(yroot, spine._deref(y));
     //spine.uninit(y);
     spine.initialize(y, tp);
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(y, y, yclk, tp, arg);
-    y
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
   })
 }
 
@@ -945,7 +1040,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
-        assert_eq!(e.ty, &oty_);
+        //assert_eq!(e.ty, &oty_);
         e.root
       }
     };
@@ -1037,6 +1132,7 @@ pub struct ThunkClosure {
   pub pthunk:   ThunkPtr,
   pub arg:      Vec<(CellPtr, Clock)>,
   pub out:      CellPtr,
+  pub pmach:    PMach,
 }
 
 #[derive(Default)]
@@ -1070,7 +1166,9 @@ impl CtxThunkEnv {
         // FIXME: where to typecheck?
         assert_eq!(arg.len(), te.pthunk.lar as usize);
         assert_eq!(1, te.pthunk.rar);
-        let tclo = ThunkClosure{pthunk: tp, arg, out: y};
+        let pmach = TL_CTX.with(|ctx| ctx.primary.get())
+            .unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
+        let tclo = ThunkClosure{pthunk: tp, arg, out: y, pmach};
         self.update.insert((yroot, yclk), tclo);
       }
     }

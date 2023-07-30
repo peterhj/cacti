@@ -34,6 +34,7 @@ use futhark_ffi::{
   AbiScalar as FutAbiScalar,
   AbiSpace as FutAbiSpace,
   EntryAbi as FutEntryAbi,
+  Array as FutArray,
   FutharkFloatFormatter,
 };
 #[cfg(feature = "nvgpu")]
@@ -1736,10 +1737,15 @@ impl FutharkThunkGenCode {
       _ => {}
     }
     if cfg.emit_out0_shape_param {
-      let dim = spec_dim[lar as usize];
       let prev_np = genabi.param_ct;
-      genabi.param_ct += dim.ndim as u16;
-      for d in 0 .. dim.ndim {
+      let dim = spec_dim[lar as usize];
+      let nd = match genabi.get_out(0) {
+        FutharkArrayRepr::Nd => dim.ndim,
+        FutharkArrayRepr::Flat => min(1, dim.ndim),
+        _ => unimplemented!()
+      };
+      genabi.param_ct += nd as u16;
+      for d in 0 .. nd {
         genabi.set_param(prev_np + d as u16, FutharkParam::Out0Shape, FutAbiScalarType::I64);
       }
     }
@@ -1806,9 +1812,76 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
     if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_setup_object: ctx done"); }
   }
 
-  fn _build_object(_ctr: &CtxCtr, _env: &mut CtxEnv, _config: &FutConfig, _name: Option<&str>, _source: &[String], _rst: Counter) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
+  fn _build_object(ctr: &CtxCtr, env: &mut CtxEnv, config: &FutConfig, name: Option<&str>, source: &[String], rst: Counter) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
     // FIXME FIXME
-    None
+    let t0 = Stopwatch::tl_stamp();
+    match config.build::<MulticoreBackend>(FutStage::Dylib, name, source) {
+      Err(e) => {
+        println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_build_object: build error: {:?}", e);
+        None
+      }
+      Ok(None) => panic!("bug"),
+      Ok(Some(mut obj)) => {
+        let t1 = Stopwatch::tl_stamp();
+        if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0); }
+        TL_CTX.with(|ctx| {
+          if rst.rst <= 0 {
+            panic!("bug");
+          } else if rst.rst == 1 {
+            ctx.timing.f_build1.borrow_mut().push(t1 - t0);
+          } else {
+            ctx.timing.f_build.borrow_mut().push(t1 - t0);
+          }
+        });
+        let t0 = t1;
+        // NB: futhark object ctx may create constants that need to be tracked.
+        let mut consts = Vec::new();
+        let pstart = TL_PCTX.with(|pctx| {
+          pctx.ctr.next_addr()
+        });
+        unsafe { FutharkThunkImpl::<MulticoreBackend>::_setup_object(&mut obj); }
+        let t1 = Stopwatch::tl_stamp();
+        if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0); }
+        TL_CTX.with(|ctx| {
+          if rst.rst <= 0 {
+            panic!("bug");
+          } else if rst.rst == 1 {
+            ctx.timing.f_setup1.borrow_mut().push(t1 - t0);
+          } else {
+            ctx.timing.f_setup.borrow_mut().push(t1 - t0);
+          }
+        });
+        let pfin = TL_PCTX.with(|pctx| {
+          pctx.ctr.peek_addr()
+        });
+        for p in (pstart.to_unchecked() ..= pfin.to_unchecked()) {
+          let p = PAddr::from_unchecked(p);
+          let x = ctr.fresh_cel();
+          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object: const: {:?} {:?}", p, x); }
+          // FIXME: futhark consts should be marked pin.
+          TL_PCTX.with(|pctx| {
+            // FIXME: the type of the constant could probably be inferred,
+            // but easier to defer it until unification.
+            let ty = CellType::top();
+            let mut pcel = PCell::new(x, ty.clone());
+            // FIXME FIXME: could be gpu pmach (for page-locked mem).
+            //let pmach = PMach::Smp;
+            let pmach = PMach::NvGpu;
+            let locus = Locus::Mem;
+            let base_clk: Clock = rst.into();
+            let xclk = base_clk.init_once();
+            pcel.push_new_replica(x, xclk, locus, pmach, p);
+            env.insert_phy(x, ty, pcel);
+          });
+          consts.push((p, StableCell::retain(env, x)));
+          // FIXME: what else?
+        }
+        if consts.len() > 0 {
+          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object: consts={:?}", consts); }
+        }
+        Some((obj, consts))
+      }
+    }
   }
 }
 
@@ -2286,10 +2359,532 @@ impl FutharkThunkImpl<MulticoreBackend> {
       self._try_build(ctr, env, mode, oclk.ctr());
     }
     if self.objects.borrow().find(mode).is_none() {
-      panic!("bug: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
+      println!("BUG: FutharkThunkImpl::<MulticoreBackend>::apply: build error");
+      panic!();
+    }
+    let mut objects = self.objects.borrow_mut();
+    let mut object = objects.find_mut(mode).unwrap().1;
+    let &mut FutharkThunkObject{ref genabi, ref mut obj, ref mut out0_tag, ..} = &mut object;
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: hash={}", &obj.src_hash); }
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg={:?}", arg); }
+    let (lar, rar) = (self.lar, self.rar);
+    let extra_lar = match mode {
+      ThunkMode::Apply => {
+        if 1 != rar {
+          unimplemented!();
+        }
+        0
+      }
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => {
+        assert_eq!(1, rar);
+        1
+      }
+      _ => unimplemented!()
+    };
+    assert_eq!(arg.len(), lar as usize);
+    assert_eq!(genabi.arityin, lar + extra_lar);
+    let mut arg_ty_: Vec<CellType> = Vec::with_capacity(genabi.arityin as usize);
+    let mut arg_arr: Vec<UnsafeCell<FutArray>> = Vec::with_capacity(genabi.arityin as usize);
+    'for_k: for k in 0 .. lar {
+      let xroot = match env.lookup_ref(arg[k as usize].0) {
+        None => panic!("bug"),
+        Some(e) => e.root
+      };
+      for j in 0 .. k as usize {
+        match env.lookup_ref(arg[j].0) {
+          None => panic!("bug"),
+          Some(e_j) => {
+            let xroot_j = e_j.root;
+            if xroot_j == xroot {
+              if _cfg_debug_mode(mode) {
+              println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xroot[{}]={:?} xroot[{}]={:?}",
+                  j, xroot_j, k, xroot);
+              }
+              match env.lookup_ref(arg[k as usize].0) {
+                None => panic!("bug"),
+                Some(e) => {
+                  if &arg_ty_[j] == e.ty {
+                    arg_ty_.push(arg_ty_[j].clone());
+                    let a = arg_arr[j].get_mut().clone();
+                    arg_arr.push(a.into());
+                  } else {
+                    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xty[{}]={:?} xty[{}]={:?}",
+                        j, &arg_ty_[j], k, e.ty);
+                    unimplemented!();
+                  }
+                  continue 'for_k;
+                }
+              }
+            }
+          }
+        }
+      }
+      let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1) {
+        None => panic!("bug"),
+        Some(e) => e
+      };
+      assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
+      let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
+        (FutharkArrayRepr::Nd, 0) |
+        (FutharkArrayRepr::Nd, 1) |
+        (FutharkArrayRepr::Flat, _) => FutArray::new_1d(),
+        (FutharkArrayRepr::Nd, 2) => FutArray::new_2d(),
+        (FutharkArrayRepr::Nd, 3) => FutArray::new_3d(),
+        (FutharkArrayRepr::Nd, 4) => FutArray::new_4d(),
+        _ => unimplemented!()
+      };
+      TL_PCTX.with(|pctx| {
+        let loc = Locus::Mem;
+        match e.cel_ {
+          &mut Cell_::Phy(.., ref mut pcel) => {
+            // FIXME FIXME
+            //let pmach = PMach::Smp;
+            let pmach = PMach::NvGpu;
+            let addr = pcel.get(arg[k as usize].0, arg[k as usize].1, &e.ty, loc, pmach);
+            //let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();
+            match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
+              Some(reg) => {
+                a.set_mem_parts(reg.ptr, reg.sz);
+              }
+              None => unimplemented!()
+            }
+          }
+          _ => panic!("bug")
+        }
+      });
+      if self.spec_dim[k as usize].ndim == 0 {
+        a.set_shape(&[1]);
+      } else {
+        match genabi.get_arg(k) {
+          FutharkArrayRepr::Nd => {
+            a.set_shape(&e.ty.shape);
+          }
+          FutharkArrayRepr::Flat => {
+            a.set_shape(&[e.ty.flat_len()]);
+          }
+          _ => unimplemented!()
+        }
+      }
+      arg_ty_.push(e.ty);
+      arg_arr.push(a.into());
+    }
+    //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr={:?}", &arg_arr);
+    let mut arg_ndim = Vec::with_capacity(arg_arr.len());
+    for (k, arr) in arg_arr.iter_mut().enumerate() {
+      if _cfg_debug_mode(mode) {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr[{}]={:?}",
+          k, arr.get_mut());
+      }
+      arg_ndim.push(arr.get_mut()._unset_ndim());
+    }
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out={:?} oclk={:?}", out, oclk); }
+    assert_eq!(genabi.arityout, rar);
+    let mut out_ty_ = Vec::with_capacity(genabi.arityout as usize);
+    let mut out_arr: Vec<UnsafeCell<FutArray>> = Vec::with_capacity(genabi.arityout as usize);
+    let mut out_org = None;
+    for k in 0 .. genabi.arityout {
+      assert_eq!(k, 0);
+      let ty_ = match env.lookup_ref(out) {
+        None => panic!("bug"),
+        Some(e) => {
+          if e.ty.is_top() {
+            match spec_.out_ty_(&arg_ty_) {
+              Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
+              Err(_) => panic!("bug"),
+              Ok(ty_) => ty_
+            }
+          } else {
+            e.ty.clone()
+          }
+        }
+      };
+      assert_eq!(self.spec_dim[(lar + k) as usize], ty_.to_dim());
+      match mode {
+        // FIXME: if we no longer match on mode, then the pwrite check
+        // needs to test which of the args are also outs.
+        ThunkMode::Accumulate |
+        ThunkMode::Initialize => {
+          // FIXME: double check that out does not alias any args.
+          let e = match env.pwrite_ref(out, oclk) {
+            None => panic!("bug"),
+            Some(e) => e
+          };
+          assert_eq!(self.spec_dim[(lar + k) as usize], e.ty.to_dim());
+          assert_eq!(genabi.get_out(k), genabi.get_arg(lar + k));
+          let a = match (genabi.get_arg(lar + k), self.spec_dim[(lar + k) as usize].ndim) {
+            (FutharkArrayRepr::Nd, 0) |
+            (FutharkArrayRepr::Nd, 1) |
+            (FutharkArrayRepr::Flat, _) => FutArray::new_1d(),
+            (FutharkArrayRepr::Nd, 2) => FutArray::new_2d(),
+            (FutharkArrayRepr::Nd, 3) => FutArray::new_3d(),
+            (FutharkArrayRepr::Nd, 4) => FutArray::new_4d(),
+            _ => unimplemented!()
+          };
+          TL_PCTX.with(|pctx| {
+            let loc = Locus::Mem;
+            match e.cel_ {
+              &mut Cell_::Phy(.., ref mut pcel) => {
+                // FIXME FIXME
+                //let pmach = PMach::Smp;
+                let pmach = PMach::NvGpu;
+                let addr = pcel.get(out, oclk, &e.ty, loc, pmach);
+                //let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();
+                match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
+                  Some(reg) => {
+                    a.set_mem_parts(reg.ptr, reg.sz);
+                    out_org = Some((addr, reg.ptr, reg.sz));
+                  }
+                  None => unimplemented!()
+                }
+              }
+              _ => panic!("bug")
+            }
+          });
+          if self.spec_dim[(lar + k) as usize].ndim == 0 {
+            a.set_shape(&[1]);
+          } else {
+            match genabi.get_arg(lar + k) {
+              FutharkArrayRepr::Nd => {
+                a.set_shape(&e.ty.shape);
+              }
+              FutharkArrayRepr::Flat => {
+                a.set_shape(&[e.ty.flat_len()]);
+              }
+              _ => unimplemented!()
+            }
+          }
+          arg_ty_.push(ty_.clone());
+          arg_arr.push(a.into());
+        }
+        _ => {}
+      }
+      out_ty_.push(ty_);
+      out_arr.push(FutArray::null().into());
+    }
+    for (k, arr) in (&mut arg_arr[lar as usize ..]).iter_mut().enumerate() {
+      if _cfg_debug_mode(mode) {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr[{}]={:?} (out in-place)",
+          lar as usize + k, arr.get_mut());
+      }
+      arg_ndim.push(arr.get_mut()._unset_ndim());
+    }
+    //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out_arr={:?}", &out_arr);
+    if _cfg_debug_mode(mode) {
+    for (k, arr) in out_arr.iter_mut().enumerate() {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out_arr[{}]={:?}", k, arr.get_mut());
+    }
+    }
+    // FIXME: implicit output shape params during gen.
+    let np = genabi.param_ct as usize;
+    let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
+    param.resize(np, FutAbiScalar::Unspec);
+    //spec_.set_param(&mut param);
+    let mut flat_out0_shape = false;
+    for pidx in 0 .. np {
+      match genabi.get_param(pidx as _) {
+        (FutharkParam::Out0Shape, FutAbiScalarType::I64) => {
+          match genabi.get_out(0) {
+            FutharkArrayRepr::Nd => {
+              param[pidx] = FutAbiScalar::I64(out_ty_[0].shape[pidx].into());
+            }
+            FutharkArrayRepr::Flat => {
+              assert!(!flat_out0_shape);
+              param[pidx] = FutAbiScalar::I64(out_ty_[0].flat_len().into());
+              flat_out0_shape = true;
+            }
+            _ => unimplemented!()
+          }
+        }
+        _ => unimplemented!()
+      }
+    }
+    match mode {
+      ThunkMode::Accumulate => {
+        TL_CTX.with(|ctx| {
+          let mut h = ctx.debugctr.accumulate_hashes.borrow_mut();
+          match h.get_mut(&obj.src_hash) {
+            None => {
+              h.insert(obj.src_hash.clone(), 1);
+            }
+            Some(ct) => {
+              *ct += 1;
+            }
+          }
+        });
+      }
+      _ => {}
+    }
+    TL_PCTX.with(|pctx| {
+      // TODO: barrier?
+    });
+    let t0 = Stopwatch::tl_stamp();
+    obj.reset();
+    if _cfg_debug_mode(mode) {
+    let tmp_t1 = Stopwatch::tl_stamp();
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter:   reset elapsed: {:.09} s", tmp_t1 - t0);
+    }
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: enter kernel..."); }
+    let eabi = genabi.to_eabi(FutAbiSpace::Default);
+    let o_ret = obj.enter_kernel(eabi, &param, &arg_arr, &out_arr);
+    if o_ret.is_err() {
+      // FIXME FIXME: error handling.
+      println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: runtime error");
+      if let Some(e) = obj.error().map(|c| safe_ascii(c.to_bytes())) {
+        println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: runtime error: {}", e);
+      }
+      panic!();
+    }
+    let may_fail = obj.may_fail();
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: may fail? {:?}", may_fail); }
+    if may_fail {
+      let ret = obj.sync();
+      if ret.is_err() {
+        // FIXME FIXME: failure handling.
+        println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: runtime failure: {:?}", ret);
+        if let Some(e) = obj.error().map(|c| safe_ascii(c.to_bytes())) {
+          println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: runtime failure: {}", e);
+        }
+        panic!();
+      }
+    }
+    obj.release();
+    let t1 = Stopwatch::tl_stamp();
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
+    TL_CTX.with(|ctx| {
+      if oclk.rst <= 0 {
+        panic!("bug");
+      } else if oclk.rst == 1 {
+        ctx.timing.futhark1.borrow_mut().push(t1 - t0);
+      } else {
+        ctx.timing.futhark.borrow_mut().push(t1 - t0);
+      }
+    });
+    drop(obj);
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: ret={:?}", o_ret); }
+    //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out={:?} oclk={:?}", out, oclk);
+    for (k, arr) in (&mut arg_arr[ .. lar as usize]).iter_mut().enumerate() {
+      arr.get_mut()._set_ndim(arg_ndim[k]);
+      if _cfg_debug_mode(mode) {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr[{}]={:?}",
+          k, arr.get_mut());
+      }
+    }
+    for (k, arr) in (&mut arg_arr[lar as usize .. ]).iter_mut().enumerate() {
+      arr.get_mut()._set_ndim(arg_ndim[lar as usize + k]);
+      if _cfg_debug_mode(mode) {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr[{}]={:?} (out in-place)",
+          lar as usize + k, arr.get_mut());
+      }
+    }
+    // FIXME: at this point, the remaining memblocks are the outputs.
+    // but, if any of the inputs were clobbered, then we have to unset those.
+    // so, do some kind of unification here.
+    for k in 0 .. genabi.arityout {
+      assert!(!out_arr[k as usize].get_mut().as_ptr().is_null());
+      match genabi.get_out(k) {
+        FutharkArrayRepr::Nd => {
+          out_arr[k as usize].get_mut()._set_ndim(max(1, out_ty_[k as usize].ndim()));
+        }
+        FutharkArrayRepr::Flat => {
+          out_arr[k as usize].get_mut()._set_ndim(1);
+        }
+        _ => unimplemented!()
+      }
+    }
+    //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out_arr={:?}", &out_arr);
+    if _cfg_debug_mode(mode) {
+    for (k, arr) in out_arr.iter_mut().enumerate() {
+      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out_arr[{}]={:?}", k, arr.get_mut());
+    }
+    }
+    // TODO TODO
+    let (out_ptr, out_size) = out_arr[0].get_mut().mem_parts().unwrap();
+    match mode {
+      ThunkMode::Accumulate => {
+        assert!(out_org.is_some());
+        let (out_org_addr, out_org_ptr, out_org_size) = out_org.unwrap();
+        if out_org_ptr != out_ptr {
+          if _cfg_debug_mode(mode) {
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out: Accumulate not in-place!");
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   org ptr =0x{:016x} sz={}",
+              out_org_ptr as usize, out_org_size);
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   org addr={:?}",
+              out_org_addr);
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   new ptr =0x{:016x} sz={}",
+              out_ptr as usize, out_size);
+          /*let new_addr = TL_PCTX.with(|pctx| {
+            let gpu = pctx.nvgpu.as_ref().unwrap();
+            match gpu.mem_pool.rev_lookup(out_dptr) {
+              None => None,
+              Some((_region, None)) => None,
+              Some((_region, Some(p))) => Some(p)
+            }
+          });
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   new addr={:?}",
+              new_addr);*/
+          }
+          TL_CTX.with(|ctx| {
+            ctx.debugctr.accumulate_not_in_place.fetch_add(1);
+          });
+        } else {
+          TL_CTX.with(|ctx| {
+            ctx.debugctr.accumulate_in_place.fetch_add(1);
+          });
+        }
+        // TODO
+      }
+      _ => {}
+    }
+    if _cfg_debug_mode(mode) {
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: shape={:?}",
+        out_arr[0].get_mut().shape().unwrap());
+    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: rc={:?} ptr=0x{:016x} sz={}",
+        out_arr[0].get_mut().refcount(), out_ptr as usize, out_size);
+    }
+    if out_ty_[0].ndim() == 0 {
+      assert_eq!(Some(&[1_i64] as &[_]), out_arr[0].get_mut().shape());
+    } else {
+      match genabi.get_out(0) {
+        FutharkArrayRepr::Nd => {
+          assert_eq!(Some(&out_ty_[0].shape as &[_]), out_arr[0].get_mut().shape());
+        }
+        FutharkArrayRepr::Flat => {
+          assert_eq!(Some(&[out_ty_[0].flat_len()] as &[_]), out_arr[0].get_mut().shape());
+        }
+        _ => unimplemented!()
+      }
+    }
+    match out_arr[0].get_mut().tag() {
+      None => {
+        if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   tag=null"); }
+      }
+      Some(ctag) => {
+        if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   tag=\"{}\"", safe_ascii(ctag.to_bytes())); }
+      }
     }
     // TODO
-    unimplemented!();
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      let addr = match gpu.page_map.rev_lookup(out_ptr) {
+        Some(addr) => addr,
+        None => unimplemented!(),
+      };
+      let mut f = false;
+      if !f {
+        for k in objects.find(mode).unwrap().1.consts.iter() {
+          if k.0 == addr {
+            if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   is const"); }
+            match env.lookup_mut_ref(out) {
+              None => panic!("bug"),
+              Some(e) => {
+                match e.cel_ {
+                  &mut Cell_::Top(ref state, optr) => {
+                    assert_eq!(e.root, optr);
+                    // FIXME: defaults below are placeholders for...?
+                    let state = RefCell::new(state.borrow().clone());
+                    let clo = RefCell::new(CellClosure::default());
+                    *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
+                    f = true;
+                    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: cow {:?} -> {:?}", out, addr); }
+                  }
+                  // FIXME FIXME
+                  _ => unimplemented!()
+                }
+              }
+            }
+            break;
+          }
+        }
+      }
+      if !f {
+        match env.lookup_mut_ref(out) {
+          None => panic!("bug"),
+          Some(e) => {
+            match e.cel_ {
+              &mut Cell_::Top(ref state, optr) => {
+                if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try new phy..."); }
+                assert_eq!(e.root, optr);
+                // FIXME: defaults below are placeholders for...?
+                let state = RefCell::new(state.borrow().clone());
+                let clo = RefCell::new(CellClosure::default());
+                let mut pcel = PCell::new(optr, out_ty_[0].clone());
+                pcel.push_new_replica(optr, oclk, Locus::Mem, PMach::NvGpu, addr);
+                *e.cel_ = Cell_::Phy(state, clo, pcel);
+                f = true;
+                if _cfg_debug_mode(mode) {
+                println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: new phy {:?} --> {:?} -> {:?}",
+                    out, optr, addr);
+                }
+              }
+              &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+                if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try old phy..."); }
+                assert_eq!(e.root, pcel.optr);
+                let optr = pcel.optr;
+                if let Some(replica) = pcel.lookup(Locus::Mem, PMach::NvGpu) {
+                  // NB: clk equal b/c spine did clock_sync.
+                  assert_eq!(replica.clk.get(), oclk);
+                  let prev_addr = replica.addr.get();
+                  if prev_addr != addr {
+                    if _cfg_debug_mode(mode) {
+                    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   prev addr={:?}",
+                        prev_addr);
+                    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   next addr={:?}",
+                        addr);
+                    }
+                    replica.addr.set(addr);
+                    assert!(pctx.set_root(addr, optr).is_none());
+                    let prev_root = pctx.unset_root(prev_addr);
+                    let prev_root_root =
+                    if let Some(prev_root) = prev_root {
+                      let prev_root_root = match env.lookup_ref(prev_root) {
+                        None => panic!("bug"),
+                        Some(e) => e.root
+                      };
+                      if _cfg_debug_mode(mode) {
+                      println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   prev root={:?} --> {:?}",
+                          prev_root, prev_root_root);
+                      }
+                      Some(prev_root_root)
+                    } else {
+                      None
+                    };
+                    if _cfg_debug_mode(mode) {
+                    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   next root={:?} --> {:?}",
+                        out, optr);
+                    }
+                    if !(prev_root == Some(optr)) && prev_root_root == Some(optr) {
+                      if _cfg_debug_mode(mode) {
+                      println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   slightly invalid prev root, but mostly harmless");
+                      }
+                    } else {
+                      assert_eq!(prev_root, Some(optr));
+                    }
+                    // FIXME: gc the prev addr.
+                    match gpu.page_map.release(prev_addr) {
+                      Some(_) => {}
+                      None => unimplemented!()
+                    }
+                  }
+                } else {
+                  pcel.push_new_replica(optr, oclk, Locus::Mem, PMach::NvGpu, addr);
+                }
+                f = true;
+                if _cfg_debug_mode(mode) {
+                println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: old phy {:?} --> {:?} -> {:?}",
+                    out, optr, addr);
+                }
+              }
+              _ => unimplemented!()
+            }
+          }
+        }
+      }
+      if !f {
+        panic!("bug");
+      }
+    });
+    Ok(())
   }
 }
 
@@ -2321,7 +2916,8 @@ impl FutharkThunkImpl<CudaBackend> {
       self._try_build(ctr, env, mode, oclk.ctr());
     }
     if self.objects.borrow().find(mode).is_none() {
-      panic!("BUG: FutharkThunkImpl::<CudaBackend>::_enter: build error");
+      println!("BUG: FutharkThunkImpl::<CudaBackend>::_enter: build error");
+      panic!();
     }
     let mut objects = self.objects.borrow_mut();
     let mut object = objects.find_mut(mode).unwrap().1;
@@ -2453,6 +3049,15 @@ impl FutharkThunkImpl<CudaBackend> {
           }
         }
       };
+      if !(self.spec_dim[(lar + k) as usize] == ty_.to_dim()) {
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: lar={} rar={} k={}", lar, rar, k);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", &self.spec_dim);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", self.spec_dim[(lar + k) as usize]);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", &arg);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg ty={:?}", &arg_ty_);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?}", out);
+        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out ty={:?}", ty_);
+      }
       assert_eq!(self.spec_dim[(lar + k) as usize], ty_.to_dim());
       match mode {
         // FIXME: if we no longer match on mode, then the pwrite check
@@ -2525,9 +3130,28 @@ impl FutharkThunkImpl<CudaBackend> {
     // FIXME: implicit output shape params during gen.
     let np = genabi.param_ct as usize;
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
-    //param.resize(np, FutAbiScalar::Empty);
+    param.resize(np, FutAbiScalar::Unspec);
     //spec_.set_param(&mut param);
-    if np == 0 && self.param.len() == 0 {
+    let mut flat_out0_shape = false;
+    for pidx in 0 .. np {
+      match genabi.get_param(pidx as _) {
+        (FutharkParam::Out0Shape, FutAbiScalarType::I64) => {
+          match genabi.get_out(0) {
+            FutharkArrayRepr::Nd => {
+              param[pidx] = FutAbiScalar::I64(out_ty_[0].shape[pidx].into());
+            }
+            FutharkArrayRepr::Flat => {
+              assert!(!flat_out0_shape);
+              param[pidx] = FutAbiScalar::I64(out_ty_[0].flat_len().into());
+              flat_out0_shape = true;
+            }
+            _ => unimplemented!()
+          }
+        }
+        _ => unimplemented!()
+      }
+    }
+    /*if np == 0 && self.param.len() == 0 {
     } else if np == 1 && self.param.len() == 0 {
       // FIXME FIXME: hack.
       param.push(FutAbiScalar::I64(out_ty_[0].shape[0].into()));
@@ -2548,7 +3172,7 @@ impl FutharkThunkImpl<CudaBackend> {
       param.push(FutAbiScalar::I64(out_ty_[0].shape[3].into()));
     } else {
       unimplemented!();
-    }
+    }*/
     // FIXME: should distinguish the "spec" abi from the "real" abi.
     /*let restore_out = match mode {
       ThunkMode::Accumulate => {
@@ -3024,22 +3648,24 @@ impl PThunk {
     }
   }
 
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    // FIXME: pmach.
-    match self.lookup_impl_(PMach::NvGpu) {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, pmach: PMach) -> ThunkResult {
+    //let primary = TL_CTX.with(|ctx| ctx.primary.get());
+    //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
+    //println!("DEBUG: PThunk::apply: pmach={:?} primary={:?}", pmach, primary);
+    match self.lookup_impl_(pmach) {
       None => {
-        match self.spec_.gen_impl_(self.spec_dim.clone(), PMach::NvGpu) {
+        match self.spec_.gen_impl_(self.spec_dim.clone(), pmach) {
           None => {
             // FIXME: fail stop here.
           }
           Some(thimpl_) => {
-            self.push_new_impl_(PMach::NvGpu, thimpl_);
+            self.push_new_impl_(pmach, thimpl_);
           }
         }
       }
       _ => {}
     }
-    match self.lookup_impl_(PMach::NvGpu) {
+    match self.lookup_impl_(pmach) {
       None => panic!("bug"),
       Some(thimpl_) => {
         thimpl_.apply(ctr, env, &*self.spec_, arg, th, out, oclk)
@@ -3047,22 +3673,24 @@ impl PThunk {
     }
   }
 
-  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    // FIXME: pmach.
-    match self.lookup_impl_(PMach::NvGpu) {
+  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, pmach: PMach) -> ThunkResult {
+    //let primary = TL_CTX.with(|ctx| ctx.primary.get());
+    //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
+    //println!("DEBUG: PThunk::accumulate: pmach={:?} primary={:?}", pmach, primary);
+    match self.lookup_impl_(pmach) {
       None => {
-        match self.spec_.gen_impl_(self.spec_dim.clone(), PMach::NvGpu) {
+        match self.spec_.gen_impl_(self.spec_dim.clone(), pmach) {
           None => {
             // FIXME: fail stop here.
           }
           Some(thimpl_) => {
-            self.push_new_impl_(PMach::NvGpu, thimpl_);
+            self.push_new_impl_(pmach, thimpl_);
           }
         }
       }
       _ => {}
     }
-    match self.lookup_impl_(PMach::NvGpu) {
+    match self.lookup_impl_(pmach) {
       None => panic!("bug"),
       Some(thimpl_) => {
         thimpl_.accumulate(ctr, env, &*self.spec_, arg, th, out, oclk)
@@ -3070,7 +3698,28 @@ impl PThunk {
     }
   }
 
-  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
-    unimplemented!();
+  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, pmach: PMach) -> ThunkResult {
+    //let primary = TL_CTX.with(|ctx| ctx.primary.get());
+    //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
+    //println!("DEBUG: PThunk::initialize: pmach={:?} primary={:?}", pmach, primary);
+    match self.lookup_impl_(pmach) {
+      None => {
+        match self.spec_.gen_impl_(self.spec_dim.clone(), pmach) {
+          None => {
+            // FIXME: fail stop here.
+          }
+          Some(thimpl_) => {
+            self.push_new_impl_(pmach, thimpl_);
+          }
+        }
+      }
+      _ => {}
+    }
+    match self.lookup_impl_(pmach) {
+      None => panic!("bug"),
+      Some(thimpl_) => {
+        thimpl_.initialize(ctr, env, &*self.spec_, arg, th, out, oclk)
+      }
+    }
   }
 }
