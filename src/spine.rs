@@ -1400,7 +1400,7 @@ impl Spine {
               // FIXME FIXME
               //e.state().clk = next_clk;
               // NB: clock_sync is _probably_ the right thing here.
-              e.clock_sync(prev_clk, next_clk, env);
+              e.clock_sync_rec(prev_clk, next_clk, env);
             }
           }
         }
@@ -1411,17 +1411,16 @@ impl Spine {
         if cfg_debug() {
         println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
             ctlp, retp, x, loc, item.key());
-        }
         match env.lookup_ref(x) {
           None => panic!("bug"),
           Some(e) => {
-            if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype); }
+            println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
             match e.ty.dtype {
               Dtype::Fp32 => {
                 //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
                 match &item {
                   SpineResume::_Top => {
-                    if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   no value"); }
+                    println!("DEBUG: Spine::_step: YieldSet:   no value");
                   }
                   SpineResume::PutMemV(k, v) => {
                     match v.downcast_ref::<f32>() {
@@ -1430,13 +1429,12 @@ impl Spine {
                         panic!("bug");
                       }
                       Some(v) => {
-                        if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v); }
+                        println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v);
                       }
                     }
                   }
                   SpineResume::PutMemF(k, _f) => {
-                    if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k); }
-                    // TODO
+                    println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k);
                   }
                 }
               }
@@ -1444,6 +1442,7 @@ impl Spine {
               }
             }
           }
+        }
         }
         if Some(ctlp) == retp {
           if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   ...resume"); }
@@ -1463,21 +1462,20 @@ impl Spine {
               } else if prev_clk < next_clk {
                 //e.state().flag.unset_seal();
                 // FIXME: probably should not clock_sync here.
-                e.clock_sync_loc(Locus::Mem, prev_clk, next_clk, env);
+                e.clock_sync_loc(loc, prev_clk, next_clk, env);
               }
               (prev_clk, next_clk)
             }
           };
-          match env.pwrite_ref(x, prev_xclk, xclk, Locus::Mem) {
+          match env.pwrite_ref(x, prev_xclk, xclk, loc) {
             None => panic!("bug"),
             Some(e) => {
               match e.cel_ {
                 &mut Cell_::Phy(_, ref clo, ref mut cel_) => {
                   match (loc, &item) {
-                    (Locus::Mem, SpineResume::PutMemV(_, _val)) => {
-                      // FIXME FIXME
+                    /*(Locus::Mem, SpineResume::PutMemV(_, _val)) => {
                       unimplemented!();
-                    }
+                    }*/
                     (Locus::Mem, SpineResume::PutMemF(_, fun)) => {
                       let (pm, addr) = cel_.get_loc_nosync(x, xclk, &e.ty, Locus::Mem);
                       TL_PCTX.with(|pctx| {
@@ -1648,10 +1646,6 @@ impl Spine {
           None => panic!("bug"),
           Some(e) => {
             let root = e.root;
-            /*match e.state().mode {
-              CellMode::Init => {}
-              _ => panic!("bug")
-            }*/
             //assert_eq!(e.state().clk.ctr(), self.ctr);
             //assert!(e.state().clk.is_uninit());
             //assert!(!e.state().flag.seal());

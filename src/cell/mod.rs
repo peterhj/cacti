@@ -27,7 +27,7 @@ use std::str::{FromStr};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct CellPtr{
-  pub raw_: i32,
+  pub raw_: i64,
 }
 
 impl From<StableCell> for CellPtr {
@@ -65,11 +65,11 @@ impl CellPtr {
     CellPtr{raw_: 0}
   }
 
-  pub fn from_unchecked(raw_: i32) -> CellPtr {
+  pub fn from_unchecked(raw_: i64) -> CellPtr {
     CellPtr{raw_}
   }
 
-  pub fn to_unchecked(&self) -> i32 {
+  pub fn to_unchecked(&self) -> i64 {
     self.raw_
   }
 
@@ -77,13 +77,13 @@ impl CellPtr {
     self.raw_ == 0
   }
 
-  pub fn as_bytes_repr(&self) -> &[u8] {
+  /*pub fn as_bytes_repr(&self) -> &[u8] {
     // SAFETY: This should be safe as the type is `Copy`.
     let ptr = (self as *const CellPtr) as *const u8;
     let len = size_of::<CellPtr>();
-    assert_eq!(len, 4);
+    assert_eq!(len, 8);
     unsafe { from_raw_parts(ptr, len) }
-  }
+  }*/
 
   pub fn _into_mcel_ptr(self) -> MCellPtr {
     MCellPtr{raw_: self.raw_}
@@ -242,7 +242,7 @@ pub type StableCheckpoint = Checkpoint;*/
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Atom {
-  pub raw_: i32,
+  pub raw_: i64,
 }
 
 impl Atom {
@@ -250,11 +250,11 @@ impl Atom {
     Atom{raw_: 0}
   }
 
-  pub fn from_unchecked(raw_: i32) -> Atom {
+  pub fn from_unchecked(raw_: i64) -> Atom {
     Atom{raw_}
   }
 
-  pub fn to_unchecked(&self) -> i32 {
+  pub fn to_unchecked(&self) -> i64 {
     self.raw_
   }
 
@@ -266,7 +266,7 @@ impl Atom {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct MCellPtr {
-  pub raw_: i32,
+  pub raw_: i64,
 }
 
 impl Debug for MCellPtr {
@@ -280,11 +280,11 @@ impl MCellPtr {
     MCellPtr{raw_: 0}
   }
 
-  pub fn from_unchecked(raw_: i32) -> MCellPtr {
+  pub fn from_unchecked(raw_: i64) -> MCellPtr {
     MCellPtr{raw_}
   }
 
-  pub fn to_unchecked(&self) -> i32 {
+  pub fn to_unchecked(&self) -> i64 {
     self.raw_
   }
 
@@ -447,10 +447,10 @@ pub trait CellDeref {
   fn _deref(&self) -> CellPtr;
 }
 
-const VOID_MAP_SIZE: usize = 0x1_0000_0000;
-const VOID_MAP_HI: usize = 0x8000_0000;
-
 enum _Void {}
+
+/*const VOID_MAP_SIZE: usize = 0x1_0000_0000;
+const VOID_MAP_HI: usize = 0x8000_0000;
 
 thread_local! {
   static TL_HANDLE_TAB: RefCell<CellViewHandleTab> = RefCell::new(CellViewHandleTab::new());
@@ -592,7 +592,7 @@ impl CellDeref for CellViewHandle {
     //println!("DEBUG: CellViewHandle::_deref: ptr ={}", raw as i32);
     CellPtr::from_unchecked(raw as i32)
   }
-}
+}*/
 
 #[repr(transparent)]
 pub struct CellViewHandle_([_Void]);
@@ -610,6 +610,7 @@ pub struct CellViewHandle_([_Void]);
 }*/
 
 impl CellViewHandle_ {
+  #[cfg(target_pointer_width = "64")]
   pub fn _from_mut<'a>(this: &'a mut CellPtr) -> &'a mut CellViewHandle_ {
     let ptr = { this.raw_ as _ };
     unsafe { &mut *(from_raw_parts_mut(this as *mut CellPtr as *mut _Void, ptr) as *mut [_Void] as *mut CellViewHandle_) }
@@ -627,10 +628,12 @@ impl Debug for CellViewHandleEx {
 }
 
 impl CellViewHandleEx {
+  #[cfg(target_pointer_width = "64")]
   pub fn _from(x: CellPtr) -> CellViewHandleEx {
     let raw = x.raw_ as usize;
-    assert!(raw < VOID_MAP_HI);
-    CellViewHandleEx(raw, 0)
+    //assert!(raw < VOID_MAP_HI);
+    //CellViewHandleEx(raw, 0)
+    CellViewHandleEx(0, raw)
   }
 
   pub fn materialize(&self) -> CellPtr {
@@ -642,7 +645,8 @@ impl CellViewHandleEx {
 
 impl CellDeref for CellViewHandleEx {
   fn _deref(&self) -> CellPtr {
-    CellPtr::from_unchecked(self.0 as i32)
+    //CellPtr::from_unchecked(self.0 as i32)
+    CellPtr::from_unchecked(self.1 as i64)
   }
 }
 
@@ -1775,9 +1779,12 @@ impl PCell {
     match self.lookup(q_locus, q_pmach) {
       None => panic!("bug"),
       Some(rep) => {
+        // FIXME FIXME: this logic here is fishy.
         //assert_eq!(rep.clk.get(), q_clk);
         let prev_clk = rep.clk.get();
-        if prev_clk < q_clk {
+        if prev_clk > q_clk {
+          panic!("bug");
+        } else if prev_clk < q_clk {
           // FIXME: actually copy from any existing replica.
           // FIXME: depends on whether we want fresh or non-fresh get...
           match self.find_any(q_clk, ty) {
@@ -1817,13 +1824,17 @@ impl PCell {
         let prev_clk = rep.clk.get();
         if prev_clk > q_clk {
           // FIXME FIXME
-          println!("DEBUG: PCell::get: prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
-              prev_clk, q_clk, ty, q_locus, pmach);
+          println!("DEBUG: PCell::get_loc: x={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+              x, prev_clk, q_clk, ty, q_locus, pmach);
           panic!("bug");
         }
         Some(pmach)
       }
     };
+    if cfg_debug() {
+    println!("DEBUG: PCell::get_loc: x={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
+        x, q_clk, ty, q_locus, f_pmach);
+    }
     if f_pmach.is_none() {
       let (pmach, addr) = TL_PCTX.with(|pctx| {
         pctx.alloc_loc(ty, q_locus)
@@ -1835,23 +1846,26 @@ impl PCell {
     match self.lookup(q_locus, f_pmach) {
       None => panic!("bug"),
       Some(rep) => {
+        // FIXME FIXME: this logic here is fishy.
         //assert_eq!(rep.clk.get(), q_clk);
         let prev_clk = rep.clk.get();
-        if prev_clk < q_clk {
+        if prev_clk > q_clk {
+          panic!("bug");
+        } else if prev_clk < q_clk {
           // FIXME: actually copy from any existing replica.
           // FIXME: depends on whether we want fresh or non-fresh get...
           match self.find_any(q_clk, ty) {
             None => {
-              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
                   prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
               );
-              println!("ERROR: PCell::get: no replica to copy from");
+              println!("ERROR: PCell::get_loc: no replica to copy from");
               panic!();
             }
             Some((o_loc, o_pm, o_addr)) => {
               if cfg_debug() {
-              println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
                   self.optr, &self.ogty,
                   prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
                   o_loc, o_pm, o_addr,
@@ -1897,7 +1911,9 @@ impl PCell {
       Some(rep) => {
         //assert_eq!(rep.clk.get(), q_clk);
         let prev_clk = rep.clk.get();
-        if prev_clk < q_clk {
+        if prev_clk > q_clk {
+          panic!("bug");
+        } else if prev_clk < q_clk {
           rep.clk.set(q_clk);
         }
         TL_PCTX.with(|pctx| {
@@ -1914,6 +1930,75 @@ impl PCell {
     }
   }
 
+  pub fn get_loc2(&mut self, x: CellPtr, q_prev_clk: Clock, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+    let mut f_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
+          // FIXME FIXME
+          println!("DEBUG: PCell::get_loc: x={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+              x, prev_clk, q_clk, ty, q_locus, pmach);
+          panic!("bug");
+        }
+        Some(pmach)
+      }
+    };
+    if cfg_debug() {
+    println!("DEBUG: PCell::get_loc: x={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
+        x, q_clk, ty, q_locus, f_pmach);
+    }
+    if f_pmach.is_none() {
+      let (pmach, addr) = TL_PCTX.with(|pctx| {
+        pctx.alloc_loc(ty, q_locus)
+      });
+      self.push_new_replica(x, Clock::default(), q_locus, pmach, addr);
+      f_pmach = Some(pmach);
+    }
+    let f_pmach = f_pmach.unwrap();
+    match self.lookup(q_locus, f_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        // FIXME FIXME: this logic here is fishy.
+        //assert_eq!(rep.clk.get(), q_clk);
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
+          panic!("bug");
+        } else if prev_clk == q_prev_clk {
+          rep.clk.set(q_clk);
+        } if prev_clk < q_clk {
+          // FIXME: actually copy from any existing replica.
+          // FIXME: depends on whether we want fresh or non-fresh get...
+          match self.find_any(q_clk, ty) {
+            None => {
+              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+                  self.optr, &self.ogty,
+                  prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+              );
+              println!("ERROR: PCell::get_loc: no replica to copy from");
+              panic!();
+            }
+            Some((o_loc, o_pm, o_addr)) => {
+              if cfg_debug() {
+              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+                  self.optr, &self.ogty,
+                  prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+                  o_loc, o_pm, o_addr,
+              );
+              }
+              // FIXME FIXME: only set clock on successful copy.
+              TL_PCTX.with(|pctx| {
+                pctx.hard_copy(q_locus, f_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
+              });
+              rep.clk.set(q_clk);
+            }
+          }
+        }
+        (f_pmach, rep.addr.get())
+      }
+    }
+  }
+
   pub fn fresh(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
     let f = match self.lookup(q_locus, q_pmach) {
       None => None,
@@ -1921,7 +2006,7 @@ impl PCell {
         let prev_clk = rep.clk.get();
         if prev_clk > q_clk {
           // FIXME FIXME
-          println!("DEBUG: PCell::get: prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+          println!("DEBUG: PCell::fresh: prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
               prev_clk, q_clk, ty, q_locus, q_pmach);
           panic!("bug");
         }
@@ -1944,6 +2029,11 @@ impl PCell {
         rep.addr.get()
       }
     }
+  }
+
+  pub fn fresh_loc(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> PAddr {
+    // FIXME FIXME: hack.
+    self.fresh(x, q_clk, ty, q_locus, PMach::NvGpu)
   }
 
   pub fn hardcopy(&self) -> PCell {

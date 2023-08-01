@@ -29,14 +29,15 @@ fn main() {
   println!("boot: tokenizer: bos={:?}", tokenizer.bos_id());
   println!("boot: tokenizer: eos={:?}", tokenizer.eos_id());
   println!("boot: tokenizer: pad={:?}", tokenizer.pad_id());
-  let adamw_cfg = AdamWConfig{
+  let grad_upscale = 1024.0_f32;
+  let adamw = AdamW32{
+    grad_downscale: 1.0 / grad_upscale,
     //lr: 1.0e-5,
     lr: 2.0e-5,
-    alpha1: 0.1,
-    alpha2: 0.05,
-    lamda: 0.1,
+    wd: 0.1,
+    a1: 0.1,
+    a2: 0.05,
     eps: 1.0e-5,
-    dtype: f32::dtype(),
   };
   //let text_str = "Thucydides, an Athenian, wrote the history of";
   //let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its";
@@ -63,67 +64,59 @@ fn main() {
     grad.push(g);
   }
   grad.reverse();
-  for (p, g) in param.iter().zip(grad.iter()) {
+  /*for (p, g) in param.iter().zip(grad.iter()) {
     println!("boot: param={:?} grad={:?} ty={:?}", p, g, p.type_());
-  }
-  let mut adamw = AdamW::from(adamw_cfg);
-  adamw.master = Vec::with_capacity(param.len());
-  adamw.grad_avg = Vec::with_capacity(param.len());
-  adamw.grad2_avg = Vec::with_capacity(param.len());
+  }*/
+  let mut master = Vec::with_capacity(param.len());
+  let mut grad_avg = Vec::with_capacity(param.len());
+  let mut grad2_avg = Vec::with_capacity(param.len());
   for p in param.iter() {
     let p_ = StableCell::from(p.type_().cast(f32::dtype()));
     let g_ = StableCell::from(p.type_().cast(f32::dtype()));
     let g2 = StableCell::from(p.type_().cast(f32::dtype()));
     println!("boot: master={:?} ty={:?} grad avg={:?} ty={:?} grad2 avg={:?} ty={:?}",
         p_, p_.type_(), g_, g_.type_(), g2, g2.type_());
-    adamw.master.push(p_);
-    adamw.grad_avg.push(g_);
-    adamw.grad2_avg.push(g2);
+    master.push(p_);
+    grad_avg.push(g_);
+    grad2_avg.push(g2);
   }
   let mut param_log2_hist = Vec::with_capacity(param.len());
   let mut param_nan_count = Vec::with_capacity(param.len());
   let mut grad_log2_hist = Vec::with_capacity(param.len());
   let mut grad_nan_count = Vec::with_capacity(param.len());
-  let grad_upscale = 1024.0_f32;
+  println!("boot: adamw: {:?}", adamw);
   println!("boot: grad upscale: {:?}", grad_upscale);
   //let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
   //let loss_scale = (1.0_f32 / 256.0_f32) * grad_upscale;
   let loss_scale = grad_upscale / (text_tok.len() - 1) as f32;
   println!("boot: loss scale: {:?}", loss_scale);
-  for iter_nr in 0 .. 2 {
-    println!("boot: start iter_nr={}", iter_nr);
+  for iter_nr in 0 .. 5 {
+    println!("boot: start iter={}", iter_nr);
     reset();
     if iter_nr == 0 {
       for (cel, _) in inv_matches.iter() {
         cel.mem_set_yield_();
       }
       smp_scope().with(|_| {
-        for (p, p_) in param.iter().zip(adamw.master.iter()) {
-          println!("boot: param={:?} ty={:?} master={:?} ty={:?}",
-              p, p.type_(), p_, p_.type_());
+        for (p, p_) in param.iter().zip(master.iter()) {
+          //println!("boot: param={:?} ty={:?} master={:?} ty={:?}", p, p.type_(), p_, p_.type_());
           p_.set_cast(p);
         }
-        for g_ in adamw.grad_avg.iter() {
+        for g_ in grad_avg.iter() {
           g_.set_zeros();
         }
-        for g2 in adamw.grad2_avg.iter() {
+        for g2 in grad2_avg.iter() {
           g2.set_zeros();
         }
       });
       model.init();
     } else {
-      /*for (cel, _) in inv_matches.iter() {
-        cel.cache();
-      }*/
       smp_scope().with(|_| {
-        adamw.state.iter_nr += 1;
-        assert_eq!(adamw.state.iter_nr, iter_nr);
-        // FIXME: zero out the zero-th row of the embed grad.
         for (idx, ((((g, g_), g2), p_), p)) in
             grad.iter()
-            .zip(adamw.grad_avg.iter())
-            .zip(adamw.grad2_avg.iter())
-            .zip(adamw.master.iter())
+            .zip(grad_avg.iter())
+            .zip(grad2_avg.iter())
+            .zip(master.iter())
             .zip(param.iter())
             .rev().enumerate()
         {
@@ -147,17 +140,14 @@ fn main() {
             let mem = g_._get_mem();
             mem._debug_dump_f32();
           }
-          g_.init_online_average_scale(g, 1.0 / grad_upscale, adamw.state.alpha1);
-          g2.init_online_average_square_scale(g, 1.0 / grad_upscale, adamw.state.alpha2);
-          p_.init_online_adamw_update32(g_, g2,
-              adamw.state.iter_nr,
-              adamw.state.lr,
-              adamw.state.alpha1,
-              adamw.state.alpha2,
-              adamw.state.lamda,
-              adamw.state.eps);
-          p.set_cast(p_.const_());
-          //p.set_cast(p_);
+          // FIXME: zero out the zero-th row of the embed grad.
+          if p == &model.embed {
+            p.cache();
+          } else {
+            adamw.step(iter_nr, &p_, &g_, &g2, &g);
+            p.set_cast(p_.const_());
+            //p.set_cast(p_);
+          }
         }
       });
       model.cache();
@@ -175,7 +165,7 @@ fn main() {
     println!("boot: out_lm_loss.shape={:?}", out.out_lm_loss.shape());
     println!("boot: out_lm_loss.dtype={:?}", out.out_lm_loss.dtype());
     let sink = CellMap::new();
-    //sink.add(&out.out_lm_loss, out.out_lm_loss.type_().ones() * loss_scale);
+    /*sink.add(&out.out_lm_loss, out.out_lm_loss.type_().ones() * loss_scale);*/
     sink.add(&out.out_lm_loss, &in_.in_lm_loss_scale);
     let allsrc = CellMap::new();
     allsrc.vadd(&param, &grad);
@@ -199,14 +189,6 @@ fn main() {
       let g_nan_count = g.nan_count();
       grad_nan_count.push(g_nan_count.keep());
     }
-    /*
-    // TODO TODO
-    //let grad = allsrc.vget(&param);
-    adamw.accumulate_grad(&param, &grad);
-    if (iter_nr + 1) % minibatch_iter_ct == 0 {
-      adamw.step(&param, &grad);
-    }
-    */
     compile();
     resume();
     let seq_cap = cfg.seq_cap;
@@ -254,9 +236,9 @@ fn main() {
     });
     for (idx, ((((g, g_), g2), p_), p)) in
         grad.iter()
-        .zip(adamw.grad_avg.iter())
-        .zip(adamw.grad2_avg.iter())
-        .zip(adamw.master.iter())
+        .zip(grad_avg.iter())
+        .zip(grad2_avg.iter())
+        .zip(master.iter())
         .zip(param.iter())
         .rev().enumerate()
     {
@@ -335,7 +317,7 @@ fn main() {
         loss_sum += out_lm_loss_f32[pos as usize];
       }
     }
-    println!("boot: loss sum={:.06}", loss_sum);
+    println!("boot: iter={} loss sum={:.06}", iter_nr, loss_sum);
     // TODO
     //println!("boot: inspect param");
     for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
@@ -428,7 +410,7 @@ fn main() {
       }
     }
     // TODO
-    println!("boot: end iter");
+    println!("boot: end iter={}", iter_nr);
     //break;
   }
 }

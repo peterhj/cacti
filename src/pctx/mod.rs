@@ -345,8 +345,22 @@ impl PCtx {
     }
   }
 
+  pub fn release(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      let pm = PMach::NvGpu;
+      match gpu.release(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    // TODO
+    None
+  }
+
   pub fn lookup(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
-    // FIXME
     #[cfg(feature = "nvgpu")]
     if let Some(gpu) = self.nvgpu.as_ref() {
       let pm = PMach::NvGpu;

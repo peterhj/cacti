@@ -395,7 +395,7 @@ impl BitXor<T_> for StableCell {
   }
 }
 
-impl<'l> BitXor<T> for &'l CellViewHandle {
+/*impl<'l> BitXor<T> for &'l CellViewHandle {
   type Output = CellViewHandleEx;
 
   #[track_caller]
@@ -419,7 +419,7 @@ impl<'l> BitXor<T_> for &'l CellViewHandle {
       CellViewHandleEx::_from(self._deref())
     })
   }
-}
+}*/
 
 impl BitXor<T> for CellViewHandleEx {
   type Output = CellViewHandleEx;
@@ -463,7 +463,7 @@ impl IndexMut<RangeFull> for CellPtr {
   }
 }
 
-impl Index<IRange> for CellPtr {
+/*impl Index<IRange> for CellPtr {
   type Output = CellViewHandle;
 
   #[track_caller]
@@ -498,7 +498,7 @@ impl Index<[IRange; 2]> for CellPtr {
       unimplemented!();
     })
   }
-}
+}*/
 
 pub trait IntoCellViewOps: Into<CellView> {
   fn inner_transpose(self) -> CellView {
@@ -1164,38 +1164,37 @@ pub trait MathInitOps: Borrow<CellPtr> {
   }
 
   #[track_caller]
-  //fn init_online_adamw_update<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, emavg: V, emavg2: V, iter_nr: i64, lr: T, alpha1: T, alpha2: T, lamda: T, eps: T) {}
-  fn init_online_adamw_update32<V: Borrow<CellPtr>>(&self, emavg: V, emavg2: V, iter_nr: i32, lr: f32, alpha1: f32, alpha2: f32, lamda: f32, eps: f32) {
+  fn init_online_adamw_update32<V: Borrow<CellPtr>>(&self, grad1_avg: V, grad2_avg: V, iter_nr: i32, lr: f32, wd: f32, a1: f32, a2: f32, eps: f32) {
     let unbias1 = if iter_nr <= 0 {
-      println!("ERROR: iter_online_adamw_update: invalid iter_nr={} (should be positive)", iter_nr);
+      println!("ERROR: init_online_adamw_update32: invalid iter_nr={} (should be positive)", iter_nr);
       panic!();
     } else if iter_nr == 1 {
-      alpha1
+      a1
     } else {
-      1.0 - (1.0 - alpha1).powi(iter_nr)
+      1.0 - (1.0 - a1).powi(iter_nr)
     };
     let unbias2 = if iter_nr <= 0 {
-      println!("ERROR: iter_online_adamw_update: invalid iter_nr={} (should be positive)", iter_nr);
+      println!("ERROR: init_online_adamw_update32: invalid iter_nr={} (should be positive)", iter_nr);
       panic!();
     } else if iter_nr == 1 {
-      alpha2.sqrt()
+      a2.sqrt()
     } else {
-      (1.0 - (1.0 - alpha2).powi(iter_nr)).sqrt()
+      (1.0 - (1.0 - a2).powi(iter_nr)).sqrt()
     };
     panick_wrap(|| {
       let this = *self.borrow();
-      let emavg = *emavg.borrow();
-      let emavg2 = *emavg2.borrow();
+      let grad1_avg = *grad1_avg.borrow();
+      let grad2_avg = *grad2_avg.borrow();
       let signed_lr = (-lr * (unbias2 / unbias1)).into_scalar_val_();
-      let lamda = lamda.into_scalar_val_();
+      let lamda = (lr * wd).into_scalar_val_();
       let eps = (eps * unbias2).into_scalar_val_();
       if cfg_debug() {
       println!("DEBUG: init_online_adamw_update32: signed lr={:?} lamda={:?} eps={:?}",
           signed_lr, lamda, eps);
       }
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(emavg);
-      ctx_push_cell_arg(emavg2);
+      ctx_push_cell_arg(grad1_avg);
+      ctx_push_cell_arg(grad2_avg);
       ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lamda, eps}, this)
     })
   }

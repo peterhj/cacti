@@ -77,7 +77,7 @@ pub fn _cfg_debug_mode(mode: ThunkMode) -> bool {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
-pub struct ThunkPtr(pub i32);
+pub struct ThunkPtr(pub i64);
 
 impl Debug for ThunkPtr {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -92,14 +92,14 @@ impl ThunkPtr {
 
   pub fn opaque() -> ThunkPtr {
     // FIXME: make sure that ctr never allocates this value.
-    ThunkPtr(i32::max_value())
+    ThunkPtr(i64::max_value())
   }
 
-  pub fn from_unchecked(p: i32) -> ThunkPtr {
+  pub fn from_unchecked(p: i64) -> ThunkPtr {
     ThunkPtr(p)
   }
 
-  pub fn to_unchecked(&self) -> i32 {
+  pub fn to_unchecked(&self) -> i64 {
     self.0
   }
 
@@ -108,16 +108,16 @@ impl ThunkPtr {
   }
 
   pub fn is_opaque(&self) -> bool {
-    self.0 == i32::max_value()
+    self.0 == i64::max_value()
   }
 
-  pub fn as_bytes_repr(&self) -> &[u8] {
+  /*pub fn as_bytes_repr(&self) -> &[u8] {
     // SAFETY: This is safe because the type is `Copy` and transparent.
-    let ptr = ((self as *const ThunkPtr) as *const i32) as *const u8;
+    let ptr = ((self as *const ThunkPtr) as *const i64) as *const u8;
     let len = size_of::<ThunkPtr>();
-    assert_eq!(len, 4);
+    assert_eq!(len, 8);
     unsafe { from_raw_parts(ptr, len) }
-  }
+  }*/
 }
 
 #[derive(Clone, Debug)]
@@ -2809,6 +2809,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
               &mut Cell_::Top(ref state, optr) => {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try new phy..."); }
                 assert_eq!(e.root, optr);
+                assert_eq!(oclk, state.borrow().clk);
                 // FIXME: defaults below are placeholders for...?
                 let state = RefCell::new(state.borrow().clone());
                 let clo = RefCell::new(CellClosure::default());
@@ -2824,10 +2825,15 @@ impl FutharkThunkImpl<MulticoreBackend> {
               &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try old phy..."); }
                 assert_eq!(e.root, pcel.optr);
+                assert_eq!(oclk, state.borrow().clk);
                 let optr = pcel.optr;
                 if let Some(replica) = pcel.lookup(Locus::Mem, PMach::NvGpu) {
                   // NB: clk equal b/c spine did clock_sync.
-                  assert_eq!(replica.clk.get(), oclk);
+                  /*assert_eq!(replica.clk.get(), oclk);*/
+                  assert!(replica.clk.get() <= oclk);
+                  if replica.clk.get() < oclk {
+                    replica.clk.set(oclk);
+                  }
                   let prev_addr = replica.addr.get();
                   if prev_addr != addr {
                     if _cfg_debug_mode(mode) {
@@ -3463,6 +3469,7 @@ impl FutharkThunkImpl<CudaBackend> {
                   &mut Cell_::Top(ref state, optr) => {
                     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try new phy..."); }
                     assert_eq!(e.root, optr);
+                    assert_eq!(oclk, state.borrow().clk);
                     // FIXME: defaults below are placeholders for...?
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
@@ -3478,10 +3485,15 @@ impl FutharkThunkImpl<CudaBackend> {
                   &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try old phy..."); }
                     assert_eq!(e.root, pcel.optr);
+                    assert_eq!(oclk, state.borrow().clk);
                     let optr = pcel.optr;
                     if let Some(replica) = pcel.lookup(Locus::VMem, PMach::NvGpu) {
                       // NB: clk equal b/c spine did clock_sync.
-                      assert_eq!(replica.clk.get(), oclk);
+                      /*assert_eq!(replica.clk.get(), oclk);*/
+                      assert!(replica.clk.get() <= oclk);
+                      if replica.clk.get() < oclk {
+                        replica.clk.set(oclk);
+                      }
                       let prev_addr = replica.addr.get();
                       if prev_addr != addr {
                         if _cfg_debug_mode(mode) {

@@ -100,7 +100,7 @@ pub fn ctx_cfg_set_gpu_workspace_mem_per_10k(m: u16) {
 
 pub struct Ctx {
   pub ctr:      CtxCtr,
-  pub primary:  Cell<Option<PMach>>,
+  pub ctlstate: CtxCtlState,
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    RefCell<Spine>,
@@ -113,19 +113,19 @@ impl Drop for Ctx {
   fn drop(&mut self) {
     if cfg_info() {
     let digest = self.timing.digest();
-    println!("INFO:  Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
-    println!("INFO:  Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
-    println!("INFO:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
-    println!("INFO:  Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
-    println!("INFO:  Ctx::drop: timing digest: f_build1: {:?}", digest.f_build1);
-    println!("INFO:  Ctx::drop: timing digest: f_setup1: {:?}", digest.f_setup1);
-    println!("INFO:  Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
-    println!("INFO:  Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
-    println!("INFO:  Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
-    println!("INFO:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
-    println!("INFO:  Ctx::drop: debug counter: accumulate hashes:       {:?}", self.debugctr.accumulate_hashes.borrow());
-    println!("INFO:  Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
-    println!("INFO:  Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
+    println!("INFO:   Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
+    println!("INFO:   Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
+    println!("INFO:   Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
+    println!("INFO:   Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
+    println!("INFO:   Ctx::drop: timing digest: f_build1: {:?}", digest.f_build1);
+    println!("INFO:   Ctx::drop: timing digest: f_setup1: {:?}", digest.f_setup1);
+    println!("INFO:   Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
+    println!("INFO:   Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
+    println!("INFO:   Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
+    println!("INFO:   Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    println!("INFO:   Ctx::drop: debug counter: accumulate hashes:       {:?}", self.debugctr.accumulate_hashes.borrow());
+    println!("INFO:   Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
+    println!("INFO:   Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
     }
   }
 }
@@ -135,7 +135,7 @@ impl Ctx {
     if cfg_debug() { println!("DEBUG: Ctx::new"); }
     Ctx{
       ctr:      CtxCtr::new(),
-      primary:  Cell::new(None),
+      ctlstate: CtxCtlState::default(),
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    RefCell::new(Spine::default()),
@@ -145,6 +145,70 @@ impl Ctx {
     }
   }
 
+  pub fn reset(&self) {
+    if cfg_info() { println!("INFO:   Ctx::reset: gc: scan {} cells", self.ctr.celfront.borrow().len()); }
+    let env = self.env.borrow();
+    let mut next_celfront = Vec::new();
+    let mut free_ct = 0;
+    TL_PCTX.with(|pctx| {
+      if let Some(gpu) = pctx.nvgpu.as_ref() {
+        gpu._dump_info();
+      }
+      for &x in self.ctr.celfront.borrow().iter() {
+        let mut f = false;
+        match env._lookup_ref(x) {
+          None => {}
+          Some(e) => {
+            let xroot = e.root;
+            if e.stablect.get() <= 0 {
+              match e.cel_ {
+                &Cell_::Phy(.., ref pcel) => {
+                  for (_, rep) in pcel.replicas.iter() {
+                    match pctx.release(rep.addr.get()) {
+                      None => {}
+                      Some(icel) => {
+                        //assert_eq!(icel.root(), Some(xroot));
+                        f = true;
+                      }
+                    }
+                  }
+                }
+                _ => {}
+              }
+            }
+          }
+        }
+        if f {
+          free_ct += 1;
+        } else {
+          next_celfront.push(x);
+        }
+      }
+      if let Some(gpu) = pctx.nvgpu.as_ref() {
+        gpu._dump_info();
+      }
+    });
+    if cfg_info() { println!("INFO:   Ctx::reset: gc:   free {} cells", free_ct); }
+    // TODO
+    // FIXME
+    //unimplemented!();
+    swap(&mut *self.ctr.celfront.borrow_mut(), &mut next_celfront);
+    // FIXME FIXME: reset all.
+    //ctx.env.borrow_mut().reset();
+    //ctx.thunkenv.borrow_mut().reset();
+    self.spine.borrow_mut()._reset();
+  }
+}
+
+#[derive(Default)]
+pub struct CtxCtlState {
+  // TODO
+  pub primary:  Cell<Option<PMach>>,
+  pub accumulate_in_place: Cell<bool>,
+  pub assume_uninit_zero: Cell<bool>,
+}
+
+impl CtxCtlState {
   pub fn _set_primary(&self, pmach: PMach) -> Option<PMach> {
     let prev = self.primary.get();
     self.primary.set(Some(pmach));
@@ -155,6 +219,14 @@ impl Ctx {
     let prev = self.primary.get();
     self.primary.set(None);
     prev
+  }
+
+  pub fn _set_accumulate_in_place(&self, flag: bool) {
+    self.accumulate_in_place.set(flag);
+  }
+
+  pub fn _set_assume_uninit_zero(&self, flag: bool) {
+    self.assume_uninit_zero.set(flag);
   }
 }
 
@@ -217,12 +289,7 @@ pub struct DebugCtrs {
 
 #[track_caller]
 pub fn reset() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    // FIXME FIXME: reset all.
-    //ctx.env.borrow_mut().reset();
-    //ctx.thunkenv.borrow_mut().reset();
-    ctx.spine.borrow_mut()._reset();
-  }))
+  panick_wrap(|| TL_CTX.with(|ctx| ctx.reset()))
 }
 
 #[track_caller]
@@ -307,10 +374,10 @@ impl Drop for PMachScope {
     TL_CTX.with(|ctx| {
       match self.prev {
         None => {
-          ctx._unset_primary();
+          ctx.ctlstate._unset_primary();
         }
         Some(pm) => {
-          ctx._set_primary(pm);
+          ctx.ctlstate._set_primary(pm);
         }
       }
     })
@@ -321,7 +388,7 @@ impl PMachScope {
   #[track_caller]
   pub fn new(pmach: PMach) -> PMachScope {
     TL_CTX.with(|ctx| {
-      let prev = ctx._set_primary(pmach);
+      let prev = ctx.ctlstate._set_primary(pmach);
       PMachScope{prev}
     })
   }
@@ -840,13 +907,15 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
 }*/
 
 pub struct CtxCtr {
-  pub ptr_ctr:  Cell<i32>,
+  pub ptr_ctr:  Cell<i64>,
+  pub celfront: RefCell<Vec<CellPtr>>,
 }
 
 impl CtxCtr {
   pub fn new() -> CtxCtr {
     CtxCtr{
       ptr_ctr:  Cell::new(0),
+      celfront: RefCell::new(Vec::new()),
     }
   }
 }
@@ -854,7 +923,9 @@ impl CtxCtr {
 impl CtxCtr {
   pub fn fresh_cel(&self) -> CellPtr {
     let next = self._fresh();
-    CellPtr::from_unchecked(next)
+    let x = CellPtr::from_unchecked(next);
+    self.celfront.borrow_mut().push(x);
+    x
   }
 
   pub fn fresh_mcel(&self) -> MCellPtr {
@@ -867,10 +938,10 @@ impl CtxCtr {
     ThunkPtr::from_unchecked(next)
   }
 
-  pub fn _fresh(&self) -> i32 {
+  pub fn _fresh(&self) -> i64 {
     let next = self.ptr_ctr.get() + 1;
     assert!(next > 0);
-    assert!(next < i32::max_value());
+    assert!(next < i64::max_value());
     self.ptr_ctr.set(next);
     next
   }
@@ -919,7 +990,7 @@ impl CtxThunkEnv {
         // FIXME: where to typecheck?
         assert_eq!(arg.len(), te.pthunk.lar as usize);
         assert_eq!(1, te.pthunk.rar);
-        let pmach = TL_CTX.with(|ctx| ctx.primary.get())
+        let pmach = TL_CTX.with(|ctx| ctx.ctlstate.primary.get())
             .unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
         let tclo = ThunkClosure{pthunk: tp, arg, out: y, pmach};
         self.update.insert((yroot, yclk), tclo);
@@ -1174,6 +1245,12 @@ pub struct CellEnvEntry {
   pub cel_:     Cell_,
 }
 
+impl CellEnvEntry {
+  pub fn state_ref(&self) -> Ref<CellState> {
+    self.cel_.state_ref()
+  }
+}
+
 pub struct CellEnvEntryRef<'a> {
   pub root:     CellPtr,
   pub stablect: &'a Cell<u32>,
@@ -1193,6 +1270,39 @@ impl<'a> CellEnvEntryRef<'a> {
   }
 
   pub fn clock_sync(self, prev_clk: Clock, next_clk: Clock, env: &CtxEnv) {
+    let mut cursor = self;
+    loop {
+      assert_eq!(cursor.cel_.state_ref().clk, prev_clk);
+      cursor.cel_.state_mut().clk = next_clk;
+      break;
+      /*match cursor.cel_ {
+        &Cell_::Top(..) => {
+          break;
+        }
+        &Cell_::Phy(.., ref pcel) => {
+          for (_, rep) in pcel.replicas.iter() {
+            if rep.clk.get() == prev_clk {
+              rep.clk.set(next_clk);
+            }
+          }
+          break;
+        }
+        &Cell_::Cow(.., ref cow) => {
+          // FIXME FIXME
+          unimplemented!();
+          /*match env.lookup_ref(cow.pcel) {
+            None => panic!("bug"),
+            Some(e) => {
+              cursor = e;
+            }
+          }*/
+        }
+        _ => panic!("bug")
+      }*/
+    }
+  }
+
+  pub fn clock_sync_rec(self, prev_clk: Clock, next_clk: Clock, env: &CtxEnv) {
     let mut cursor = self;
     loop {
       assert_eq!(cursor.cel_.state_ref().clk, prev_clk);
@@ -1341,10 +1451,9 @@ impl CtxEnv {
     p
   }
 
-  pub fn lookup_ref(&self, x: CellPtr) -> Option<CellEnvEntryRef> {
-    let query = x;
+  pub fn _lookup_ref(&self, query: CellPtr) -> Option<CellEnvEntryRef> {
     let ty = match self.celtab.get(&query) {
-      None => panic!("bug: CtxEnv::lookup_ref: missing query={:?}", query),
+      None => return None,
       Some(e) => {
         match &e.cel_ {
           &Cell_::Top(.., optr) => {
@@ -1418,11 +1527,17 @@ impl CtxEnv {
     }
   }
 
-  pub fn lookup_mut_ref(&mut self, x: CellPtr) -> Option<CellEnvEntryMutRef> {
-    let query = x;
+  pub fn lookup_ref(&self, query: CellPtr) -> Option<CellEnvEntryRef> {
+    match self._lookup_ref(query) {
+      None => panic!("bug: CtxEnv::lookup_ref: missing query={:?}", query),
+      Some(e) => Some(e)
+    }
+  }
+
+  pub fn lookup_mut_ref(&mut self, query: CellPtr) -> Option<CellEnvEntryMutRef> {
     let mut noalias = false;
     let ty = match self.celtab.get(&query) {
-      None => panic!("bug"),
+      None => panic!("bug: CtxEnv::lookup_mut_ref: missing query={:?}", query),
       Some(e) => {
         match &e.cel_ {
           &Cell_::Top(..) |
@@ -1507,11 +1622,45 @@ impl CtxEnv {
               println!("ERROR: runtime error: attempted to read an uninitialized cell");
               panic!();
             }
-            &Cell_::Phy(.., ref cel) => {
+            &Cell_::Phy(ref state, .., ref cel) => {
               assert_eq!(root, cel.optr);
+              assert_eq!(xclk, state.borrow().clk);
+              /*let mut reps = Vec::new();
+              let mut clks = Vec::new();
+              for (&key, replica) in cel.replicas.iter() {
+                let &(loc, pm) = key.as_ref();
+                reps.push((loc, pm, replica.addr.get(), replica.clk.get()));
+                clks.push(replica.clk.get());
+              }
+              //clks.sort();
+              if clks.len() > 1 {
+                let mut f = false;
+                if xclk != e.state_ref().clk {
+                  f = true;
+                }
+                if !f {
+                  for &c in clks.iter() {
+                    if c != xclk || c != e.state_ref().clk {
+                      f = true;
+                      break;
+                    }
+                  }
+                }
+                if f {
+                  println!("DEBUG: CtxEnv::pread_ref: x={:?} xroot={:?} xclk={:?} e.clk={:?} replicas={:?}",
+                      x, root, xclk, e.state_ref().clk, &reps);
+                  panic!("BREAK");
+                }
+              }*/
               match self.celtab.get_mut(&root) {
                 None => panic!("bug"),
                 Some(e) => {
+                  match &mut e.cel_ {
+                    &mut Cell_::Phy(.., ref mut cel) => {
+                      cel.get_loc(x, xclk, &e.ty, loc);
+                    }
+                    _ => unreachable!()
+                  }
                   // FIXME: type compat.
                   return Some(CellEnvEntryMutRef{
                     root,
@@ -1583,11 +1732,6 @@ impl CtxEnv {
   }
 
   pub fn pfresh_ref(&mut self, x: CellPtr, next_xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
-    // TODO
-    unimplemented!();
-  }
-
-  pub fn pwrite_ref(&mut self, x: CellPtr, prev_xclk: Clock, next_xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
     let query = x;
     let mut noalias = false;
     let ty = match self.celtab.get(&query) {
@@ -1613,13 +1757,15 @@ impl CtxEnv {
         match &e.cel_ {
           &Cell_::Top(ref state, optr) => {
             assert_eq!(root, optr);
+            assert_eq!(next_xclk, state.borrow().clk);
             // FIXME: create a fresh PCell.
             let ty = e.ty.clone();
-            if cfg_debug() { println!("DEBUG: CtxEnv::pwrite_ref: fresh pcel: ty={:?}", &ty); }
+            if cfg_debug() { println!("DEBUG: CtxEnv::pfresh_ref: fresh pcel: ty={:?}", &ty); }
             let state = state.clone();
             match self.celtab.get_mut(&root) {
               None => panic!("bug"),
               Some(e) => {
+                //state.borrow_mut().clk = xclk;
                 let clo = RefCell::new(CellClosure::default());
                 let pcel = PCell::new(optr, ty.clone());
                 e.cel_ = Cell_::Phy(state, clo, pcel);
@@ -1636,11 +1782,17 @@ impl CtxEnv {
           }
           &Cell_::Phy(ref state, _, ref cel) => {
             assert_eq!(root, cel.optr);
-            /*assert_eq!(state.borrow().clk.update(), next_xclk);*/
-            assert_eq!(state.borrow().clk, next_xclk);
+            assert_eq!(next_xclk, state.borrow().clk);
             match self.celtab.get_mut(&root) {
               None => panic!("bug"),
               Some(e) => {
+                // FIXME: need to `get` here.
+                match &mut e.cel_ {
+                  &mut Cell_::Phy(.., ref mut cel) => {
+                    cel.fresh_loc(x, next_xclk, &e.ty, loc);
+                  }
+                  _ => unreachable!()
+                }
                 // FIXME: type compat.
                 return Some(CellEnvEntryMutRef{
                   root,
@@ -1655,8 +1807,99 @@ impl CtxEnv {
           }
           &Cell_::Cow(ref state, _, ref cel) => {
             assert_eq!(root, cel.optr);
-            /*assert_eq!(state.borrow().clk.update(), next_xclk);*/
-            assert_eq!(state.borrow().clk, next_xclk);
+            assert_eq!(next_xclk, state.borrow().clk);
+            unimplemented!();
+          }
+          &Cell_::Bot => {
+            panic!("bug");
+          }
+          &Cell_::Alias(..) => {
+            panic!("bug");
+          }
+          _ => unimplemented!()
+        }
+      }
+    }
+  }
+
+  pub fn pwrite_ref(&mut self, x: CellPtr, prev_xclk: Clock, next_xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
+    assert!(prev_xclk < next_xclk);
+    let query = x;
+    let mut noalias = false;
+    let ty = match self.celtab.get(&query) {
+      None => panic!("bug"),
+      Some(e) => {
+        match &e.cel_ {
+          &Cell_::Top(..) |
+          &Cell_::Phy(..) |
+          &Cell_::Cow(..) |
+          &Cell_::Bot => {
+            noalias = true;
+          }
+          &Cell_::Alias(..) => {}
+          _ => unimplemented!()
+        }
+        e.ty.clone()
+      }
+    };
+    let root = if !noalias { self.probe(query) } else { query };
+    match self.celtab.get(&root) {
+      None => panic!("bug"),
+      Some(e) => {
+        match &e.cel_ {
+          &Cell_::Top(ref state, optr) => {
+            assert_eq!(root, optr);
+            assert_eq!(next_xclk, state.borrow().clk);
+            // FIXME: create a fresh PCell.
+            let ty = e.ty.clone();
+            if cfg_debug() { println!("DEBUG: CtxEnv::pwrite_ref: fresh pcel: ty={:?}", &ty); }
+            let state = state.clone();
+            match self.celtab.get_mut(&root) {
+              None => panic!("bug"),
+              Some(e) => {
+                //state.borrow_mut().clk = xclk;
+                let clo = RefCell::new(CellClosure::default());
+                let pcel = PCell::new(optr, ty.clone());
+                e.cel_ = Cell_::Phy(state, clo, pcel);
+                return Some(CellEnvEntryMutRef{
+                  root,
+                  stablect: &e.stablect,
+                  //snapshot: &e.snapshot,
+                  ty,
+                  //eflag: &mut e.eflag,
+                  cel_: &mut e.cel_,
+                });
+              }
+            }
+          }
+          &Cell_::Phy(ref state, _, ref cel) => {
+            assert_eq!(root, cel.optr);
+            assert_eq!(next_xclk, state.borrow().clk);
+            match self.celtab.get_mut(&root) {
+              None => panic!("bug"),
+              Some(e) => {
+                // FIXME: need to `get` here.
+                match &mut e.cel_ {
+                  &mut Cell_::Phy(.., ref mut cel) => {
+                    cel.get_loc2(x, prev_xclk, next_xclk, &e.ty, loc);
+                  }
+                  _ => unreachable!()
+                }
+                // FIXME: type compat.
+                return Some(CellEnvEntryMutRef{
+                  root,
+                  stablect: &e.stablect,
+                  //snapshot: &e.snapshot,
+                  ty,
+                  //eflag: &mut e.eflag,
+                  cel_: &mut e.cel_,
+                });
+              }
+            }
+          }
+          &Cell_::Cow(ref state, _, ref cel) => {
+            assert_eq!(root, cel.optr);
+            assert_eq!(next_xclk, state.borrow().clk);
             let pcel = cel.pcel;
             match self.celtab.get(&pcel) {
               None => panic!("bug"),

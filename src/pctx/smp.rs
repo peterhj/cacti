@@ -159,13 +159,13 @@ impl PCtxImpl for SmpPCtx {
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
     let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    if cfg_info() { println!("INFO:  SmpPCtx::new: blas num threads={}", n); }
+    if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
     // FIXME FIXME: debugging.
     let n = 1;
     (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n);
-    if cfg_info() { println!("INFO:  SmpPCtx::new: blas set num threads={}", n); }
+    if cfg_info() { println!("INFO:   SmpPCtx::new: blas set num threads={}", n); }
     let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    if cfg_info() { println!("INFO:  SmpPCtx::new: blas num threads={}", n); }
+    if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
     SmpPCtx{
     }
   }

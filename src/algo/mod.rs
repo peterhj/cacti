@@ -517,12 +517,36 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
 
 pub trait StdCellExt<T> {
   fn fetch_add(&self, val: T) -> T;
+  fn fetch_sub(&self, val: T) -> T;
 }
 
 impl StdCellExt<i64> for Cell<i64> {
   fn fetch_add(&self, val: i64) -> i64 {
     let old_val = self.get();
     let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: i64) -> i64 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<usize> for Cell<usize> {
+  fn fetch_add(&self, val: usize) -> usize {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: usize) -> usize {
+    let old_val = self.get();
+    let new_val = old_val - val;
     self.set(new_val);
     old_val
   }
