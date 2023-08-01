@@ -242,7 +242,7 @@ pub fn resume() -> SpineRet {
   }))
 }
 
-#[track_caller]
+/*#[track_caller]
 pub fn resume_put_mem_val<K: Borrow<CellPtr>>(key: K, val: &dyn Any) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
@@ -250,10 +250,10 @@ pub fn resume_put_mem_val<K: Borrow<CellPtr>>(key: K, val: &dyn Any) -> SpineRet
     let mut spine = ctx.spine.borrow_mut();
     spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemV(*key.borrow(), val))
   }))
-}
+}*/
 
 #[track_caller]
-pub fn resume_put_mem_fun<K: Borrow<CellPtr>, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
+pub fn resume_put_mem_with<K: Borrow<CellPtr>, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
@@ -296,29 +296,6 @@ pub fn break_() {
     //spine.env._;
     spine.log.push(SpineEntry::Break_);*/
   }))
-}*/
-
-/*pub struct LocusScope {
-  pub loc: Locus,
-}
-
-impl Drop for LocusScope {
-  fn drop(&mut self) {
-  }
-}
-
-impl LocusScope {
-  #[track_caller]
-  pub fn new(loc: Locus) -> LocusScope {
-    TL_CTX.with(|ctx| {
-      unimplemented!();
-    })
-  }
-}
-
-#[track_caller]
-pub fn mem_scope() -> LocusScope {
-  panick_wrap(|| LocusScope::new(Locus::Mem))
 }*/
 
 pub struct PMachScope {
@@ -375,55 +352,6 @@ pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
   TL_CTX.with(f)
 }
 
-/*#[cfg(not(feature = "gpu"))]
-pub fn ctx_init_gpu(_dev: i32) {
-}
-
-#[cfg(feature = "gpu")]
-pub fn ctx_init_gpu(dev: i32) {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    ctx.gpu.dev.set(dev);
-  })
-}*/
-
-/*pub fn ctx_fresh() -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.ctr.fresh_cel()
-  })
-}*/
-
-/*pub fn ctx_tmp_fresh() -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.ctr.fresh_tmp()
-  })
-}
-
-pub fn ctx_reset_tmp() {
-  TL_CTX.with(|ctx| {
-    ctx.env.borrow_mut().reset_tmp();
-    ctx.ctr.reset_tmp();
-  })
-}
-
-pub fn ctx_fresh_tmp() -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.ctr.fresh_tmp()
-  })
-}
-
-pub fn ctx_peek_tmp() -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.ctr.peek_tmp()
-  })
-}
-
-pub fn ctx_unify(x: CellPtr, uty: Option<CellType>) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.env.borrow_mut().unify(&ctx.ctr, x, uty)
-  })
-}*/
-
 pub fn ctx_release(x: CellPtr) {
   TL_CTX.try_with(|ctx| {
     ctx.env.borrow().release(x);
@@ -450,38 +378,6 @@ pub fn ctx_lookup_dtype(x: CellPtr) -> Dtype {
     match ctx.env.borrow().lookup_ref(x) {
       None => panic!("bug"),
       Some(e) => e.ty.dtype
-    }
-  })
-}
-
-pub fn ctx_lookup_mode(x: CellPtr) -> CellMode {
-  TL_CTX.with(|ctx| {
-    match ctx.env.borrow().lookup_ref(x) {
-      None => panic!("bug"),
-      Some(e) => e.state().mode
-    }
-  })
-}
-
-pub fn ctx_lookup_flag(x: CellPtr) -> CellFlag {
-  TL_CTX.with(|ctx| {
-    match ctx.env.borrow().lookup_ref(x) {
-      None => panic!("bug"),
-      Some(e) => {
-        e.state().flag
-        //*e.cel.flag.borrow()
-      }
-    }
-  })
-}
-
-pub fn ctx_lookup_eflag(x: CellPtr) -> CellEFlag {
-  TL_CTX.with(|ctx| {
-    match ctx.env.borrow().lookup_ref(x) {
-      None => panic!("bug"),
-      Some(e) => {
-        e.eflag
-      }
     }
   })
 }
@@ -611,130 +507,6 @@ pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
   })
 }
 
-/*pub fn ctx_lookup_or_insert_gradl(x: CellPtr, tg: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.env.borrow_mut().lookup_or_insert_gradr(&ctx.ctr, tg, x)
-  })
-}
-
-pub fn ctx_lookup_or_insert_gradr(tg: CellPtr, x: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    ctx.env.borrow_mut().lookup_or_insert_gradr(&ctx.ctr, tg, x)
-  })
-}
-
-pub fn ctx_accumulate_gradr(tg: CellPtr, x: CellPtr, dx: CellPtr) {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    unimplemented!();
-    //ctx.env.borrow_mut().accumulate_gradr(&ctx.ctr, tg, x, dx)
-  })
-}*/
-
-/*pub fn ctx_trace_val(og: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    match env.lookup_ref(og) {
-      None => panic!("bug"),
-      Some(e) => {
-        let ty = e.ty.clone();
-        let x = ctx.ctr.fresh_cel();
-        env.insert_alias(x, ty, og);
-        // FIXME
-        let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::TraceV(x, og));
-        spine.env.cache.insert(x, sp);
-        spine.env.aff.insert(x, sp);
-        x
-      }
-    }
-  })
-}
-
-pub fn ctx_profile_val(og: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    match env.lookup_ref(og) {
-      None => panic!("bug"),
-      Some(e) => {
-        let ty = e.ty.clone();
-        let x = ctx.ctr.fresh_cel();
-        env.insert_alias(x, ty, og);
-        // FIXME
-        let mut spine = ctx.spine.borrow_mut();
-        let sp = spine.curp;
-        spine.curp += 1;
-        spine.log.push(SpineEntry::Profile(x, og));
-        spine.env.cache.insert(x, sp);
-        spine.env.aff.insert(x, sp);
-        x
-      }
-    }
-  })
-}*/
-
-pub fn ctx_opaque(og: CellPtr) -> CellPtr {
-  TL_CTX.with(|ctx| {
-    // FIXME FIXME
-    let mut env = ctx.env.borrow_mut();
-    match env.lookup_ref(og) {
-      None => panic!("bug"),
-      Some(e) => {
-        let ty = e.ty.clone();
-        let x = ctx.ctr.fresh_cel();
-        env.insert_alias(x, ty, og);
-        // FIXME
-        let spine = ctx.spine.borrow();
-        spine.opaque(x, og);
-        x
-      }
-    }
-  })
-}
-
-/*pub fn ctx_init_zeros(ty: CellType) -> CellPtr {
-  match ty.dtype {
-    Dtype::Fp32 => {
-      let value = 0.0_f32;
-      //let x = ctx_fresh();
-      match ty.ndim() {
-        0 => {
-          ctx_pop_init_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val_()}, ty)
-        }
-        1 => {
-          unimplemented!();
-          //ctx_pop_init_thunk_(SetScalar1dFutThunkSpec{val: value.into_scalar_val()}, ty)
-        }
-        _ => unimplemented!()
-      }
-    }
-    _ => unimplemented!()
-  }
-}
-
-pub fn ctx_set_ones(ty: CellType) -> CellPtr {
-  match ty.dtype {
-    Dtype::Fp32 => {
-      let value = 1.0_f32;
-      match ty.ndim() {
-        0 => {
-          ctx_pop_thunk_(SetScalarFutThunkSpec{val: value.into_scalar_val_()}, ty)
-        }
-        1 => {
-          unimplemented!();
-          //ctx_pop_thunk_(SetScalar1dFutThunkSpec{val: value.into_scalar_val()}, ty)
-        }
-        _ => unimplemented!()
-      }
-    }
-    _ => unimplemented!()
-  }
-}*/
-
 pub fn ctx_clean_arg() -> bool {
   TL_CTX.with(|ctx| {
     ctx.thunkenv.borrow().arg.is_empty()/* &&
@@ -755,11 +527,11 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
             let xroot = cur_env._deref(x);
             println!("DEBUG: ctx_push_cell_arg:   xroot={:?} state={:?}",
                 xroot, cur_env.state.get(&xroot));
-            let query = CellPtr::from_unchecked(2401);
+            /*let query = CellPtr::from_unchecked(2401);
             /*println!("DEBUG: ctx_push_cell_arg:   query={:?} state={:?} alias={:?}",
                 query, cur_env.state.get(&query), cur_env.alias.get(&query));*/
             println!("DEBUG: ctx_push_cell_arg:   query={:?} state={:?}",
-                query, cur_env.state.get(&query));
+                query, cur_env.state.get(&query));*/
             panic!("bug");
           }
           Some(xclk) => xclk
@@ -911,7 +683,7 @@ pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
-        //assert_eq!(e.ty, &oty_);
+        assert_eq!(e.ty, &oty_);
         e.root
       }
     };
@@ -983,11 +755,10 @@ pub fn ctx_pop_initialize_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr,
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
-        //assert_eq!(e.ty, &oty_);
+        assert_eq!(e.ty, &oty_);
         e.root
       }
     };
-    ctx.env.borrow_mut().insert_top(y, oty_);
     let spine = ctx.spine.borrow();
     assert_eq!(yroot, spine._deref(y));
     //spine.uninit(y);
@@ -1040,7 +811,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
     let yroot = match ctx.env.borrow().lookup_ref(y) {
       None => panic!("bug"),
       Some(e) => {
-        //assert_eq!(e.ty, &oty_);
+        assert_eq!(e.ty, &oty_);
         e.root
       }
     };
@@ -1058,7 +829,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
   unimplemented!();
 }*/
 
-pub fn ctx_gc() {
+/*pub fn ctx_gc() {
   TL_CTX.with(|ctx| {
     // FIXME FIXME
     let mut gc_list = Vec::new();
@@ -1066,18 +837,16 @@ pub fn ctx_gc() {
     ctx.env.borrow_mut().gc(&gc_list);
     //ctx.thunkenv.borrow_mut().gc(&gc_list);
   })
-}
+}*/
 
 pub struct CtxCtr {
   pub ptr_ctr:  Cell<i32>,
-  //pub tmp_ctr:  Cell<i32>,
 }
 
 impl CtxCtr {
   pub fn new() -> CtxCtr {
     CtxCtr{
       ptr_ctr:  Cell::new(0),
-      //tmp_ctr:  Cell::new(0),
     }
   }
 }
@@ -1105,22 +874,6 @@ impl CtxCtr {
     self.ptr_ctr.set(next);
     next
   }
-
-  /*pub fn reset_tmp(&self) {
-    self.tmp_ctr.set(0);
-  }
-
-  pub fn fresh_tmp(&self) -> CellPtr {
-    let next = self.tmp_ctr.get() - 1;
-    assert!(next < 0);
-    assert!(next > i32::min_value());
-    self.tmp_ctr.set(next);
-    CellPtr::from_unchecked(next)
-  }
-
-  pub fn peek_tmp(&self) -> CellPtr {
-    CellPtr::from_unchecked(self.tmp_ctr.get())
-  }*/
 }
 
 pub struct ThunkEnvEntry {
@@ -1195,11 +948,8 @@ impl CtxThunkEnv {
     let (lar, rar, spec_dim, tk, ) = key;
     if tp_.is_none() {
       let tp = ctr.fresh_thunk();
-      /*let mut arg = Vec::new();
-      swap(&mut arg, &mut *ctx.arg.borrow_mut());
-      assert_eq!(arg.len(), ar_in as usize);*/
       let pthunk = Rc::new(PThunk::new(tp, spec_dim.clone(), (tk.0).clone()));
-      let te = ThunkEnvEntry{/*arg,*/ pthunk};
+      let te = ThunkEnvEntry{pthunk};
       self.thunkidx.insert((lar, rar, spec_dim, tk, ), tp);
       self.thunktab.insert(tp, te);
       tp_ = Some(tp);
@@ -1211,21 +961,6 @@ impl CtxThunkEnv {
     // FIXME FIXME: remove updating thunks.
   }
 }
-
-/*#[derive(Clone, Debug)]
-pub struct CellClosure {
-  pub ithunk:   Option<(Counter, ThunkPtr)>,
-  pub thunk_:   Vec<(Counter, ThunkPtr)>,
-}
-
-impl Default for CellClosure {
-  fn default() -> CellClosure {
-    CellClosure{
-      ithunk:   None,
-      thunk_:   Vec::new(),
-    }
-  }
-}*/
 
 #[derive(Clone, Debug)]
 pub struct CellClosure {
@@ -1259,10 +994,6 @@ impl CellClosure {
     assert!(clk.is_update());
     if self.ctr > clk.ctr() {
       panic!("bug");
-    /*} else if self.ctr < clk.ctr() {
-      self.ctr = clk.ctr();
-      self.thunk.clear();
-      self.thunk.push(ThunkPtr::nil());*/
     } else if self.ctr < clk.ctr() {
       panic!("bug");
     }
@@ -1366,7 +1097,7 @@ pub enum MCell_ {
   //Map(RefCell<CellState>, MCellMap),
 }
 
-#[derive(Clone, Copy, Default)]
+/*#[derive(Clone, Copy, Default)]
 #[repr(transparent)]
 pub struct CellEFlag {
   bits: u8,
@@ -1432,14 +1163,6 @@ impl CellEFlag {
   pub fn set_break(&mut self) {
     self.bits |= 0x80;
   }*/
-}
-
-/*#[derive(Clone, Copy, Debug)]
-#[repr(u8)]
-pub enum CellEMode {
-  Read,
-  Rwlock,
-  Mutex,
 }*/
 
 pub struct CellEnvEntry {
@@ -1447,7 +1170,7 @@ pub struct CellEnvEntry {
   pub stablect: Cell<u32>,
   //pub snapshot: Cell<u32>,
   pub ty:       CellType,
-  pub eflag:    CellEFlag,
+  //pub eflag:    CellEFlag,
   pub cel_:     Cell_,
 }
 
@@ -1456,7 +1179,7 @@ pub struct CellEnvEntryRef<'a> {
   pub stablect: &'a Cell<u32>,
   //pub snapshot: &'a Cell<u32>,
   pub ty:       &'a CellType,
-  pub eflag:    CellEFlag,
+  //pub eflag:    CellEFlag,
   pub cel_:     &'a Cell_,
 }
 
@@ -1539,7 +1262,7 @@ pub struct CellEnvEntryMutRef<'a> {
   pub stablect: &'a Cell<u32>,
   //pub snapshot: &'a Cell<u32>,
   pub ty:       CellType,
-  pub eflag:    &'a mut CellEFlag,
+  //pub eflag:    &'a mut CellEFlag,
   pub cel_:     &'a mut Cell_,
 }
 
@@ -1557,7 +1280,6 @@ pub struct MCellEnvEntry {
 //#[derive(Default)]
 pub struct CtxEnv {
   // FIXME
-  //pub tmptab:   HashMap<CellPtr, CellPtr>,
   pub alias_root:   RefCell<HashMap<CellPtr, CellPtr>>,
   pub cow_root:     RefCell<HashMap<CellPtr, (CellPtr, Clock)>>,
   //pub stable:   HashSet<CellPtr>,
@@ -1565,28 +1287,20 @@ pub struct CtxEnv {
   pub snapshot: HashMap<(CellPtr, Clock), Vec<CellPtr>>,
   /*pub atomtab:  HashMap<Atom, ()>,*/
   pub mceltab:  HashMap<MCellPtr, MCellEnvEntry>,
-  //pub gradr:    HashMap<[CellPtr; 2], CellPtr>,
-  //pub ungradr:  HashMap<[CellPtr; 2], CellPtr>,
-  //pub bwd:      HashMap<CellPtr, Clock>,
-  //pub gradr:    HashMap<(CellPtr, CellPtr, Clock), CellPtr>,
-  pub tag:      HashMap<CellPtr, HashSet<String>>,
+  //pub tag:      HashMap<CellPtr, HashSet<String>>,
   //pub tag:      HashMap<CellPtr, Vec<String>>,
 }
 
 impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
-      //tmptab:   HashMap::new(),
       alias_root:   RefCell::new(HashMap::new()),
       cow_root:     RefCell::new(HashMap::new()),
       celtab:   HashMap::new(),
       snapshot: HashMap::new(),
       /*atomtab:  HashMap::new(),*/
       mceltab:  HashMap::new(),
-      //gradr:    HashMap::new(),
-      //ungradr:  HashMap::new(),
-      //bwd:      HashMap::new(),
-      tag:      HashMap::new(),
+      //tag:      HashMap::new(),
     }
   }
 }
@@ -1594,13 +1308,9 @@ impl Default for CtxEnv {
 impl CtxEnv {
   pub fn reset(&mut self) {
     // FIXME FIXME
-    /*self.tmptab.clear();*/
     self.celtab.clear();
     self.alias_root.borrow_mut().clear();
-    //self.gradr.clear();
-    //self.ungradr.clear();
-    //self.bwd.clear();
-    self.tag.clear();
+    //self.tag.clear();
   }
 
   pub fn probe(&self, x: CellPtr) -> CellPtr {
@@ -1661,7 +1371,7 @@ impl CtxEnv {
               stablect: &e.stablect,
               //snapshot: &e.snapshot,
               ty: &e.ty,
-              eflag: e.eflag,
+              //eflag: e.eflag,
               cel_: &e.cel_,
             });
           }
@@ -1701,7 +1411,7 @@ impl CtxEnv {
           stablect: &e.stablect,
           //snapshot: &e.snapshot,
           ty,
-          eflag: e.eflag,
+          //eflag: e.eflag,
           cel_: &e.cel_,
         })
       }
@@ -1757,14 +1467,14 @@ impl CtxEnv {
           stablect: &e.stablect,
           //snapshot: &e.snapshot,
           ty,
-          eflag: &mut e.eflag,
+          //eflag: &mut e.eflag,
           cel_: &mut e.cel_,
         });
       }
     }
   }
 
-  pub fn pread_ref(&mut self, x: CellPtr, xclk: Clock, /*emode: CellEMode,*/ /*pmach: PMach,*/) -> Option<CellEnvEntryMutRef> {
+  pub fn pread_ref(&mut self, x: CellPtr, xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
     let mut query = x;
     let mut ty = None;
     loop {
@@ -1803,26 +1513,12 @@ impl CtxEnv {
                 None => panic!("bug"),
                 Some(e) => {
                   // FIXME: type compat.
-                  /*// FIXME FIXME
-                  match emode {
-                    CellEMode::Read => {
-                      assert!(!e.eflag.mutex());
-                      assert!(!e.eflag.rwlock());
-                      e.eflag.set_read();
-                    }
-                    CellEMode::Rwlock => {
-                      assert!(!e.eflag.mutex());
-                      assert!(!e.eflag.read());
-                      e.eflag.set_rwlock();
-                    }
-                    _ => panic!("bug")
-                  }*/
                   return Some(CellEnvEntryMutRef{
                     root,
                     stablect: &e.stablect,
                     //snapshot: &e.snapshot,
                     ty: ty.unwrap(),
-                    eflag: &mut e.eflag,
+                    //eflag: &mut e.eflag,
                     cel_: &mut e.cel_,
                   });
                 }
@@ -1867,7 +1563,7 @@ impl CtxEnv {
                     stablect: &e.stablect,
                     //snapshot: &e.snapshot,
                     ty: ty.unwrap(),
-                    eflag: &mut e.eflag,
+                    //eflag: &mut e.eflag,
                     cel_: &mut e.cel_,
                   });
                 }
@@ -1886,7 +1582,12 @@ impl CtxEnv {
     }
   }
 
-  pub fn pwrite_ref(&mut self, x: CellPtr, /*old_xclk: Clock,*/ new_xclk: Clock, /*emode: CellEMode,*/ /*pmach: PMach,*/) -> Option<CellEnvEntryMutRef> {
+  pub fn pfresh_ref(&mut self, x: CellPtr, next_xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
+    // TODO
+    unimplemented!();
+  }
+
+  pub fn pwrite_ref(&mut self, x: CellPtr, prev_xclk: Clock, next_xclk: Clock, loc: Locus) -> Option<CellEnvEntryMutRef> {
     let query = x;
     let mut noalias = false;
     let ty = match self.celtab.get(&query) {
@@ -1927,7 +1628,7 @@ impl CtxEnv {
                   stablect: &e.stablect,
                   //snapshot: &e.snapshot,
                   ty,
-                  eflag: &mut e.eflag,
+                  //eflag: &mut e.eflag,
                   cel_: &mut e.cel_,
                 });
               }
@@ -1935,8 +1636,8 @@ impl CtxEnv {
           }
           &Cell_::Phy(ref state, _, ref cel) => {
             assert_eq!(root, cel.optr);
-            /*assert_eq!(state.borrow().clk.update(), new_xclk);*/
-            assert_eq!(state.borrow().clk, new_xclk);
+            /*assert_eq!(state.borrow().clk.update(), next_xclk);*/
+            assert_eq!(state.borrow().clk, next_xclk);
             match self.celtab.get_mut(&root) {
               None => panic!("bug"),
               Some(e) => {
@@ -1946,7 +1647,7 @@ impl CtxEnv {
                   stablect: &e.stablect,
                   //snapshot: &e.snapshot,
                   ty,
-                  eflag: &mut e.eflag,
+                  //eflag: &mut e.eflag,
                   cel_: &mut e.cel_,
                 });
               }
@@ -1954,8 +1655,8 @@ impl CtxEnv {
           }
           &Cell_::Cow(ref state, _, ref cel) => {
             assert_eq!(root, cel.optr);
-            /*assert_eq!(state.borrow().clk.update(), new_xclk);*/
-            assert_eq!(state.borrow().clk, new_xclk);
+            /*assert_eq!(state.borrow().clk.update(), next_xclk);*/
+            assert_eq!(state.borrow().clk, next_xclk);
             let pcel = cel.pcel;
             match self.celtab.get(&pcel) {
               None => panic!("bug"),
@@ -1996,7 +1697,7 @@ impl CtxEnv {
                       stablect: &e.stablect,
                       //snapshot: &e.snapshot,
                       ty,
-                      eflag: &mut e.eflag,
+                      //eflag: &mut e.eflag,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -2025,7 +1726,7 @@ impl CtxEnv {
       stablect: Cell::new(0),
       //snapshot: Cell::new(0),
       ty,
-      eflag:    CellEFlag::default(),
+      //eflag:    CellEFlag::default(),
       cel_:     Cell_::Top(RefCell::new(CellState::default()), x),
     };
     self.celtab.insert(x, e);
@@ -2041,7 +1742,7 @@ impl CtxEnv {
       stablect: Cell::new(0),
       //snapshot: Cell::new(0),
       ty,
-      eflag:    CellEFlag::default(),
+      //eflag:    CellEFlag::default(),
       cel_:     Cell_::Phy(
                     RefCell::new(CellState::default()),
                     RefCell::new(CellClosure::default()),
@@ -2077,7 +1778,7 @@ impl CtxEnv {
       stablect: Cell::new(0),
       //snapshot: Cell::new(0),
       ty,
-      eflag:    CellEFlag::default(),
+      //eflag:    CellEFlag::default(),
       cel_:     Cell_::Cow(
                     state,
                     clo,
@@ -2102,7 +1803,7 @@ impl CtxEnv {
       stablect: Cell::new(u32::max_value()),
       //snapshot: Cell::new(u32::max_value()),
       ty,
-      eflag:    CellEFlag::default(),
+      //eflag:    CellEFlag::default(),
       cel_:     Cell_::Alias(CellAlias::NewType, og),
     };
     self.celtab.insert(x, e);
@@ -2126,7 +1827,7 @@ impl CtxEnv {
     let e = CellEnvEntry{
       stablect: Cell::new(u32::max_value()),
       ty,
-      eflag:    CellEFlag::default(),
+      //eflag:    CellEFlag::default(),
       cel_:     Cell_::Alias(CellAlias::Const_, og),
     };
     self.celtab.insert(x, e);
@@ -2215,102 +1916,7 @@ impl CtxEnv {
     x
   }
 
-  /*pub fn lookup_gradr(&mut self, ctr: &CtxCtr, tg: CellPtr, x: CellPtr) -> CellPtr {
-    match self.gradr.get(&[tg, x]) {
-      None => {
-        panic!("bug");
-      }
-      Some(&dx) => dx
-    }
-  }
-
-  pub fn lookup_or_insert_gradr(&mut self, ctr: &CtxCtr, tg: CellPtr, x: CellPtr) -> CellPtr {
-    match self.gradr.get(&[tg, x]) {
-      None => {
-        // FIXME FIXME
-        let dx = ctr.fresh_cel();
-        let ty = match self.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => e.ty.clone()
-        };
-        let cel = PCell::new(dx, ty.clone());
-        self.insert_phy(dx, ty, cel);
-        self.gradr.insert([tg, x], dx);
-        self.ungradr.insert([tg, dx], x);
-        dx
-      }
-      Some(&dx) => dx
-    }
-  }
-
-  pub fn accumulate_gradr(&mut self, ctr: &CtxCtr, tg: CellPtr, x: CellPtr, dx: CellPtr) -> CellPtr {
-    // FIXME FIXME
-    match self.gradr.get(&[tg, x]) {
-      None => {
-        // FIXME FIXME
-        let ty = match self.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => e.ty.clone()
-        };
-        //let dx0 = self.zeros(ty);
-        //assert!(self.gradr.insert([tg, x], dx0).is_none());
-      }
-      Some(_) => {}
-    }
-    match self.gradr.get(&[tg, x]) {
-      None => unreachable!(),
-      Some(&dx0) => {
-        //dx0 += dx;
-      }
-    }
-    unimplemented!();
-  }*/
-
-  /*pub fn reset_tmp(&mut self) {
-    self.tmptab.clear();
-  }
-
-  pub fn unify(&mut self, ctr: &CtxCtr, x: CellPtr, uty: Option<CellType>) -> CellPtr {
-    assert!(x.to_unchecked() < 0);
-    //assert!(y.to_unchecked() > 0);
-    match self.lookup_mut_ref(x) {
-      None => panic!("bug"),
-      Some(e) => {
-        // FIXME FIXME: cases.
-        match e.cel_ {
-          &mut Cell_::Phy(ref _state, _, ref mut pcel) => {
-            if pcel.optr == x {
-              // FIXME FIXME: fixup Top celltype.
-              let y = ctr.fresh_cel();
-              pcel.optr = y;
-              if let Some(ty) = uty.as_ref() {
-                pcel.ogty = ty.clone();
-                pcel.olay = CellLayout::new_packed(&ty);
-              }
-              let mut e = self.celtab.remove(&x).unwrap();
-              if let Some(ty) = uty {
-                e.ty = ty;
-              }
-              assert!(self.celtab.insert(y, e).is_none());
-              let mut root = self.alias_root.borrow_mut();
-              root.insert(x, y);
-              self.tmptab.insert(x, y);
-              y
-            } else if pcel.optr.to_unchecked() <= 0 {
-              panic!("bug")
-            } else {
-              // FIXME FIXME
-              pcel.optr
-            }
-          }
-          // FIXME FIXME
-          _ => unimplemented!()
-        }
-      }
-    }
-  }*/
-
-  pub fn gc_prepare(&self, gc_list: &mut Vec<CellPtr>) {
+  /*pub fn gc_prepare(&self, gc_list: &mut Vec<CellPtr>) {
     // FIXME FIXME: temporarily commented out for debugging.
     /*for (&k, _) in self.celtab.iter() {
       match self.lookup(k) {
@@ -2331,5 +1937,5 @@ impl CtxEnv {
       root.remove(&k);
       self.celtab.remove(&k);
     }
-  }
+  }*/
 }

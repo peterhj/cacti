@@ -316,9 +316,16 @@ impl PCtxImpl for NvGpuPCtx {
     let sz = ty.packed_span_bytes() as usize;
     match locus {
       Locus::Mem => {
-        let mem = NvGpuMemCell::try_alloc(sz)?;
         let addr = pctr.fresh_addr();
-        assert!(self.page_map.page_tab.borrow_mut().insert(addr, Rc::new(mem)).is_none());
+        //let mem = NvGpuMemCell::try_alloc(sz)?;
+        //assert!(self.page_map.page_tab.borrow_mut().insert(addr, Rc::new(mem)).is_none());
+        match self.page_map.try_alloc(addr, sz) {
+          Err(_) => {
+            // FIXME FIXME: oom.
+            unimplemented!();
+          }
+          Ok(_) => {}
+        }
         Ok(addr)
       }
       Locus::VMem => {
@@ -615,7 +622,7 @@ impl Drop for NvGpuMemCell {
 }
 
 impl NvGpuMemCell {
-  pub fn try_alloc(sz: usize) -> Result<NvGpuMemCell, PMemErr> {
+  pub fn _try_alloc(sz: usize) -> Result<NvGpuMemCell, PMemErr> {
     let ptr = match cuda_mem_alloc_host(sz) {
       Err(CUDA_ERROR_OUT_OF_MEMORY) => {
         return Err(PMemErr::Oom);
@@ -628,7 +635,7 @@ impl NvGpuMemCell {
     if ptr.is_null() {
       return Err(PMemErr::Bot);
     }
-    if cfg_debug() { println!("DEBUG: NvGpuMemCell::try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz); }
+    if cfg_debug() { println!("DEBUG: NvGpuMemCell::_try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz); }
     Ok(NvGpuMemCell{
       root: Cell::new(CellPtr::nil()),
       flag: Cell::new(0),
@@ -682,7 +689,7 @@ pub struct NvGpuPageMap {
 
 impl NvGpuPageMap {
   pub fn new() -> NvGpuPageMap {
-    let mem = match NvGpuMemCell::try_alloc(1 << 16) {
+    let mem = match NvGpuMemCell::_try_alloc(1 << 16) {
       Err(_) => {
         println!("ERROR: NvGpuPageMap: failed to allocate shadow back buffer");
         panic!();
@@ -705,7 +712,7 @@ impl NvGpuPageMap {
   }
 
   pub fn try_alloc(&self, addr: PAddr, sz: usize) -> Result<Rc<NvGpuMemCell>, PMemErr> {
-    let cel = Rc::new(NvGpuMemCell::try_alloc(sz)?);
+    let cel = Rc::new(NvGpuMemCell::_try_alloc(sz)?);
     assert!(self.page_tab.borrow_mut().insert(addr, cel.clone()).is_none());
     assert!(self.page_idx.borrow_mut().insert(cel.ptr, addr).is_none());
     Ok(cel)
@@ -716,7 +723,11 @@ impl NvGpuPageMap {
     match cel.as_ref() {
       None => {}
       Some(cel) => {
-        assert_eq!(self.page_idx.borrow_mut().remove(&cel.ptr), Some(addr));
+        let oaddr = self.page_idx.borrow_mut().remove(&cel.ptr);
+        if !(oaddr == Some(addr)) {
+          println!("WARNING: NvGpuPageMap::release: addr={:?} cel.ptr={:?} oaddr={:?}", addr, cel.ptr, oaddr);
+        }
+        assert_eq!(oaddr, Some(addr));
       }
     }
     cel

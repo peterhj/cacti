@@ -71,7 +71,7 @@ fn main() {
     let tok_dim = cfg.tok_dim;
     if iter_nr == 0 {
       for (cel, key) in inv_matches.iter() {
-        resume_put_mem_fun(cel, |ty, mem| {
+        resume_put_mem_with(cel, |ty, mem| {
           let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
           if ty.unbroadcast() != pickty.unbroadcast() {
             panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
@@ -85,7 +85,7 @@ fn main() {
         });
       }
     }
-    resume_put_mem_fun(&in_tok, |_, mem| {
+    resume_put_mem_with(&in_tok, |_, mem| {
       println!("boot: set in_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.push(1_u16);
@@ -93,7 +93,7 @@ fn main() {
       tok_buf.resize(seq_cap as _, 0_u16);
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_fun(&input.in_lm_tok, |_, mem| {
+    resume_put_mem_with(&input.in_lm_tok, |_, mem| {
       println!("boot: set in_lm_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       for _ in 0 .. seq_cap {

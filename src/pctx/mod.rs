@@ -538,7 +538,7 @@ impl MemReg {
     print!("DEBUG: MemReg: {:08x} :", start * 4);
     for i in start .. min(start + 8, len) {
       let x = buf[i];
-      print!(" {}", x);
+      print!(" {:+e}", x);
     }
     println!();
     if len <= 0 {
@@ -548,7 +548,7 @@ impl MemReg {
     print!("DEBUG: MemReg: {:08x} :", start * 4);
     for i in start .. min(start + 8, len) {
       let x = buf[i];
-      print!(" {}", x);
+      print!(" {:+e}", x);
     }
     println!();
   }
@@ -562,7 +562,7 @@ impl MemReg {
     print!("DEBUG: MemReg: {:08x} :", start * 2);
     for i in start .. min(start + 8, len) {
       let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
+      print!(" {:+e}", x);
     }
     println!();
     if len <= 0 {
@@ -572,7 +572,7 @@ impl MemReg {
     print!("DEBUG: MemReg: {:08x} :", start * 2);
     for i in start .. min(start + 8, len) {
       let x = f16::from_bits(buf[i]);
-      print!(" {}", x);
+      print!(" {:+e}", x);
     }
     println!();
   }

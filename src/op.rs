@@ -107,7 +107,7 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                       None => panic!("bug"),
                       Some((_, state)) => {
                         // FIXME: sealing here is kinda hacky.
-                        state.flag.set_seal();
+                        //state.flag.set_seal();
                         //state.flag.unset_intro();
                         assert!(!state.clk.is_uninit());
                         state.clk = state.clk.uninit();
@@ -126,8 +126,14 @@ impl<R: Borrow<CellPtr>> AddAssign<R> for CellPtr {
                       Some((_, state)) => {
                         //state.flag.set_intro();
                         //assert!(state.flag.intro());
-                        assert!(!state.flag.seal());
-                        assert!(this_clk.is_update());
+                        //assert!(!state.flag.seal());
+                        //state.flag.unset_seal();
+                        /*if !this_clk.is_update() {
+                          println!("DEBUG: AddAssign::add_assign: this={:?} this_clk={:?} state.clk={:?}",
+                              this, this_clk, state.clk);
+                        }
+                        assert!(this_clk.is_update());*/
+                        assert!(this_clk.is_init_once() || this_clk.is_update());
                         assert!(state.clk < this_clk);
                         state.clk = this_clk;
                       }
@@ -1116,28 +1122,44 @@ impl Neg for StableCell {
 
 pub trait MathInitOps: Borrow<CellPtr> {
   #[track_caller]
-  fn init_online_prescale_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T, rate: T) {
+  fn init_online_add_scale2<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, src_scale: T, dst_scale: T) {
     panick_wrap(|| {
       let this = *self.borrow();
       let val = *val.borrow();
-      let rate = rate.into_scalar_val_();
-      let scale = scale.into_scalar_val_();
+      let src_scale = src_scale.into_scalar_val_();
+      let dst_scale = dst_scale.into_scalar_val_();
+      let ty = ctx_lookup_type(this);
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(val);
-      ctx_pop_initialize_thunk(OnlineAverageScaleInitFutThunkSpec{rate, scale}, this)
+      ctx_pop_initialize_thunk_(OnlineAddScale2InitFutThunkSpec{src_scale, dst_scale}, this, ty)
     })
   }
 
   #[track_caller]
-  fn init_online_prescale_square_average<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, scale: T, rate: T) {
+  fn init_online_average_scale<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, src_scale: T, rate: T) {
     panick_wrap(|| {
       let this = *self.borrow();
       let val = *val.borrow();
+      let src_scale = src_scale.into_scalar_val_();
       let rate = rate.into_scalar_val_();
-      let scale = scale.into_scalar_val_();
+      let ty = ctx_lookup_type(this);
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(val);
-      ctx_pop_initialize_thunk(OnlineAverageSquareScaleInitFutThunkSpec{rate, scale}, this)
+      ctx_pop_initialize_thunk_(OnlineAverageScaleInitFutThunkSpec{src_scale, rate}, this, ty)
+    })
+  }
+
+  #[track_caller]
+  fn init_online_average_square_scale<V: Borrow<CellPtr>, T: IntoScalarValExt>(&self, val: V, src_scale: T, rate: T) {
+    panick_wrap(|| {
+      let this = *self.borrow();
+      let val = *val.borrow();
+      let src_scale = src_scale.into_scalar_val_();
+      let rate = rate.into_scalar_val_();
+      let ty = ctx_lookup_type(this);
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(val);
+      ctx_pop_initialize_thunk_(OnlineAverageSquareScaleInitFutThunkSpec{src_scale, rate}, this, ty)
     })
   }
 
@@ -1167,6 +1189,10 @@ pub trait MathInitOps: Borrow<CellPtr> {
       let signed_lr = (-lr * (unbias2 / unbias1)).into_scalar_val_();
       let lamda = lamda.into_scalar_val_();
       let eps = (eps * unbias2).into_scalar_val_();
+      if cfg_debug() {
+      println!("DEBUG: init_online_adamw_update32: signed lr={:?} lamda={:?} eps={:?}",
+          signed_lr, lamda, eps);
+      }
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(emavg);
       ctx_push_cell_arg(emavg2);
@@ -2251,12 +2277,12 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   fn cache(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow();
-      spine.cache_aff(*self.borrow());
+      spine.cache(*self.borrow());
       //self
     }))
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn cache_init(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow();
@@ -2266,7 +2292,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   }
 
   #[track_caller]
-  fn init_cache(&self) /*-> Self */{ self.cache_init() }
+  fn init_cache(&self) /*-> Self */{ self.cache_init() }*/
 
   /*fn cache_init_futhark(self, fut_str: &str) -> Self {
     // TODO: ???
@@ -2401,7 +2427,7 @@ pub trait CtlOps: Borrow<CellPtr> + Sized {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let x = *self.borrow();
       let xclk = ctx_lookup_clk(x);
-      match ctx.env.borrow_mut().pread_ref(x, xclk) {
+      match ctx.env.borrow_mut().pread_ref(x, xclk, Locus::Mem) {
         None => panic!("bug"),
         Some(e) => {
           match e.cel_ {

@@ -1540,7 +1540,7 @@ impl CellTransposeType {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CellMode {
   _Top,
@@ -1652,12 +1652,12 @@ impl CellFlag {
     self.bits |= 8;
     prev
   }*/
-}
+}*/
 
 #[derive(Clone, Default, Debug)]
 pub struct CellState {
-  pub mode: CellMode,
-  pub flag: CellFlag,
+  //pub mode: CellMode,
+  //pub flag: CellFlag,
   pub clk:  Clock,
   // FIXME
   //pub seal: Clock,
@@ -1665,28 +1665,20 @@ pub struct CellState {
 
 pub struct PCellReplica {
   pub clk:  Cell<Clock>,
-  //pub icel: Option<Weak<dyn InnerCell_>>,
   pub addr: Cell<PAddr>,
 }
 
 pub struct PCell {
-  // FIXME FIXME: to implement fusion w/ unique cells, simply change
-  // the PCell's owning ptr; the original ptr then becomes dangling.
   pub optr: CellPtr,
-  //pub optr: Cell<CellPtr>,
   pub ogty: CellType,
   pub olay: CellLayout,
-  //pub primary:  Locus,
   pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
-  //pub replicas: RevSortMap8<(Locus, PMach), Option<Weak<dyn InnerCell_>>>,
   pub replicas: RevSortMap8<(Locus, PMach), PCellReplica>,
 }
 
 impl PCell {
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     let lay = CellLayout::new_packed(&ty);
-    //let primary = Locus::fastest();
-    //let replicas = Vec::new();
     let pm_index = RevSortMap8::new();
     let replicas = RevSortMap8::new();
     PCell{
@@ -1694,26 +1686,10 @@ impl PCell {
       //optr: Cell::new(ptr),
       ogty: ty,
       olay: lay,
-      //primary,
       pm_index,
       replicas,
     }
   }
-
-  /*pub fn new_loc(ptr: CellPtr, ty: CellType, primary: Locus) -> PCell {
-    let lay = CellLayout::new_packed(&ty);
-    let pm_index = RevSortMap8::new();
-    let replicas = RevSortMap8::new();
-    PCell{
-      optr: ptr,
-      //optr: Cell::new(ptr),
-      ogty: ty,
-      olay: lay,
-      primary,
-      pm_index,
-      replicas,
-    }
-  }*/
 
   pub fn push_new_replica(&mut self, x: CellPtr, xclk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
     match self.replicas.find((locus, pmach)) {
@@ -1750,7 +1726,6 @@ impl PCell {
     }
   }
 
-  //pub fn lookup_replica(&mut self, q_locus: Locus) -> Option<(PMach, Clock, &mut Option<Weak<dyn InnerCell_>>)> {}
   pub fn lookup_loc(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
     //match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {}
     match self.replicas.find_lub((q_locus, PMach::_Bot)) {
@@ -1830,15 +1805,6 @@ impl PCell {
             }
           }
         }
-        /*TL_PCTX.with(|pctx| {
-          match pctx.lookup_pm(q_pmach, rep.addr) {
-            None => {
-              // FIXME FIXME
-              panic!("bug");
-            }
-            Some(_) => {}
-          }
-        });*/
         rep.addr.get()
       }
     }
@@ -1926,25 +1892,6 @@ impl PCell {
       f_pmach = Some(pmach);
     }
     let f_pmach = f_pmach.unwrap();
-    /*match self.lookup_loc(q_locus) {
-      None => panic!("bug"),
-      Some((pmach, rep)) => {
-        // FIXME FIXME: fixup causal ordering by replica copying.
-        if cfg_debug() {
-        println!("DEBUG: PCell::get_loc: pmach={:?} rep clk={:?} q clk={:?} q loc={:?}",
-            pmach, rep.clk.get(), q_clk, q_locus);
-        }
-        if f_pmach.is_none() {
-          //assert!(rep.clk.get().is_nil());
-          rep.clk.set(q_clk);
-        }
-        if rep.clk.get() < q_clk {
-          unimplemented!();
-        }
-        assert_eq!(rep.clk.get(), q_clk);
-        (pmach, rep.addr.get())
-      }
-    }*/
     match self.lookup(q_locus, f_pmach) {
       None => panic!("bug"),
       Some(rep) => {
@@ -1966,35 +1913,6 @@ impl PCell {
       }
     }
   }
-
-  /*pub fn get_pm(&mut self, q_clk: Clock, ty: &CellType, q_pmach: PMach) -> (Locus, /*Option<&mut Weak<dyn InnerCell_>>*/ PAddr) {
-    match self.pm_index.find_lub((q_pmach, Locus::_Bot)) {
-      None => {}
-      Some((_, key)) => {
-        if key.key.as_ref().1 == q_pmach {
-          // FIXME FIXME
-          /*let rep = self.replicas.get_mut(key);
-          match &mut rep.icel {
-            &mut None => {}
-            &mut Some(ref mut icel) => {
-              return Some(icel);
-            }
-          }*/
-          let rep = self.replicas.get(key);
-          if rep.clk.get() == q_clk {
-            return (key.key.as_ref().0, rep.addr);
-          }
-        }
-      }
-    }
-    // FIXME FIXME: if it doesn't exist, then create it.
-    unimplemented!();
-  }*/
-
-  /*pub fn get_any(&mut self, q_clk: Clock, ty: &CellType) -> (Locus, PMach, PAddr) {
-    // FIXME FIXME
-    unimplemented!();
-  }*/
 
   pub fn fresh(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
     let f = match self.lookup(q_locus, q_pmach) {
@@ -2032,11 +1950,6 @@ impl PCell {
     // FIXME FIXME
     unimplemented!();
   }
-
-  /*pub fn write_mem(&self, x: CellPtr, xclk: Clock) -> Option<Rc<dyn InnerCell_>> {
-    // FIXME FIXME
-    unimplemented!();
-  }*/
 }
 
 pub trait InnerCell {

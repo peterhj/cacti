@@ -30,11 +30,12 @@ fn main() {
   println!("boot: tokenizer: eos={:?}", tokenizer.eos_id());
   println!("boot: tokenizer: pad={:?}", tokenizer.pad_id());
   let adamw_cfg = AdamWConfig{
-    lr: 1.0e-5,
+    //lr: 1.0e-5,
+    lr: 2.0e-5,
     alpha1: 0.1,
-    alpha2: 0.001,
+    alpha2: 0.05,
     lamda: 0.1,
-    eps: 3.0e-6,
+    eps: 1.0e-5,
     dtype: f32::dtype(),
   };
   //let text_str = "Thucydides, an Athenian, wrote the history of";
@@ -89,7 +90,7 @@ fn main() {
   //let loss_scale = (1.0_f32 / 256.0_f32) * grad_upscale;
   let loss_scale = grad_upscale / (text_tok.len() - 1) as f32;
   println!("boot: loss scale: {:?}", loss_scale);
-  for iter_nr in 0 .. 1 {
+  for iter_nr in 0 .. 2 {
     println!("boot: start iter_nr={}", iter_nr);
     reset();
     if iter_nr == 0 {
@@ -118,16 +119,36 @@ fn main() {
         adamw.state.iter_nr += 1;
         assert_eq!(adamw.state.iter_nr, iter_nr);
         // FIXME: zero out the zero-th row of the embed grad.
-        for ((((g, g_), g2), p_), p) in
+        for (idx, ((((g, g_), g2), p_), p)) in
             grad.iter()
             .zip(adamw.grad_avg.iter())
             .zip(adamw.grad2_avg.iter())
             .zip(adamw.master.iter())
             .zip(param.iter())
-            .rev()
+            .rev().enumerate()
         {
-          g_.init_online_prescale_average(g, 1.0 / grad_upscale, adamw.state.alpha1);
-          g2.init_online_prescale_square_average(g, 1.0 / grad_upscale, adamw.state.alpha2);
+          if idx == 18 {
+            println!("boot: dump param: label={:?} pre", inv_matches.get(p));
+            let mem = p._get_mem();
+            mem._debug_dump_f16();
+          }
+          if idx == 18 {
+            println!("boot: dump master: label={:?} pre", inv_matches.get(p));
+            let mem = p_._get_mem();
+            mem._debug_dump_f32();
+          }
+          if idx == 18 {
+            println!("boot: dump grad: label={:?}", inv_matches.get(p));
+            let mem = g._get_mem();
+            mem._debug_dump_f16();
+          }
+          if idx == 18 {
+            println!("boot: dump grad avg: label={:?} pre", inv_matches.get(p));
+            let mem = g_._get_mem();
+            mem._debug_dump_f32();
+          }
+          g_.init_online_average_scale(g, 1.0 / grad_upscale, adamw.state.alpha1);
+          g2.init_online_average_square_scale(g, 1.0 / grad_upscale, adamw.state.alpha2);
           p_.init_online_adamw_update32(g_, g2,
               adamw.state.iter_nr,
               adamw.state.lr,
@@ -135,7 +156,8 @@ fn main() {
               adamw.state.alpha2,
               adamw.state.lamda,
               adamw.state.eps);
-          p.set_cast(p_);
+          p.set_cast(p_.const_());
+          //p.set_cast(p_);
         }
       });
       model.cache();
@@ -191,7 +213,7 @@ fn main() {
     let tok_dim = cfg.tok_dim;
     if iter_nr == 0 {
       for (cel, key) in inv_matches.iter() {
-        resume_put_mem_fun(cel, |ty, mem| {
+        resume_put_mem_with(cel, |ty, mem| {
           let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
           if ty.unbroadcast() != pickty.unbroadcast() {
             panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
@@ -205,7 +227,7 @@ fn main() {
         });
       }
     }
-    resume_put_mem_fun(&in_tok, |_, mem| {
+    resume_put_mem_with(&in_tok, |_, mem| {
       println!("boot: set in_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.push(1_u16);
@@ -214,7 +236,7 @@ fn main() {
       tok_buf.resize(seq_cap as _, 0_u16);
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_fun(&in_.in_lm_tok, |_, mem| {
+    resume_put_mem_with(&in_.in_lm_tok, |_, mem| {
       println!("boot: set in_lm_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.extend_from_slice(text_tok.as_ref());
@@ -222,7 +244,7 @@ fn main() {
       tok_buf.resize(seq_cap as _, 0_u16);
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_fun(&in_.in_lm_loss_scale, |_, mem| {
+    resume_put_mem_with(&in_.in_lm_loss_scale, |_, mem| {
       println!("boot: set in_lm_loss_scale...");
       let mut scale_buf = Vec::with_capacity(seq_cap as _);
       scale_buf.push(0.0_f32);
@@ -230,6 +252,30 @@ fn main() {
       scale_buf.resize(seq_cap as _, 0.0_f32);
       mem.copy_from_slice(&scale_buf);
     });
+    for (idx, ((((g, g_), g2), p_), p)) in
+        grad.iter()
+        .zip(adamw.grad_avg.iter())
+        .zip(adamw.grad2_avg.iter())
+        .zip(adamw.master.iter())
+        .zip(param.iter())
+        .rev().enumerate()
+    {
+      if idx == 18 {
+        println!("boot: dump grad avg: label={:?} post", inv_matches.get(p));
+        let mem = g_._get_mem();
+        mem._debug_dump_f32();
+      }
+      if idx == 18 {
+        println!("boot: dump master: label={:?} post", inv_matches.get(p));
+        let mem = p_._get_mem();
+        mem._debug_dump_f32();
+      }
+      if idx == 18 {
+        println!("boot: dump param: label={:?} post", inv_matches.get(p));
+        let mem = p._get_mem();
+        mem._debug_dump_f16();
+      }
+    }
     let out_lm_prob_mem = out.out_lm_prob._get_mem();
     let out_lm_loss_mem = out.out_lm_loss._get_mem();
     println!("boot: out lm prob type   ={:?}", out.out_lm_prob.type_());
@@ -263,6 +309,7 @@ fn main() {
       }
       kv
     }
+    let mut loss_sum = 0.0;
     let ntok = tok_dim as usize;
     for pos in 1 ..= text_tok.len() {
       let prev_pos = pos - 1;
@@ -284,9 +331,13 @@ fn main() {
           tokenizer.id_to_piece(prev_tok as _).map(|s| sane_ascii(s.as_bytes())),
           tokenizer.id_to_piece(arg_max as _).map(|s| sane_ascii(s.as_bytes())),
       );
+      if pos < text_tok.len() {
+        loss_sum += out_lm_loss_f32[pos as usize];
+      }
     }
+    println!("boot: loss sum={:.06}", loss_sum);
     // TODO
-    println!("boot: inspect param");
+    //println!("boot: inspect param");
     for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
       let p_log2_hist_mem = p_log2_hist._get_mem();
       if !(p_log2_hist_mem._as_slice_i64().len() == 0x100) {
@@ -301,9 +352,6 @@ fn main() {
       let h = p_log2_hist_mem._as_slice_i64();
       let nan = p_nan_count_mem._as_slice_i64()[0];
       let mut total = 0;
-      /*for &x in h.iter() {
-        total += x;
-      }*/
       total += h[0];
       for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
         total += x;
@@ -315,6 +363,7 @@ fn main() {
         total += x;
       }
       total += h[0xff];
+      if h[0xff] != 0 {
       println!("boot: param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
           h[0],
           &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
@@ -325,13 +374,12 @@ fn main() {
           total,
           inv_matches.get(param),
       );
-      if h[0xff] != 0 {
         println!("boot: param log2 hist: WARNING: fp blowup: label={:?}",
             inv_matches.get(param),
         );
       }
     }
-    println!("boot: inspect gradient");
+    //println!("boot: inspect gradient");
     for (((param, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
       let p = *param.borrow();
       let g = *g.borrow();
@@ -352,9 +400,6 @@ fn main() {
       let h = g_log2_hist_mem._as_slice_i64();
       let nan = g_nan_count_mem._as_slice_i64()[0];
       let mut total = 0;
-      /*for &x in h.iter() {
-        total += x;
-      }*/
       total += h[0];
       for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
         total += x;
@@ -366,6 +411,7 @@ fn main() {
         total += x;
       }
       total += h[0xff];
+      if h[0xff] != 0 {
       println!("boot: grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
           h[0],
           &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
@@ -376,7 +422,6 @@ fn main() {
           total,
           inv_matches.get(param),
       );
-      if h[0xff] != 0 {
         println!("boot: param log2 hist: WARNING: fp blowup: label={:?}",
             inv_matches.get(param),
         );

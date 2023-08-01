@@ -3591,9 +3591,97 @@ impl FutharkThunkSpec for InnerTransposeFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct OnlineAddScale2InitFutThunkSpec {
+  pub src_scale: ScalarVal_,
+  pub dst_scale: ScalarVal_,
+}
+
+impl FutharkThunkSpec for OnlineAddScale2InitFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.online_add_scale2.init")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    //Ok(arg[0])
+    Err(ThunkDimErr::Nondeterm)
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    //Ok(arg[0].clone())
+    Err(ThunkTypeErr::Nondeterm)
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+        format!(r"\u v -> {} * v + {} * ({}.{} u)",
+            self.dst_scale.format_futhark(),
+            self.src_scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
+    )
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct OnlineAddSquareScale2InitFutThunkSpec {
+  pub src_scale: ScalarVal_,
+  pub dst_scale: ScalarVal_,
+}
+
+impl FutharkThunkSpec for OnlineAddSquareScale2InitFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.online_add_square_scale2.init")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    //Ok(arg[0])
+    Err(ThunkDimErr::Nondeterm)
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    //Ok(arg[0].clone())
+    Err(ThunkTypeErr::Nondeterm)
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    if arg[0].ndim() != out[0].ndim() {
+      return Err(ThunkDimErr::_Bot.into_gen());
+    }
+    FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+        format!(r"\u v -> {} * v + ({} * ({}.{} u)) * ({} * ({}.{} u))",
+            self.dst_scale.format_futhark(),
+            self.src_scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+            self.src_scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
+    )
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OnlineAverageScaleInitFutThunkSpec {
+  pub src_scale: ScalarVal_,
   pub rate: ScalarVal_,
-  pub scale: ScalarVal_,
 }
 
 impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
@@ -3609,26 +3697,24 @@ impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
     Some((1, 1))
   }
 
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(arg[0])
+    //Ok(arg[0])
+    Err(ThunkDimErr::Nondeterm)
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(arg[0].clone())
+    //Ok(arg[0].clone())
+    Err(ThunkTypeErr::Nondeterm)
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    if arg[0].ndim() != out[0].ndim() {
+      return Err(ThunkDimErr::_Bot.into_gen());
+    }
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> v + {} * ({} * ({}.{} u) - v)",
             self.rate.format_futhark(),
-            self.scale.format_futhark(),
+            self.src_scale.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         )
@@ -3638,8 +3724,8 @@ impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OnlineAverageSquareScaleInitFutThunkSpec {
+  pub src_scale: ScalarVal_,
   pub rate: ScalarVal_,
-  pub scale: ScalarVal_,
 }
 
 impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
@@ -3655,29 +3741,27 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
     Some((1, 1))
   }
 
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(arg[0])
+    //Ok(arg[0])
+    Err(ThunkDimErr::Nondeterm)
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(arg[0].clone())
+    //Ok(arg[0].clone())
+    Err(ThunkTypeErr::Nondeterm)
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    if arg[0].ndim() != out[0].ndim() {
+      return Err(ThunkDimErr::_Bot.into_gen());
+    }
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> v + {} * (({} * ({}.{} u)) * ({} * ({}.{} u)) - v)",
             self.rate.format_futhark(),
-            self.scale.format_futhark(),
+            self.src_scale.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
-            self.scale.format_futhark(),
+            self.src_scale.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         )
@@ -3704,13 +3788,6 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
   fn arity(&self) -> Option<(u16, u16)> {
     Some((2, 1))
   }
-
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 2;
-    abi.arityout = 1;
-    abi
-  }*/
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
@@ -4271,7 +4348,7 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl BlockMatrixMulF16F32GpuThunkImpl {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter"); }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -4376,7 +4453,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/) {
+    match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/ loc) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -4413,7 +4490,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/) {
+    match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/ loc) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -4450,7 +4527,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
-    match env.pwrite_ref(out, oclk, /*CellEMode::Mutex,*/) {
+    match env.pwrite_ref(out, prev_oclk, oclk, /*CellEMode::Mutex,*/ loc) {
       None => panic!("bug"),
       Some(e) => {
         match e.cel_ {
@@ -4635,31 +4712,16 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply"); }
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
+    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate"); }
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, arg, th, out, oclk, mode)
-    /*let spec = spec_.as_any().downcast_ref::<BlockMatrixMulThunkSpec>().unwrap();
-    /*self.alpha.set(1.0);*/
-    match &spec.o_scale {
-      &ScalarVal_::F32(ref val) => {
-        self.alpha.set(*val.borrow());
-      }
-      _ => unimplemented!()
-    }
-    self.beta.set(1.0);
-    unimplemented!();*/
-    /*
-    TL_PCTX.with(|pctx| {
-      // FIXME FIXME
-    })
-    */
+    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
@@ -4707,7 +4769,7 @@ pub struct MemcpyNvgpuThunkImpl;
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MemcpyNvgpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
     let mut arg_ty_ = Vec::with_capacity(arg.len());
@@ -4735,7 +4797,7 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       let loc = gpu.device_locus();
-      let src_dptr = match env.pread_ref(arg[0].0, arg[0].1) {
+      let src_dptr = match env.pread_ref(arg[0].0, arg[0].1, loc) {
         None => panic!("bug"),
         Some(e) => {
           match e.cel_ {
@@ -4749,7 +4811,7 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
           }
         }
       };
-      let dst_dptr = match env.pwrite_ref(out, oclk) {
+      let dst_dptr = match env.pwrite_ref(out, prev_oclk, oclk, loc) {
         None => panic!("bug"),
         Some(e) => {
           match e.cel_ {
