@@ -29,9 +29,9 @@ fn main() {
   println!("boot: tokenizer: bos={:?}", tokenizer.bos_id());
   println!("boot: tokenizer: eos={:?}", tokenizer.eos_id());
   println!("boot: tokenizer: pad={:?}", tokenizer.pad_id());
-  let grad_upscale = 1024.0_f32;
+  let grad_scale = 1024.0_f32;
   let adamw = AdamW32{
-    grad_downscale: 1.0 / grad_upscale,
+    grad_unscale: 1.0 / grad_scale,
     //lr: 1.0e-5,
     lr: 2.0e-5,
     wd: 0.1,
@@ -85,10 +85,10 @@ fn main() {
   let mut grad_log2_hist = Vec::with_capacity(param.len());
   let mut grad_nan_count = Vec::with_capacity(param.len());
   println!("boot: adamw: {:?}", adamw);
-  println!("boot: grad upscale: {:?}", grad_upscale);
+  println!("boot: grad scale: {:?}", grad_scale);
   //let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
-  //let loss_scale = (1.0_f32 / 256.0_f32) * grad_upscale;
-  let loss_scale = grad_upscale / (text_tok.len() - 1) as f32;
+  //let loss_scale = (1.0_f32 / 256.0_f32) * grad_scale;
+  let loss_scale = grad_scale / (text_tok.len() - 1) as f32;
   println!("boot: loss scale: {:?}", loss_scale);
   for iter_nr in 0 .. 5 {
     println!("boot: start iter={}", iter_nr);

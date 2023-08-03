@@ -36,7 +36,7 @@ fn main() {
   println!("boot: tokenizer: text tok.len={}", text_tok.len());
   let mut model = Llama::from(cfg);
   let inv_matches = model.match_pickle_dir(&pickdir);
-  let input = model.make_input();
+  let input = model.fresh_input();
   let in_tok = input.in_tok;
   //println!("boot: matches: {:?}", &matches.mat);
   for &(ref cel, ref key) in inv_matches.mat.iter() {

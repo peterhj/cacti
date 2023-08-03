@@ -2391,23 +2391,23 @@ impl FutharkThunkImpl<MulticoreBackend> {
     let mut arg_ty_: Vec<CellType> = Vec::with_capacity(genabi.arityin as usize);
     let mut arg_arr: Vec<UnsafeCell<FutArray>> = Vec::with_capacity(genabi.arityin as usize);
     'for_k: for k in 0 .. lar {
-      let xroot = match env.lookup_ref(arg[k as usize].0) {
-        None => panic!("bug"),
-        Some(e) => e.root
+      let xroot = match env._lookup_ref_(arg[k as usize].0) {
+        Err(_) => panic!("bug"),
+        Ok(e) => e.root()
       };
       for j in 0 .. k as usize {
-        match env.lookup_ref(arg[j].0) {
-          None => panic!("bug"),
-          Some(e_j) => {
-            let xroot_j = e_j.root;
+        match env._lookup_ref_(arg[j].0) {
+          Err(_) => panic!("bug"),
+          Ok(e_j) => {
+            let xroot_j = e_j.root();
             if xroot_j == xroot {
               if _cfg_debug_mode(mode) {
               println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xroot[{}]={:?} xroot[{}]={:?}",
                   j, xroot_j, k, xroot);
               }
-              match env.lookup_ref(arg[k as usize].0) {
-                None => panic!("bug"),
-                Some(e) => {
+              match env._lookup_ref_(arg[k as usize].0) {
+                Err(_) => panic!("bug"),
+                Ok(e) => {
                   if &arg_ty_[j] == e.ty {
                     arg_ty_.push(arg_ty_[j].clone());
                     let a = arg_arr[j].get_mut().clone();
@@ -2424,9 +2424,13 @@ impl FutharkThunkImpl<MulticoreBackend> {
           }
         }
       }
-      let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
+      /*let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
         None => panic!("bug"),
         Some(e) => e
+      };*/
+      let e = match env.pread_ref_(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
+        Err(_) => panic!("bug"),
+        Ok(e) => e
       };
       assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
       let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
@@ -2444,8 +2448,12 @@ impl FutharkThunkImpl<MulticoreBackend> {
           &mut Cell_::Phy(.., ref mut pcel) => {
             // FIXME FIXME
             //let pmach = PMach::Smp;
-            let pmach = PMach::NvGpu;
-            let addr = pcel.get(arg[k as usize].0, arg[k as usize].1, &e.ty, loc, pmach);
+            //let pmach = PMach::NvGpu;
+            //let addr = pcel.get(arg[k as usize].0, arg[k as usize].1, &e.ty, loc, pmach);
+            let addr = match pcel.lookup_loc(loc) {
+              None => panic!("bug"),
+              Some((_, rep)) => rep.addr.get()
+            };
             //let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();
             match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
               Some(reg) => {
@@ -2489,9 +2497,9 @@ impl FutharkThunkImpl<MulticoreBackend> {
     let mut out_org = None;
     for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
-      let ty_ = match env.lookup_ref(out) {
-        None => panic!("bug"),
-        Some(e) => {
+      let ty_ = match env._lookup_ref_(out) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
           if e.ty.is_top() {
             match spec_.out_ty_(&arg_ty_) {
               Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
@@ -2510,9 +2518,13 @@ impl FutharkThunkImpl<MulticoreBackend> {
         ThunkMode::Accumulate |
         ThunkMode::Initialize => {
           // FIXME: double check that out does not alias any args.
-          let e = match env.pwrite_ref(out, prev_oclk, oclk, Locus::Mem) {
+          /*let e = match env.pwrite_ref(out, prev_oclk, oclk, Locus::Mem) {
             None => panic!("bug"),
             Some(e) => e
+          };*/
+          let e = match env.prewrite_ref_(out, prev_oclk, oclk, Locus::Mem) {
+            Err(_) => panic!("bug"),
+            Ok(e) => e
           };
           assert_eq!(self.spec_dim[(lar + k) as usize], e.ty.to_dim());
           assert_eq!(genabi.get_out(k), genabi.get_arg(lar + k));
@@ -2531,8 +2543,12 @@ impl FutharkThunkImpl<MulticoreBackend> {
               &mut Cell_::Phy(.., ref mut pcel) => {
                 // FIXME FIXME
                 //let pmach = PMach::Smp;
-                let pmach = PMach::NvGpu;
-                let addr = pcel.get(out, oclk, &e.ty, loc, pmach);
+                //let pmach = PMach::NvGpu;
+                //let addr = pcel.get(out, oclk, &e.ty, loc, pmach);
+                let addr = match pcel.lookup_loc(loc) {
+                  None => panic!("bug"),
+                  Some((_, rep)) => rep.addr.get()
+                };
                 //let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();
                 match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
                   Some(reg) => {
@@ -2779,12 +2795,12 @@ impl FutharkThunkImpl<MulticoreBackend> {
         for k in objects.find(mode).unwrap().1.consts.iter() {
           if k.0 == addr {
             if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   is const"); }
-            match env.lookup_mut_ref(out) {
-              None => panic!("bug"),
-              Some(e) => {
+            match env._lookup_mut_ref_(out) {
+              Err(_) => panic!("bug"),
+              Ok(e) => {
                 match e.cel_ {
                   &mut Cell_::Top(ref state, optr) => {
-                    assert_eq!(e.root, optr);
+                    assert_eq!(e.root(), optr);
                     // FIXME: defaults below are placeholders for...?
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
@@ -2802,18 +2818,30 @@ impl FutharkThunkImpl<MulticoreBackend> {
         }
       }
       if !f {
-        match env.lookup_mut_ref(out) {
-          None => panic!("bug"),
-          Some(e) => {
+        let oroot = match env._lookup_ref_(out) {
+          Err(_) => panic!("bug"),
+          Ok(e) => e.root()
+        };
+        let oroot_ty = match env._lookup_ref_(oroot) {
+          Err(_) => panic!("bug"),
+          Ok(e) => e.ty.clone()
+        };
+        // FIXME: the out and root types must be concordant.
+        assert_eq!(oroot_ty.span_bytes(), out_ty_[0].span_bytes());
+        match env._lookup_mut_ref_(out) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            //let oroot = e.root();
             match e.cel_ {
               &mut Cell_::Top(ref state, optr) => {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try new phy..."); }
-                assert_eq!(e.root, optr);
+                assert_eq!(oroot, optr);
                 assert_eq!(oclk, state.borrow().clk);
                 // FIXME: defaults below are placeholders for...?
                 let state = RefCell::new(state.borrow().clone());
                 let clo = RefCell::new(CellClosure::default());
-                let mut pcel = PCell::new(optr, out_ty_[0].clone());
+                //let mut pcel = PCell::new(optr, out_ty_[0].clone());
+                let mut pcel = PCell::new(optr, oroot_ty);
                 pcel.push_new_replica(optr, oclk, Locus::Mem, PMach::NvGpu, addr);
                 *e.cel_ = Cell_::Phy(state, clo, pcel);
                 f = true;
@@ -2824,10 +2852,23 @@ impl FutharkThunkImpl<MulticoreBackend> {
               }
               &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try old phy..."); }
-                assert_eq!(e.root, pcel.optr);
+                assert_eq!(oroot, pcel.optr);
                 assert_eq!(oclk, state.borrow().clk);
                 let optr = pcel.optr;
-                if let Some(replica) = pcel.lookup(Locus::Mem, PMach::NvGpu) {
+                // FIXME: pmach.
+                if let Some((_, prev_addr)) = pcel.swap(optr, oclk, Locus::Mem, PMach::NvGpu, addr) {
+                  if _cfg_debug_mode(mode) {
+                  println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   prev addr={:?} addr={:?}",
+                      prev_addr, addr);
+                  }
+                  if prev_addr != addr {
+                    match gpu.page_map.release(prev_addr) {
+                      None => unimplemented!(),
+                      Some(_) => {}
+                    }
+                  }
+                }
+                /*if let Some(replica) = pcel.lookup(Locus::Mem, PMach::NvGpu) {
                   // NB: clk equal b/c spine did clock_sync.
                   /*assert_eq!(replica.clk.get(), oclk);*/
                   assert!(replica.clk.get() <= oclk);
@@ -2878,7 +2919,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                   }
                 } else {
                   pcel.push_new_replica(optr, oclk, Locus::Mem, PMach::NvGpu, addr);
-                }
+                }*/
                 f = true;
                 if _cfg_debug_mode(mode) {
                 println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: old phy {:?} --> {:?} -> {:?}",
@@ -2954,23 +2995,23 @@ impl FutharkThunkImpl<CudaBackend> {
     let mut arg_ty_: Vec<CellType> = Vec::with_capacity(genabi.arityin as usize);
     let mut arg_arr: Vec<UnsafeCell<FutArrayDev>> = Vec::with_capacity(genabi.arityin as usize);
     'for_k: for k in 0 .. lar {
-      let xroot = match env.lookup_ref(arg[k as usize].0) {
-        None => panic!("bug"),
-        Some(e) => e.root
+      let xroot = match env._lookup_ref_(arg[k as usize].0) {
+        Err(_) => panic!("bug"),
+        Ok(e) => e.root()
       };
       for j in 0 .. k as usize {
-        match env.lookup_ref(arg[j].0) {
-          None => panic!("bug"),
-          Some(e_j) => {
-            let xroot_j = e_j.root;
+        match env._lookup_ref_(arg[j].0) {
+          Err(_) => panic!("bug"),
+          Ok(e_j) => {
+            let xroot_j = e_j.root();
             if xroot_j == xroot {
               if _cfg_debug_mode(mode) {
               println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: aliased args: xroot[{}]={:?} xroot[{}]={:?}",
                   j, xroot_j, k, xroot);
               }
-              match env.lookup_ref(arg[k as usize].0) {
-                None => panic!("bug"),
-                Some(e) => {
+              match env._lookup_ref_(arg[k as usize].0) {
+                Err(_) => panic!("bug"),
+                Ok(e) => {
                   if &arg_ty_[j] == e.ty {
                     arg_ty_.push(arg_ty_[j].clone());
                     let a = arg_arr[j].get_mut().clone();
@@ -2990,9 +3031,13 @@ impl FutharkThunkImpl<CudaBackend> {
       TL_PCTX.with(|pctx| {
         let gpu = pctx.nvgpu.as_ref().unwrap();
         let loc = gpu.device_locus();
-        let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, loc) {
+        /*let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, loc) {
           None => panic!("bug"),
           Some(e) => e
+        };*/
+        let e = match env.pread_ref_(arg[k as usize].0, arg[k as usize].1, loc) {
+          Err(_) => panic!("bug"),
+          Ok(e) => e
         };
         assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
         let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
@@ -3006,7 +3051,11 @@ impl FutharkThunkImpl<CudaBackend> {
         };
         match e.cel_ {
           &mut Cell_::Phy(.., ref mut pcel) => {
-            let addr = pcel.get(arg[k as usize].0, arg[k as usize].1, &e.ty, loc, PMach::NvGpu);
+            //let addr = pcel.get(arg[k as usize].0, arg[k as usize].1, &e.ty, loc, PMach::NvGpu);
+            let addr = match pcel.lookup_loc(loc) {
+              None => panic!("bug"),
+              Some((_, rep)) => rep.addr.get()
+            };
             let (dptr, size) = gpu.lookup_dev(addr).unwrap();
             a.set_mem_parts(dptr, size);
           }
@@ -3045,9 +3094,9 @@ impl FutharkThunkImpl<CudaBackend> {
     let mut out_org = None;
     for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
-      let ty_ = match env.lookup_ref(out) {
-        None => panic!("bug"),
-        Some(e) => {
+      let ty_ = match env._lookup_ref_(out) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
           if e.ty.is_top() {
             match spec_.out_ty_(&arg_ty_) {
               Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
@@ -3078,10 +3127,25 @@ impl FutharkThunkImpl<CudaBackend> {
             let gpu = pctx.nvgpu.as_ref().unwrap();
             let loc = gpu.device_locus();
             // FIXME: double check that out does not alias any args.
-            let e = match env.pwrite_ref(out, prev_oclk, oclk, loc) {
+            /*let e = match env.pwrite_ref(out, prev_oclk, oclk, loc) {
               None => panic!("bug"),
               Some(e) => e
+            };*/
+            let e = match env.prewrite_ref_(out, prev_oclk, oclk, loc) {
+              Err(_) => panic!("bug"),
+              Ok(e) => e
             };
+            if !(self.spec_dim[(lar + k) as usize] == e.ty.to_dim()) {
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: lar={} rar={} k={}", lar, rar, k);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", &self.spec_dim);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", self.spec_dim[(lar + k) as usize]);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", &arg);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg ty={:?}", &arg_ty_);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?}", out);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out ty={:?}", ty_);
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: e.root={:?}", e.root());
+              println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: e.ty={:?}", &e.ty);
+            }
             assert_eq!(self.spec_dim[(lar + k) as usize], e.ty.to_dim());
             assert_eq!(genabi.get_out(k), genabi.get_arg(lar + k));
             let a = match (genabi.get_arg(lar + k), self.spec_dim[(lar + k) as usize].ndim) {
@@ -3095,7 +3159,11 @@ impl FutharkThunkImpl<CudaBackend> {
             };
             match e.cel_ {
               &mut Cell_::Phy(.., ref mut pcel) => {
-                let addr = pcel.get(out, oclk, &e.ty, loc, PMach::NvGpu);
+                //let addr = pcel.get(out, oclk, &e.ty, loc, PMach::NvGpu);
+                let addr = match pcel.lookup_loc(loc) {
+                  None => panic!("bug"),
+                  Some((_, rep)) => rep.addr.get()
+                };
                 let (dptr, size) = gpu.lookup_dev(addr).unwrap();
                 a.set_mem_parts(dptr, size);
                 out_org = Some((addr, dptr, size));
@@ -3439,12 +3507,12 @@ impl FutharkThunkImpl<CudaBackend> {
             for k in objects.find(mode).unwrap().1.consts.iter() {
               if k.0 == addr {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   is const"); }
-                match env.lookup_mut_ref(out) {
-                  None => panic!("bug"),
-                  Some(e) => {
+                match env._lookup_mut_ref_(out) {
+                  Err(_) => panic!("bug"),
+                  Ok(e) => {
                     match e.cel_ {
                       &mut Cell_::Top(ref state, optr) => {
-                        assert_eq!(e.root, optr);
+                        assert_eq!(e.root(), optr);
                         // FIXME: defaults below are placeholders for...?
                         let state = RefCell::new(state.borrow().clone());
                         let clo = RefCell::new(CellClosure::default());
@@ -3462,32 +3530,58 @@ impl FutharkThunkImpl<CudaBackend> {
             }
           }
           if !f {
-            match env.lookup_mut_ref(out) {
-              None => panic!("bug"),
-              Some(e) => {
+            let oroot = match env._lookup_ref_(out) {
+              Err(_) => panic!("bug"),
+              Ok(e) => e.root()
+            };
+            let oroot_ty = match env._lookup_ref_(oroot) {
+              Err(_) => panic!("bug"),
+              Ok(e) => e.ty.clone()
+            };
+            // FIXME: the out and root types must be concordant.
+            assert_eq!(oroot_ty.span_bytes(), out_ty_[0].span_bytes());
+            match env._lookup_mut_ref_(out) {
+              Err(_) => panic!("bug"),
+              Ok(e) => {
+                //let oroot = e.root();
                 match e.cel_ {
                   &mut Cell_::Top(ref state, optr) => {
-                    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try new phy..."); }
-                    assert_eq!(e.root, optr);
+                    //if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try new phy..."); }
+                    if _cfg_debug_mode(mode) {
+                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: new phy {:?} --> {:?} -> {:?}",
+                        out, optr, addr);
+                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   ty={:?} root ty={:?}",
+                        &e.ty, &oroot_ty);
+                    }
+                    assert_eq!(oroot, optr);
                     assert_eq!(oclk, state.borrow().clk);
                     // FIXME: defaults below are placeholders for...?
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
-                    let mut pcel = PCell::new(optr, out_ty_[0].clone());
+                    //let mut pcel = PCell::new(optr, out_ty_[0].clone());
+                    let mut pcel = PCell::new(optr, oroot_ty);
                     pcel.push_new_replica(optr, oclk, Locus::VMem, PMach::NvGpu, addr);
                     *e.cel_ = Cell_::Phy(state, clo, pcel);
                     f = true;
-                    if _cfg_debug_mode(mode) {
-                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: new phy {:?} --> {:?} -> {:?}",
-                        out, optr, addr);
-                    }
                   }
                   &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try old phy..."); }
-                    assert_eq!(e.root, pcel.optr);
+                    assert_eq!(oroot, pcel.optr);
                     assert_eq!(oclk, state.borrow().clk);
                     let optr = pcel.optr;
-                    if let Some(replica) = pcel.lookup(Locus::VMem, PMach::NvGpu) {
+                    if let Some((_, prev_addr)) = pcel.swap(optr, oclk, Locus::VMem, PMach::NvGpu, addr) {
+                      if _cfg_debug_mode(mode) {
+                      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   prev addr={:?} addr={:?}",
+                          prev_addr, addr);
+                      }
+                      if prev_addr != addr {
+                        match gpu.mem_pool.try_free(prev_addr) {
+                          None => unimplemented!(),
+                          Some(_) => {}
+                        }
+                      }
+                    }
+                    /*if let Some(replica) = pcel.lookup(Locus::VMem, PMach::NvGpu) {
                       // NB: clk equal b/c spine did clock_sync.
                       /*assert_eq!(replica.clk.get(), oclk);*/
                       assert!(replica.clk.get() <= oclk);
@@ -3535,7 +3629,7 @@ impl FutharkThunkImpl<CudaBackend> {
                       }
                     } else {
                       pcel.push_new_replica(optr, oclk, Locus::VMem, PMach::NvGpu, addr);
-                    }
+                    }*/
                     f = true;
                     if _cfg_debug_mode(mode) {
                     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: old phy {:?} --> {:?} -> {:?}",

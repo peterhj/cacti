@@ -152,7 +152,13 @@ pub const CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION: cublasMath_t = 0x10;
 pub type cublasComputeType_t = c_int;
 
 pub const CUBLAS_COMPUTE_16F: cublasComputeType_t = 64;
+pub const CUBLAS_COMPUTE_16F_PEDANTIC: cublasComputeType_t = 65;
 pub const CUBLAS_COMPUTE_32F: cublasComputeType_t = 68;
+pub const CUBLAS_COMPUTE_32F_PEDANTIC: cublasComputeType_t = 69;
+pub const CUBLAS_COMPUTE_64F: cublasComputeType_t = 70;
+pub const CUBLAS_COMPUTE_64F_PEDANTIC: cublasComputeType_t = 71;
+pub const CUBLAS_COMPUTE_32I: cublasComputeType_t = 72;
+pub const CUBLAS_COMPUTE_32I_PEDANTIC: cublasComputeType_t = 73;
 
 #[repr(C)]
 pub struct cublasContext([u8; 0]);

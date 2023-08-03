@@ -583,11 +583,11 @@ impl SpineEnv {
                                 drop(self_);
                                 //let x_ty = ctx.env.lookup_ref(x).map(|e| e.ty.clone()).unwrap();
                                 let env = ctx.env.borrow();
-                                match env.lookup_ref(x) {
-                                  None => panic!("bug"),
-                                  Some(e) => {
+                                match env._lookup_ref_(x) {
+                                  Err(_) => panic!("bug"),
+                                  Ok(e) => {
                                     let x_ty = e.ty.clone();
-                                    assert_eq!(xroot, e.root);
+                                    assert_eq!(xroot, e.root());
                                     if x != xroot {
                                       let xroot_clk = xclk;
                                       drop(e);
@@ -603,9 +603,9 @@ impl SpineEnv {
                                           })
                                           .unwrap_or_else(|| {
                                             drop(self_);
-                                            let xroot_ty = match ctx.env.borrow().lookup_ref(xroot) {
-                                              None => panic!("bug"),
-                                              Some(e) => e.ty.clone()
+                                            let xroot_ty = match ctx.env.borrow()._lookup_ref_(xroot) {
+                                              Err(_) => panic!("bug"),
+                                              Ok(e) => e.ty.clone()
                                             };
                                             //ctx_insert(xroot_ty)
                                             let dxroot = ctr.unwrap().fresh_cel();
@@ -627,7 +627,8 @@ impl SpineEnv {
                                       let dx = ctr.unwrap().fresh_cel();
                                       if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   fresh: x={:?} dx={:?} ty={:?}", x, dx, x_ty); }
                                       if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:          xroot={:?} dxroot={:?}", xroot, dxroot); }
-                                      ctx.env.borrow_mut().insert_alias(dx, x_ty, dxroot);
+                                      // FIXME: double check if NewShape here is correct.
+                                      ctx.env.borrow_mut().insert_alias(dx, CellAlias::NewShape, x_ty, dxroot);
                                       {
                                         let sp = {
                                           let sp = curp.get();
@@ -1387,9 +1388,9 @@ impl Spine {
         //unimplemented!();
       }
       SpineEntry::Cache(x, _xclk) => {
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
+        match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
             let base_clk: Clock = self.ctr.into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.init_once();
@@ -1411,9 +1412,9 @@ impl Spine {
         if cfg_debug() {
         println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
             ctlp, retp, x, loc, item.key());
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
+        match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
             println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
             match e.ty.dtype {
               Dtype::Fp32 => {
@@ -1446,9 +1447,9 @@ impl Spine {
         }
         if Some(ctlp) == retp {
           if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   ...resume"); }
-          let (prev_xclk, xclk) = match env.lookup_ref(x) {
-            None => panic!("bug"),
-            Some(e) => {
+          let (prev_xclk, xclk) = match env._lookup_ref_(x) {
+            Err(_) => panic!("bug"),
+            Ok(e) => {
               let base_clk: Clock = self.ctr.into();
               let prev_clk = e.state().clk;
               let next_clk = base_clk.init_once();
@@ -1462,22 +1463,28 @@ impl Spine {
               } else if prev_clk < next_clk {
                 //e.state().flag.unset_seal();
                 // FIXME: probably should not clock_sync here.
-                e.clock_sync_loc(loc, prev_clk, next_clk, env);
+                //e.clock_sync_loc(loc, prev_clk, next_clk, env);
+                e.clock_sync(prev_clk, next_clk, env);
               }
               (prev_clk, next_clk)
             }
           };
-          match env.pwrite_ref(x, prev_xclk, xclk, loc) {
-            None => panic!("bug"),
-            Some(e) => {
+          match env.pwrite_ref_(x, xclk, loc) {
+            Err(_) => panic!("bug"),
+            Ok(e) => {
               match e.cel_ {
-                &mut Cell_::Phy(_, ref clo, ref mut cel_) => {
+                &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
                   match (loc, &item) {
                     /*(Locus::Mem, SpineResume::PutMemV(_, _val)) => {
                       unimplemented!();
                     }*/
                     (Locus::Mem, SpineResume::PutMemF(_, fun)) => {
-                      let (pm, addr) = cel_.get_loc_nosync(x, xclk, &e.ty, Locus::Mem);
+                      // FIXME: use of get_loc here is kind of kludgy.
+                      //let (pm, addr) = pcel.get_loc_nosync(x, xclk, &e.ty, Locus::Mem);
+                      let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                        None => panic!("bug"),
+                        Some((pm, rep)) => (pm, rep.addr.get())
+                      };
                       TL_PCTX.with(|pctx| {
                         let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
                         (fun)(e.ty.clone(), icel.as_mem_reg().unwrap());
@@ -1515,9 +1522,9 @@ impl Spine {
         //unimplemented!();
       }
       SpineEntry::PushSeal(x, _xclk) => {
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
+        match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
             //e.state().flag.set_seal();
             let xclk = e.state().clk;
             assert!(!xclk.ctr().is_nil());
@@ -1526,10 +1533,10 @@ impl Spine {
       }
       SpineEntry::Initialize(x, _xclk, th) => {
         // FIXME FIXME
-        let (xroot, prev_xclk, xclk) = match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
-            let root = e.root;
+        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let root = e.root();
             //assert_eq!(e.state().clk.ctr(), self.ctr);
             //assert!(!e.state().flag.seal());
             //e.state().flag.unset_seal();
@@ -1566,9 +1573,9 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env.lookup_ref(x) {
-            None => panic!("bug"),
-            Some(e) => {
+          match env._lookup_ref_(x) {
+            Err(_) => panic!("bug"),
+            Ok(e) => {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
@@ -1581,10 +1588,10 @@ impl Spine {
         }
       }
       SpineEntry::Apply(x, _xclk, th) => {
-        let (xroot, prev_xclk, xclk) = match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
-            let root = e.root;
+        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let root = e.root();
             //assert_eq!(e.state().clk.ctr(), self.ctr);
             /*assert_eq!(e.state().clk.up, 0);*/
             //assert!(e.state().clk.is_uninit());
@@ -1627,9 +1634,9 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env.lookup_ref(x) {
-            None => panic!("bug"),
-            Some(e) => {
+          match env._lookup_ref_(x) {
+            Err(_) => panic!("bug"),
+            Ok(e) => {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
@@ -1642,10 +1649,10 @@ impl Spine {
         }
       }
       SpineEntry::Accumulate(x, _xclk, th) => {
-        let (xroot, prev_xclk, xclk) = match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
-            let root = e.root;
+        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let root = e.root();
             //assert_eq!(e.state().clk.ctr(), self.ctr);
             //assert!(e.state().clk.is_uninit());
             //assert!(!e.state().flag.seal());
@@ -1683,9 +1690,9 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env.lookup_ref(x) {
-            None => panic!("bug"),
-            Some(e) => {
+          match env._lookup_ref_(x) {
+            Err(_) => panic!("bug"),
+            Ok(e) => {
               match e.cel_ {
                 &Cell_::Phy(_, ref clo, _) |
                 &Cell_::Cow(_, ref clo, _) => {
@@ -1701,9 +1708,9 @@ impl Spine {
         unimplemented!();
       }
       SpineEntry::Seal(x) => {
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
+        match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
             assert_eq!(e.state().clk.ctr(), self.ctr);
             assert!(!e.state().clk.is_uninit());
             //assert!(!e.state().flag.seal());
@@ -1715,9 +1722,9 @@ impl Spine {
         unimplemented!();
       }
       SpineEntry::Unsync(x) => {
-        match env.lookup_ref(x) {
-          None => panic!("bug"),
-          Some(e) => {
+        match env._lookup_ref_(x) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
             assert_eq!(e.state().clk.ctr(), self.ctr);
             //assert!(e.state().flag.seal());
             // FIXME FIXME

@@ -597,19 +597,62 @@ pub fn cublas_gemm(
     n: i32,
     k: i32,
     alpha: *const c_void,
-    a: CUdeviceptr,
+    a: u64,
     a_ty: cudaDataType_t,
     lda: i32,
-    b: CUdeviceptr,
+    b: u64,
     b_ty: cudaDataType_t,
     ldb: i32,
     beta: *const c_void,
-    c: CUdeviceptr,
+    c: u64,
     c_ty: cudaDataType_t,
     ldc: i32,
     stream_raw: &CUstream,
 ) -> CublasResult {
-  unimplemented!();
+  ctx.set_stream(stream_raw).unwrap();
+  ctx.set_pointer_mode(CublasPointerMode::Host).unwrap();
+  ctx.set_atomics_mode(CublasAtomicsMode::NotAllowed).unwrap();
+  let mut flags = CUBLAS_DEFAULT_MATH;
+  let compute_ty = match (a_ty, b_ty, c_ty) {
+    (CUDA_R_64F, CUDA_R_64F, CUDA_R_64F) => {
+      CUBLAS_COMPUTE_64F
+    }
+    (CUDA_R_32F, CUDA_R_32F, CUDA_R_32F) => {
+      CUBLAS_COMPUTE_32F
+    }
+    (CUDA_R_16F, CUDA_R_16F, CUDA_R_16F) |
+    (CUDA_R_16F, CUDA_R_16F, CUDA_R_32F) |
+    (CUDA_R_16F, CUDA_R_32F, CUDA_R_16F) |
+    (CUDA_R_32F, CUDA_R_16F, CUDA_R_16F) |
+    (CUDA_R_16F, CUDA_R_32F, CUDA_R_32F) |
+    (CUDA_R_32F, CUDA_R_16F, CUDA_R_32F) |
+    (CUDA_R_32F, CUDA_R_32F, CUDA_R_16F) => {
+      if cfg_debug() { println!("DEBUG: cublas_gemm: fp16/mixed-precision mode"); }
+      flags |= CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION;
+      CUBLAS_COMPUTE_32F
+    }
+    _ => {
+      panic!("bug: cacti_gpu_cu_ffi::cublas_gemm: unimplemented: a={} b={} c={}", a_ty, b_ty, c_ty);
+    }
+  };
+  ctx.set_math_mode(flags).unwrap();
+  let e = (LIBCUBLAS.cublasGemmEx.as_ref().unwrap())(
+    ctx.raw,
+    if tr_a { CUBLAS_OP_T } else { CUBLAS_OP_N },
+    if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
+    m, n, k,
+    alpha,
+    a as usize as *const _, a_ty, lda,
+    b as usize as *const _, b_ty, ldb,
+    beta,
+    c as usize as *mut _, c_ty, ldc,
+    compute_ty,
+    CUBLAS_GEMM_DEFAULT,
+  );
+  if e != CUBLAS_STATUS_SUCCESS {
+    return Err(e);
+  }
+  Ok(())
 }
 
 pub fn cublas_gemm_batched(
@@ -620,17 +663,14 @@ pub fn cublas_gemm_batched(
     n: i32,
     k: i32,
     alpha: *const c_void,
-    //a: &[CUdeviceptr],
-    a: CUdeviceptr,
+    a: u64,
     a_ty: cudaDataType_t,
     lda: i32,
-    //b: &[CUdeviceptr],
-    b: CUdeviceptr,
+    b: u64,
     b_ty: cudaDataType_t,
     ldb: i32,
     beta: *const c_void,
-    //c: &[CUdeviceptr],
-    c: CUdeviceptr,
+    c: u64,
     c_ty: cudaDataType_t,
     ldc: i32,
     nblk: i32,
@@ -652,14 +692,10 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        //a.as_ptr() as *const usize as *const *const _, lda,
-        //b.as_ptr() as *const usize as *const *const _, ldb,
         a as usize as *const *const _, lda,
         b as usize as *const *const _, ldb,
         beta as *const _,
-        //c.as_ptr() as *const usize as *const *mut _, ldc,
         c as usize as *const *mut _, ldc,
-        //c.len() as i32,
         nblk,
       )
     }
@@ -671,14 +707,10 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        //a.as_ptr() as *const usize as *const *const _, lda,
-        //b.as_ptr() as *const usize as *const *const _, ldb,
         a as usize as *const *const _, lda,
         b as usize as *const *const _, ldb,
         beta as *const _,
-        //c.as_ptr() as *const usize as *const *mut _, ldc,
         c as usize as *const *mut _, ldc,
-        //c.len() as i32,
         nblk,
       )
     }
@@ -698,16 +730,11 @@ pub fn cublas_gemm_batched(
         if tr_b { CUBLAS_OP_T } else { CUBLAS_OP_N },
         m, n, k,
         alpha as *const _,
-        //a.as_ptr() as *const usize as *const *const _, a_ty, lda,
-        //b.as_ptr() as *const usize as *const *const _, b_ty, ldb,
         a as usize as *const *const _, a_ty, lda,
         b as usize as *const *const _, b_ty, ldb,
         beta as *const _,
-        //c.as_ptr() as *const usize as *const *mut _, c_ty, ldc,
         c as usize as *const *mut _, c_ty, ldc,
-        //c.len() as i32,
         nblk,
-        // TODO: check these parameters.
         CUBLAS_COMPUTE_32F,
         CUBLAS_GEMM_DEFAULT,
       )

@@ -395,7 +395,7 @@ impl BitXor<T_> for StableCell {
   }
 }
 
-/*impl<'l> BitXor<T> for &'l CellViewHandle {
+impl<'l> BitXor<T> for &'l CellViewHandle {
   type Output = CellViewHandleEx;
 
   #[track_caller]
@@ -419,7 +419,7 @@ impl<'l> BitXor<T_> for &'l CellViewHandle {
       CellViewHandleEx::_from(self._deref())
     })
   }
-}*/
+}
 
 impl BitXor<T> for CellViewHandleEx {
   type Output = CellViewHandleEx;
@@ -463,14 +463,14 @@ impl IndexMut<RangeFull> for CellPtr {
   }
 }
 
-/*impl Index<IRange> for CellPtr {
+impl Index<IRange> for CellPtr {
   type Output = CellViewHandle;
 
   #[track_caller]
   fn index(&self, _: IRange) -> &CellViewHandle {
     panick_wrap(|| {
       // FIXME
-      CellViewHandle::_from(*self)
+      CellViewHandle::_from(self)
       //unimplemented!();
     })
   }
@@ -479,28 +479,29 @@ impl IndexMut<RangeFull> for CellPtr {
 impl IndexMut<IRange> for CellPtr {
   #[track_caller]
   fn index_mut(&mut self, _: IRange) -> &mut CellViewHandle {
-    panick_wrap(|| {
+    /*panick_wrap(|| {
       // FIXME
       CellViewHandle::_from_mut(*self)
       //unimplemented!();
-    })
+    })*/
+    CellViewHandle::_from_mut(self)
   }
 }
 
-impl Index<[IRange; 2]> for CellPtr {
+/*impl Index<[IRange; 2]> for CellPtr {
   type Output = CellViewHandle;
 
   #[track_caller]
   fn index(&self, _: [IRange; 2]) -> &CellViewHandle {
     panick_wrap(|| {
       // FIXME
-      //CellViewHandle::_from(*self)
+      //CellViewHandle::_from(self)
       unimplemented!();
     })
   }
 }*/
 
-pub trait IntoCellViewOps: Into<CellView> {
+/*pub trait IntoCellViewOps: Into<CellView> {
   fn inner_transpose(self) -> CellView {
     panick_wrap(|| {
       let mut this = self.into();
@@ -586,7 +587,7 @@ impl BorrowCellViewOps for StableCell {}
 impl<'l> BorrowCellViewOps for &'l StableCell {}
 impl BorrowCellViewOps for CellView {}
 impl<'l> BorrowCellViewOps for &'l CellView {}
-impl<'l> BorrowCellViewOps for CellViewRef<'l> {}
+impl<'l> BorrowCellViewOps for CellViewRef<'l> {}*/
 
 impl<'l> Add<ScalarVal_> for &'l CellPtr {
   type Output = CellPtr;
@@ -1348,6 +1349,164 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
   }*/
 
   #[track_caller]
+  fn matmul(&self, l_t: bool, rhs: R, r_t: bool) -> CellPtr {
+    panick_wrap(|| {
+      // FIXME: scalar dtype.
+      self.matmul_scale(l_t, rhs, r_t, 1.0_f32)
+    })
+  }
+
+  #[track_caller]
+  fn matmul_scale<T: IntoScalarValExt>(&self, l_t: bool, rhs: R, r_t: bool, scale: T) -> CellPtr {
+    panick_wrap(|| {
+      let p = *self.borrow();
+      let q = *rhs.borrow();
+      let p_ty = ctx_lookup_type(p);
+      let q_ty = ctx_lookup_type(q);
+      assert_eq!(p_ty.ndim(), 2);
+      assert_eq!(q_ty.ndim(), 2);
+      let l_block = [p_ty.shape[0], p_ty.shape[1]];
+      let r_block = [q_ty.shape[0], q_ty.shape[1]];
+      if cfg_debug() {
+      println!("DEBUG: matmul_scale: {:?}{} x {:?}{}",
+          &p_ty.shape, if l_t { "^T" } else { "" },
+          &q_ty.shape, if r_t { "^T" } else { "" },
+      );
+      }
+      let l_blk_inner = if l_t { l_block[0] } else { l_block[1] };
+      let r_blk_inner = if r_t { r_block[1] } else { r_block[0] };
+      if l_blk_inner != r_blk_inner {
+        println!("ERROR: matmul_scale: incompatible shapes:");
+        println!("ERROR: matmul_scale:   {:?}{} x {:?}{}",
+            l_block, if l_t { "^T" } else { "" },
+            r_block, if r_t { "^T" } else { "" },
+        );
+        panic!();
+      }
+      assert!((16 % p_ty.dtype.size_bytes() == 0) ||
+              (p_ty.dtype.size_bytes() % 16 == 0));
+      let l_dty_isz = p_ty.dtype.size_bytes() as i64;
+      let l_pad = if (l_block[1] * l_dty_isz) % 16 != 0 {
+        let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
+        if cfg_debug() {
+        println!("DEBUG: matmul_scale: left argument requires padding:");
+        println!("DEBUG: matmul_scale:   {:?}{} -> {:?}{}",
+            l_block, if l_t { "^T" } else { "" },
+            [l_block[0], l_pad], if l_t { "^T" } else { "" },
+        );
+        }
+        l_pad
+      } else {
+        l_block[1]
+      };
+      assert!((16 % q_ty.dtype.size_bytes() == 0) ||
+              (q_ty.dtype.size_bytes() % 16 == 0));
+      let r_dty_isz = q_ty.dtype.size_bytes() as i64;
+      let r_pad = if (r_block[1] * r_dty_isz) % 16 != 0 {
+        let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
+        if cfg_debug() {
+        println!("DEBUG: matmul_scale: right argument requires padding:");
+        println!("DEBUG: matmul_scale:   {:?}{} -> {:?}{}",
+            r_block, if r_t { "^T" } else { "" },
+            [r_block[0], r_pad], if r_t { "^T" } else { "" },
+        );
+        }
+        r_pad
+      } else {
+        r_block[1]
+      };
+      let mut l_block_pad = [l_block[0], l_pad];
+      let mut r_block_pad = [r_block[0], r_pad];
+      let l_blk_pad_inner = if l_t { l_block_pad[0] } else { l_block_pad[1] };
+      let r_blk_pad_inner = if r_t { r_block_pad[1] } else { r_block_pad[0] };
+      if l_blk_pad_inner < r_blk_pad_inner {
+        if l_t {
+          l_block_pad[0] = r_blk_pad_inner;
+        } else {
+          l_block_pad[1] = r_blk_pad_inner;
+        }
+      } else if l_blk_pad_inner > r_blk_pad_inner {
+        if r_t {
+          r_block_pad[1] = l_blk_pad_inner;
+        } else {
+          r_block_pad[0] = l_blk_pad_inner;
+        }
+      }
+      let l_blk_pad_inner = if l_t { l_block_pad[0] } else { l_block_pad[1] };
+      let r_blk_pad_inner = if r_t { r_block_pad[1] } else { r_block_pad[0] };
+      if l_blk_pad_inner != r_blk_pad_inner {
+        println!("BUG: matmul_scale: incompatible blocks after padding:");
+        println!("BUG: matmul_scale:   {:?}{} x {:?}{}",
+            l_block_pad, if l_t { "^T" } else { "" },
+            r_block_pad, if r_t { "^T" } else { "" },
+        );
+        panic!();
+      }
+      let l_blk_outer = if l_t { l_block[1] } else { l_block[0] };
+      let r_blk_outer = if r_t { r_block[0] } else { r_block[1] };
+      let l_blk_pad_outer = if l_t { l_block_pad[1] } else { l_block_pad[0] };
+      let r_blk_pad_outer = if r_t { r_block_pad[0] } else { r_block_pad[1] };
+      let o_block = [l_blk_outer, r_blk_outer];
+      let o_block_pad = [l_blk_pad_outer, r_blk_pad_outer];
+      if l_block != l_block_pad ||
+         r_block != r_block_pad ||
+         o_block != o_block_pad
+      {
+        if cfg_debug() {
+        println!("DEBUG: matmul_scale: after padding:");
+        println!("DEBUG: matmul_scale:   {:?}{} x {:?}{} = {:?}",
+            l_block_pad, if l_t { "^T" } else { "" },
+            r_block_pad, if r_t { "^T" } else { "" },
+            o_block_pad,
+        );
+        }
+      }
+      let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
+        None => {
+          println!("ERROR: matmul_scale: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
+          panic!();
+        }
+        Some(dty) => dty
+      };
+      let o_scale = scale.into_scalar_val_();
+      let o_scale_dty = o_scale.dtype();
+      match o_scale_dty {
+        Dtype::Fp32 => {}
+        _ => {
+          println!("ERROR: matmul_scale: unsupported scale dtype: {:?}", o_scale_dty);
+          panic!();
+        }
+      }
+      let mut p = p;
+      let mut q = q;
+      if l_block != l_block_pad {
+        p = p.block_pad(l_block_pad, ScalarVal_::zero(q_ty.dtype));
+      }
+      if r_block != r_block_pad {
+        q = q.block_pad(r_block_pad, ScalarVal_::zero(q_ty.dtype));
+      }
+      let op = MatrixMulThunkSpec{
+        //l_block: l_block_pad,
+        //r_block: r_block_pad,
+        l_t,
+        r_t,
+        //l_dtype: p_ty.dtype,
+        //r_dtype: q_ty.dtype,
+        o_dtype,
+        o_scale,
+      };
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(p);
+      ctx_push_cell_arg(q);
+      let mut out = ctx_pop_thunk(op);
+      if o_block != o_block_pad {
+        out = out.block_unpad(o_block);
+      }
+      out
+    })
+  }
+
+  #[track_caller]
   fn block_matmul(&self, l_blk_t: bool, rhs: R, r_blk_t: bool) -> CellPtr {
     panick_wrap(|| {
       // FIXME: scalar dtype.
@@ -1368,58 +1527,60 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       let r_block = [q_ty.shape[1], q_ty.shape[3]];
       if cfg_debug() {
       println!("DEBUG: block_matmul_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
-          &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
-          &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+          &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
+          &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
       );
       }
       let l_nrow = p_ty.shape[0];
       let l_ncol = p_ty.shape[2];
       let r_nrow = q_ty.shape[0];
       let r_ncol = q_ty.shape[2];
-      if !(l_nrow == r_nrow || l_nrow == 1 || r_nrow == 1) ||
-         !(l_ncol == r_ncol || l_ncol == 1 || r_ncol == 1)
+      if !((l_nrow == r_nrow || l_nrow == 1 || r_nrow == 1) &&
+           (l_ncol == r_ncol || l_ncol == 1 || r_ncol == 1))
       {
         println!("ERROR: block_matmul_scale: incompatible shapes:");
         println!("ERROR: block_matmul_scale:   ({:?} / {:?}{}) x ({:?} / {:?}{})",
-            &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
-            &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+            &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
+            &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
         );
         panic!();
       }
       let l_blk_inner = if l_blk_t { l_block[0] } else { l_block[1] };
       let r_blk_inner = if r_blk_t { r_block[1] } else { r_block[0] };
       if l_blk_inner != r_blk_inner {
-        println!("ERROR: block_matmul_scale: incompatible blocks:");
+        println!("ERROR: block_matmul_scale: incompatible block shapes:");
         println!("ERROR: block_matmul_scale:   {:?}{} x {:?}{}",
-            l_block, if l_blk_t { " T" } else { "" },
-            r_block, if r_blk_t { " T" } else { "" },
+            l_block, if l_blk_t { "^T" } else { "" },
+            r_block, if r_blk_t { "^T" } else { "" },
         );
         panic!();
       }
-      assert_eq!(16 % p_ty.dtype.size_bytes(), 0);
+      assert!((16 % p_ty.dtype.size_bytes() == 0) ||
+              (p_ty.dtype.size_bytes() % 16 == 0));
       let l_dty_isz = p_ty.dtype.size_bytes() as i64;
       let l_pad = if (l_block[1] * l_dty_isz) % 16 != 0 {
         let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
         if cfg_debug() {
         println!("DEBUG: block_matmul_scale: left argument requires padding:");
         println!("DEBUG: block_matmul_scale:   {:?}{} -> {:?}{}",
-            l_block, if l_blk_t { " T" } else { "" },
-            [l_block[0], l_pad], if l_blk_t { " T" } else { "" },
+            l_block, if l_blk_t { "^T" } else { "" },
+            [l_block[0], l_pad], if l_blk_t { "^T" } else { "" },
         );
         }
         l_pad
       } else {
         l_block[1]
       };
-      assert_eq!(16 % q_ty.dtype.size_bytes(), 0);
+      assert!((16 % q_ty.dtype.size_bytes() == 0) ||
+              (q_ty.dtype.size_bytes() % 16 == 0));
       let r_dty_isz = q_ty.dtype.size_bytes() as i64;
       let r_pad = if (r_block[1] * r_dty_isz) % 16 != 0 {
         let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
         if cfg_debug() {
         println!("DEBUG: block_matmul_scale: right argument requires padding:");
         println!("DEBUG: block_matmul_scale:   {:?}{} -> {:?}{}",
-            r_block, if r_blk_t { " T" } else { "" },
-            [r_block[0], r_pad], if r_blk_t { " T" } else { "" },
+            r_block, if r_blk_t { "^T" } else { "" },
+            [r_block[0], r_pad], if r_blk_t { "^T" } else { "" },
         );
         }
         r_pad
@@ -1448,8 +1609,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       if l_blk_pad_inner != r_blk_pad_inner {
         println!("BUG: block_matmul_scale: incompatible blocks after padding:");
         println!("BUG: block_matmul_scale:   {:?}{} x {:?}{}",
-            l_block_pad, if l_blk_t { " T" } else { "" },
-            r_block_pad, if r_blk_t { " T" } else { "" },
+            l_block_pad, if l_blk_t { "^T" } else { "" },
+            r_block_pad, if r_blk_t { "^T" } else { "" },
         );
         panic!();
       }
@@ -1466,8 +1627,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
         if cfg_debug() {
         println!("DEBUG: block_matmul_scale: after padding:");
         println!("DEBUG: block_matmul_scale:   {:?}{} x {:?}{} = {:?}",
-            l_block_pad, if l_blk_t { " T" } else { "" },
-            r_block_pad, if r_blk_t { " T" } else { "" },
+            l_block_pad, if l_blk_t { "^T" } else { "" },
+            r_block_pad, if r_blk_t { "^T" } else { "" },
             o_block_pad,
         );
         }
@@ -1517,7 +1678,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
     })
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn block_mm(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool) -> CellPtr {
     panick_wrap(|| {
       self.block_mm_scale(l_block, l_blk_t, rhs, r_block, r_blk_t, 1.0_f32)
@@ -1538,8 +1699,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       //println!("DEBUG: block_mm_scale: lblk={:?} rblk={:?}", l_block, r_block);
       if cfg_debug() {
       println!("DEBUG: block_mm_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
-          &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
-          &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+          &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
+          &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
       );
       }
       let l_nrow = p_ty.shape[0] / l_block[0];
@@ -1558,8 +1719,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       {
         println!("ERROR: block_mm_scale: incompatible shapes:");
         println!("ERROR: block_mm_scale:   ({:?} / {:?}{}) x ({:?} / {:?}{})",
-            &p_ty.shape, l_block, if l_blk_t { " T" } else { "" },
-            &q_ty.shape, r_block, if r_blk_t { " T" } else { "" },
+            &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
+            &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
         );
         panic!();
       }
@@ -1568,8 +1729,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       if l_blk_inner != r_blk_inner {
         println!("ERROR: block_mm_scale: incompatible blocks:");
         println!("ERROR: block_mm_scale:   {:?}{} x {:?}{}",
-            l_block, if l_blk_t { " T" } else { "" },
-            r_block, if r_blk_t { " T" } else { "" },
+            l_block, if l_blk_t { "^T" } else { "" },
+            r_block, if r_blk_t { "^T" } else { "" },
         );
         panic!();
       }
@@ -1579,8 +1740,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
         let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
         println!("WARNING: block_mm_scale: left argument requires padding:");
         println!("WARNING: block_mm_scale:   {:?}{} -> {:?}{}",
-            l_block, if l_blk_t { " T" } else { "" },
-            [l_block[0], l_pad], if l_blk_t { " T" } else { "" },
+            l_block, if l_blk_t { "^T" } else { "" },
+            [l_block[0], l_pad], if l_blk_t { "^T" } else { "" },
         );
         // TODO
       }
@@ -1590,8 +1751,8 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
         let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
         println!("WARNING: block_mm_scale: right argument requires padding:");
         println!("WARNING: block_mm_scale:   {:?}{} -> {:?}{}",
-            r_block, if r_blk_t { " T" } else { "" },
-            [r_block[0], r_pad], if r_blk_t { " T" } else { "" },
+            r_block, if r_blk_t { "^T" } else { "" },
+            [r_block[0], r_pad], if r_blk_t { "^T" } else { "" },
         );
         // TODO
       }
@@ -1648,7 +1809,7 @@ pub trait MathBinaryOps<R: Borrow<CellPtr>>: Borrow<CellPtr> {
       ctx_push_cell_arg(q);
       ctx_pop_thunk(op)
     })
-  }
+  }*/
 }
 
 impl<L: Borrow<CellPtr>, R: Borrow<CellPtr>> MathBinaryOps<R> for L {}
@@ -2417,6 +2578,16 @@ impl<L: Borrow<CellPtr> + Sized> Ops for L {}
 
 pub trait CtlOps: Borrow<CellPtr> + Sized {
   #[track_caller]
+  fn resident(&self, loc: Locus) -> bool {
+    unimplemented!();
+  }
+
+  #[track_caller]
+  fn spine_version(&self) -> Clock {
+    unimplemented!();
+  }
+
+  #[track_caller]
   fn version(&self) -> Clock {
     panick_wrap(|| ctx_lookup_clk(*self.borrow()))
   }
@@ -2426,12 +2597,17 @@ pub trait CtlOps: Borrow<CellPtr> + Sized {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let x = *self.borrow();
       let xclk = ctx_lookup_clk(x);
-      match ctx.env.borrow_mut().pread_ref(x, xclk, Locus::Mem) {
-        None => panic!("bug"),
-        Some(e) => {
+      match ctx.env.borrow_mut().pread_ref_(x, xclk, Locus::Mem) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
           match e.cel_ {
-            &mut Cell_::Phy(.., ref mut cel_) => {
-              let (pm, addr) = cel_.get_loc(x, xclk, &e.ty, Locus::Mem);
+            &mut Cell_::Phy(.., ref mut pcel) => {
+              // FIXME: use of get_loc here is kind of kludgy.
+              //let (pm, addr) = pcel.get_loc(x, xclk, &e.ty, Locus::Mem);
+              let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                None => panic!("bug"),
+                Some((pm, rep)) => (pm, rep.addr.get())
+              };
               TL_PCTX.with(|pctx| {
                 let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
                 icel.as_mem_reg().unwrap()

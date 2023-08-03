@@ -174,7 +174,6 @@ impl Llama {
 
   pub fn clone_param(&self) -> Vec<StableCell> {
     let mut param = Vec::new();
-    // FIXME: 0-th embed requires zero grad.
     param.push(self.embed.clone());
     for layer in self.layers.iter() {
       param.push(layer.pre_norm.clone());
@@ -192,11 +191,11 @@ impl Llama {
     param
   }
 
-  pub fn param(&self) -> Vec<StableCell> {
+  /*pub fn param(&self) -> Vec<StableCell> {
     self.clone_param()
-  }
+  }*/
 
-  pub fn fresh_grad(&self) -> Vec<StableCell> {
+  /*pub fn fresh_grad(&self) -> Vec<StableCell> {
     // FIXME
     unimplemented!();
   }
@@ -204,7 +203,7 @@ impl Llama {
   pub fn fresh_grad_with_matmul_dtype(&self, dtype: Dtype) -> Vec<StableCell> {
     // FIXME
     unimplemented!();
-  }
+  }*/
 
   pub fn fresh_input(&self) -> LanguageModelIn {
     let ubat_sz = self.cfg.ubat_sz;
@@ -215,9 +214,9 @@ impl Llama {
     LanguageModelIn{in_tok, in_lm_tok, in_lm_loss_scale}
   }
 
-  pub fn make_input(&self) -> LanguageModelIn {
+  /*pub fn make_input(&self) -> LanguageModelIn {
     self.fresh_input()
-  }
+  }*/
 
   pub fn init(&mut self) {
     // TODO
@@ -294,93 +293,48 @@ impl Llama {
     let rms_norm_eps = self.cfg.rms_norm_eps;
     let in_tok = (*in_tok.borrow()).const_();
     let mut stream = in_tok;
-    /*stream = stream.inner_one_hot(tok_dim, f16::dtype());
-    stream = stream
-            .new_shape([ubat_sz * seq_cap, tok_dim])
-            .block_mm([ubat_sz * seq_cap, tok_dim], false, &self.embed, [tok_dim, inner_dim], false)
-            .new_shape([ubat_sz, seq_cap, num_head, head_dim]);*/
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
     for i in 0 .. num_layer as usize {
       let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
       let q_proj = pre_nrm
-                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].q, [inner_dim, inner_dim], true)
                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                   .block_matmul(false, &self.layers[i].q, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let k_proj = pre_nrm
-                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].k, [inner_dim, inner_dim], true)
                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                   .block_matmul(false, &self.layers[i].k, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let v_proj = pre_nrm
-                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                  //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].v, [inner_dim, inner_dim], true)
                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                   .block_matmul(false, &self.layers[i].v, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let (q_proj, k_proj) = symplectic_embed(q_proj, k_proj);
-      //let q_proj = q_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      //let k_proj = k_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let attn = q_proj
-                //.block_mm_scale([seq_cap, head_dim], false, k_proj, [seq_cap, head_dim], true, 1.0 / (head_dim as f32).sqrt())
-                .block_matmul_scale(false, k_proj, true, 1.0 / (head_dim as f32).sqrt())
-                //.new_shape([ubat_sz, seq_cap, num_head, seq_cap])
+      let attn = q_proj.block_matmul_scale(false, k_proj, true, 1.0 / (head_dim as f32).sqrt())
                 .cast(f32::dtype());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
-                .cast(f16::dtype())
-                //.new_shape([ubat_sz * seq_cap, num_head * seq_cap]);
-                //.new_shape([ubat_sz, seq_cap, num_head, seq_cap]);
-                ;
-      /*// FIXME: pad because block_mm is a very low level wrapper.
-      let pad_head_dim = ((head_dim + 8 - 1) / 8) * 8;
-      let v_attn = if head_dim == pad_head_dim {
-        let v_proj = v_proj.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-        let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, head_dim], false);
-        v_attn
-      } else {
-        let v_proj = v_proj
-                    .block_pad([seq_cap, pad_head_dim], f16::zero())
-                    .new_shape([ubat_sz * seq_cap, num_head * pad_head_dim]);
-        let v_attn = attn.block_mm([seq_cap, seq_cap], false, v_proj, [seq_cap, pad_head_dim], false)
-                    .new_shape([ubat_sz, seq_cap, num_head, pad_head_dim])
-                    .block_unpad([seq_cap, head_dim])
-                    .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-        v_attn
-      };*/
+                .cast(f16::dtype());
       let v_attn = attn.block_matmul(false, v_proj, false)
-                  //.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim]);
-      //let o_proj = v_attn.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].o, [inner_dim, inner_dim], true)
       let o_proj = v_attn.block_matmul(false, &self.layers[i].o, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
       let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
       let up_proj = post_nrm
-                   //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                   //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].up, [mlp_inner_dim, inner_dim], true);
                    .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                    .block_matmul(false, &self.layers[i].up, true);
       let gate_proj = post_nrm
-                     //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                     //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.layers[i].gate, [mlp_inner_dim, inner_dim], true);
                      .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                      .block_matmul(false, &self.layers[i].gate, true);
       let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
-      let down_proj = gate_up
-                     //.block_mm([ubat_sz * seq_cap, mlp_inner_dim], false, &self.layers[i].down, [inner_dim, mlp_inner_dim], true)
-                     .block_matmul(false, &self.layers[i].down, true)
+      let down_proj = gate_up.block_matmul(false, &self.layers[i].down, true)
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }
     let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
     let out_lm_logit = stream
-                      //.new_shape([ubat_sz * seq_cap, num_head * head_dim])
-                      //.block_mm([ubat_sz * seq_cap, inner_dim], false, &self.lm_head, [tok_dim, inner_dim], true)
                       .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
                       .block_matmul(false, &self.lm_head, true)
                       .new_shape([ubat_sz, seq_cap, tok_dim])
@@ -388,16 +342,15 @@ impl Llama {
     let logit32 = out_lm_logit.cast(f32::dtype());
     let out_lm_prob = logit32.inner_softmax().keep();
     let in_lm_tok = in_lm_tok.const_();
-    /*let out_lm_loss = (-out_lm_prob.inner_select(in_lm_tok).ln()).keep();*/
     let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
     LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
   }
 }
 
 #[derive(Clone)]
-pub struct LlamaLayerCachedKV {
+pub struct LlamaCachedState {
   // TODO
-  pub q_cache: StableCell,
+  //pub q_cache: StableCell,
   pub k_cache: StableCell,
   pub v_cache: StableCell,
 }
@@ -408,7 +361,8 @@ pub struct LlamaCached {
   pub cos: Option<StableCell>,
   pub sin: Option<StableCell>,
   pub embed: StableCell,
-  pub layers: Vec<(LlamaLayer, LlamaLayerCachedKV)>,
+  pub layers: Vec<LlamaLayer>,
+  pub states: Vec<LlamaCachedState>,
   pub head_norm: StableCell,
   pub lm_head: StableCell,
 }
@@ -421,12 +375,194 @@ impl LlamaCached {
     LanguageModelDeployIn{in_tok}
   }*/
 
-  pub fn init(&self) {
-    // TODO
+  pub fn init_constants(&mut self) {
+    let init_embed = || {
+      let seq_cap = self.cfg.seq_cap;
+      let dtype = self.cfg.dtype;
+      let pos = iota(seq_cap).cast(f32::dtype());
+      let freq = pos.outer_mul(&self.layers[0].inv_freq);
+      let freq2 = freq.inner_concat(freq);
+      let cos = freq2.cos().cast(dtype);
+               //.new_shape([1, seq_cap, 1, head_dim])
+               //.const_();
+      let sin = freq2.sin().cast(dtype);
+               //.new_shape([1, seq_cap, 1, head_dim])
+               //.const_();
+      (cos, sin)
+    };
+    let (cos, sin) = init_embed();
+    self.cos = Some(cos.keep());
+    self.sin = Some(sin.keep());
   }
 
-  pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: X) -> LanguageModelDeployOut {
-    // TODO
+  pub fn cache_constants(&self) {
+    self.cos.as_ref().unwrap().cache();
+    self.sin.as_ref().unwrap().cache();
+  }
+
+  pub fn init_state(&mut self) {
+    let ubat_sz = self.cfg.ubat_sz;
+    let seq_cap = self.cfg.seq_cap;
+    let num_head = self.cfg.num_head;
+    let head_dim = self.cfg.head_dim;
+    let dtype = self.cfg.dtype;
+    self.states.clear();
+    for _ in 0 .. self.cfg.num_layer as usize {
+      let k_cache = zeros([ubat_sz, seq_cap, num_head, head_dim], dtype).keep();
+      let v_cache = zeros([ubat_sz, seq_cap, num_head, head_dim], dtype).keep();
+      self.states.push(LlamaCachedState{
+        k_cache,
+        v_cache,
+      });
+    }
+  }
+
+  pub fn reinit_state(&self) {
+    for ell in 0 .. self.cfg.num_layer as usize {
+      self.states[ell].k_cache.set_zeros();
+      self.states[ell].v_cache.set_zeros();
+    }
+  }
+
+  pub fn cache_state(&self) {
+    for ell in 0 .. self.cfg.num_layer as usize {
+      self.states[ell].k_cache.cache();
+      self.states[ell].v_cache.cache();
+    }
+  }
+
+  /*pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: X) -> LanguageModelDeployOut {
+    unimplemented!();
+  }*/
+
+  pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: &[X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
     unimplemented!();
   }
+
+  /*pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: &[X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+    let ubat_sz = self.cfg.ubat_sz;
+    let seq_cap = self.cfg.seq_cap;
+    let num_head = self.cfg.num_head;
+    let head_dim = self.cfg.head_dim;
+    let inner_dim = num_head * head_dim;
+    let mlp_inner_dim = self.cfg.mlp_inner_dim;
+    let tok_dim = self.cfg.tok_dim;
+    let num_layer = self.cfg.num_layer;
+    let rms_norm_eps = self.cfg.rms_norm_eps;
+    let diff_seq_len = next_seq_len - prev_seq_len;
+    assert!(diff_seq_len > 0);
+    let block_causal_attention_mask = |x: CellPtr| {
+      x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
+    };
+    /*let row_causal_attention_mask = |x: CellPtr| {
+    };*/
+    let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
+      // FIXME
+      let x = x.new_shape([1 * diff_seq_len, num_head * head_dim]);
+      let v = x.cast(f32::dtype())
+               .square().inner_mean()
+               .new_shape([1 * diff_seq_len, 1]);
+      let t = x / (v + eps).sqrt();
+      let w = weight.new_shape([1, num_head * head_dim]);
+      let y = (w * t).cast(dtype)
+                     .new_shape([1, diff_seq_len, num_head, head_dim]);
+      y
+    };
+    /*let inner_symplectic_map = |x: CellPtr| {
+      let xty = x.type_();
+      let (lx, rx) = x.inner_split(xty.inner_len() / 2);
+      (-rx).inner_concat(lx)
+    };*/
+    let symplectic_embed = |x: CellPtr| {
+      let cos = self.cos.as_ref().unwrap()
+               .new_shape([seq_cap, 1, head_dim]);
+      let sin = self.sin.as_ref().unwrap()
+               .new_shape([seq_cap, 1, head_dim]);
+      let y = (x * cos[[prev_seq_len .. next_seq_len, .., ..]].const_())
+            + (x.inner_symplectic_map() * sin[[prev_seq_len .. next_seq_len, .., ..]].const_());
+      y
+    };
+    assert_eq!(ubat_sz as usize, in_tok.len());
+    // FIXME
+    let mut stream = in_tok;
+    let mut stream = Vec::with_capacity(ubat_sz as usize);
+    for i in 0 .. ubat_sz {
+      let in_tok = (*in_tok[i as usize].borrow()).const_();
+      stream.push(self.embed.outer_select(in_tok)
+                 .new_shape([1, diff_seq_len, num_head, head_dim]);
+    }
+    for ell in 0 .. num_layer as usize {
+      // FIXME
+      for i in 0 .. ubat_sz {
+        let pre_nrm = rms_norm(&stream[i as usize], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype());
+        let q_proj =
+               symplectic_embed(
+               pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+              .new_shape([diff_seq_len, num_head * head_dim])
+              .matmul(false, &self.layers[ell].q, true)
+              .new_shape([1, diff_seq_len, num_head, head_dim])
+               );
+        self.states[ell].k_cache[[i .. i + 1, prev_seq_len .. next_seq_len, .., ..]]
+            += symplectic_embed(
+               pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+              .new_shape([diff_seq_len, num_head * head_dim])
+              .matmul(false, &self.layers[ell].k, true)
+              .new_shape([1, diff_seq_len, num_head, head_dim])
+               );
+        self.states[ell].v_cache[[i .. i + 1, prev_seq_len .. next_seq_len, .., ..]]
+            += pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+              .new_shape([diff_seq_len, num_head * head_dim])
+              .matmul(false, &self.layers[ell].v, true)
+              .new_shape([1, diff_seq_len, num_head, head_dim]);
+        let attn =
+               q_proj
+              .block_matmul_scale(
+                   false,
+                   &self.states[ell].k_cache[[i + i + 1, .. /*next_seq_len*/, .., ..]],
+                   true,
+                   1.0 / (head_dim as f32).sqrt()
+               );
+        // FIXME: row-based causal mask.
+        let attn = _;
+        let attn = inner_softmax(attn)
+                  .cast(f16::dtype());
+        let v_attn =
+                attn
+               .block_matmul(
+                    false,
+                    self.states[ell].v_cache[[i .. i + 1, .. /*next_seq_len*/, .., ..]]
+                    false
+                )
+               .new_shape([diff_seq_len, num_head * head_dim]);
+        let o_proj = v_attn.matmul(false, &self.layers[ell].o, true);
+        stream[i as usize] = stream[i] + o_proj;
+        let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
+        let up_proj = post_nrm
+                     .block_matmul(false, &self.layers[ell].up, true);
+        let gate_proj = post_nrm
+                       .block_matmul(false, &self.layers[ell].gate, true);
+        let gate_proj = gate_proj.standard_silu();
+        let gate_up = gate_proj * up_proj;
+        let down_proj = gate_up.block_matmul(false, &self.layers[ell].down, true)
+                       .new_shape([1, seq_cap, num_head, head_dim]);
+        stream[i as usize] = stream[i as usize] + down_proj;
+      }
+    }
+    // TODO
+    let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
+    let mut out_lm_prob = Vec::with_capacity(ubat_sz as usize);
+    for i in 0 .. ubat_sz {
+      stream[i as usize] = rms_norm(&stream[i], &self.head_norm, rms_norm_eps, f16::dtype());
+      out_lm_logit.push(stream[i as usize]
+                       .new_shape([seq_cap, num_head * head_dim])
+                       .matmul(false, &self.lm_head, true)
+                       .new_shape([seq_cap, tok_dim])
+                       .keep());
+      out_lm_prob.push(out_lm_logit[i as usize]
+                      .cast(f32::dtype())
+                      .inner_softmax()
+                      .keep());
+    }
+    LanguageModelBatchDeployOut{out_lm_logit, out_lm_prob}
+  }*/
 }

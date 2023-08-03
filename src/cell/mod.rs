@@ -594,6 +594,8 @@ impl CellDeref for CellViewHandle {
   }
 }*/
 
+pub type CellViewHandle = CellViewHandle_;
+
 #[repr(transparent)]
 pub struct CellViewHandle_([_Void]);
 
@@ -610,10 +612,20 @@ pub struct CellViewHandle_([_Void]);
 }*/
 
 impl CellViewHandle_ {
-  #[cfg(target_pointer_width = "64")]
+  pub fn _from<'a>(this: &'a CellPtr) -> &'a CellViewHandle_ {
+    let ptr = { this.raw_ as _ };
+    unsafe { &*(from_raw_parts(this as *const CellPtr as *const _Void, ptr) as *const [_Void] as *const CellViewHandle_) }
+  }
+
   pub fn _from_mut<'a>(this: &'a mut CellPtr) -> &'a mut CellViewHandle_ {
     let ptr = { this.raw_ as _ };
     unsafe { &mut *(from_raw_parts_mut(this as *mut CellPtr as *mut _Void, ptr) as *mut [_Void] as *mut CellViewHandle_) }
+  }
+}
+
+impl CellDeref for CellViewHandle_ {
+  fn _deref(&self) -> CellPtr {
+    CellPtr::from_unchecked(self.0.len() as _)
   }
 }
 
@@ -628,7 +640,6 @@ impl Debug for CellViewHandleEx {
 }
 
 impl CellViewHandleEx {
-  #[cfg(target_pointer_width = "64")]
   pub fn _from(x: CellPtr) -> CellViewHandleEx {
     let raw = x.raw_ as usize;
     //assert!(raw < VOID_MAP_HI);
@@ -650,7 +661,7 @@ impl CellDeref for CellViewHandleEx {
   }
 }
 
-#[derive(Clone, Debug)]
+/*#[derive(Clone, Debug)]
 pub struct CellView(pub CellPtr, pub Vec<CellVOp>);
 
 impl From<CellPtr> for CellView {
@@ -724,19 +735,49 @@ impl<'r> BorrowCellView for CellViewRef<'r> {
   fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
     CellViewRef(self.0, self.1)
   }
-}
+}*/
 
 pub type IRange = Range<i64>;
 
+pub type CellVOp = CellViewOp;
+
 #[derive(Clone, Debug)]
-pub enum CellVOp {
+pub enum CellViewOp {
   Nop,
+  Slice(Rc<IRange>),
+  Slice2(Rc<[IRange; 2]>),
+  Slice3(Rc<[IRange; 3]>),
+  Slice4(Rc<[IRange; 4]>),
+  //Slice(Rc<[IRange]>),
   Swap(i8, i8),
-  Slice(Box<IRange>),
-  Slice2(Box<[IRange; 2]>),
-  Slice3(Box<[IRange; 3]>),
-  Slice4(Box<[IRange; 4]>),
+  //Transpose(Rc<[i8]>),
+  NewShape(Vec<i64>),
+  //NewShape(Rc<[i64]>),
+}
+
+#[derive(Debug)]
+pub struct CellView {
   // TODO
+  pub root: CellPtr,
+  pub vlog: Vec<CellViewOp>,
+}
+
+impl Default for CellView {
+  fn default() -> CellView {
+    CellView{
+      root: CellPtr::nil(),
+      vlog: Vec::new(),
+    }
+  }
+}
+
+impl From<CellPtr> for CellView {
+  fn from(root: CellPtr) -> CellView {
+    CellView{
+      root,
+      vlog: Vec::new(),
+    }
+  }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1334,6 +1375,10 @@ impl CellType {
     span
   }
 
+  pub fn span_bytes(&self) -> u64 {
+    self.packed_span_bytes()
+  }
+
   pub fn packed_span_bytes(&self) -> u64 {
     let span = self.flat_len();
     (span * self.dtype.size_bytes() as i64) as u64
@@ -1675,40 +1720,69 @@ pub struct PCellReplica {
 pub struct PCell {
   pub optr: CellPtr,
   pub ogty: CellType,
-  pub olay: CellLayout,
+  //pub olay: CellLayout,
   pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
   pub replicas: RevSortMap8<(Locus, PMach), PCellReplica>,
 }
 
 impl PCell {
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
-    let lay = CellLayout::new_packed(&ty);
+    if cfg_debug() { println!("DEBUG: PCell::new: optr={:?} ogty={:?}", ptr, &ty); }
+    //let lay = CellLayout::new_packed(&ty);
     let pm_index = RevSortMap8::new();
     let replicas = RevSortMap8::new();
     PCell{
       optr: ptr,
       //optr: Cell::new(ptr),
       ogty: ty,
-      olay: lay,
+      //olay: lay,
       pm_index,
       replicas,
     }
   }
 
-  pub fn push_new_replica(&mut self, x: CellPtr, xclk: Clock, locus: Locus, pmach: PMach, addr: PAddr, /*icel: Option<Weak<dyn InnerCell_>>*/) {
+  pub fn _push(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
+    let rep = PCellReplica{clk: Cell::new(clk), addr: Cell::new(addr)};
+    let key = self.replicas.insert((locus, pmach), rep);
+    self.pm_index.insert((pmach, locus), key);
+  }
+
+  pub fn push_new_replica(&mut self, root: CellPtr, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
     match self.replicas.find((locus, pmach)) {
       None => {}
       Some(_) => panic!("bug")
     }
     TL_PCTX.with(|pctx| {
-      assert_eq!(pctx.set_root(addr, x), None);
+      assert_eq!(pctx.set_root(addr, root), None);
     });
-    let rep = PCellReplica{clk: Cell::new(xclk), addr: Cell::new(addr)};
-    let key = self.replicas.insert((locus, pmach), rep);
-    self.pm_index.insert((pmach, locus), key);
+    self._push(clk, locus, pmach, addr);
   }
 
-  pub fn pop(&self, x: CellPtr, /*xclk: Clock,*/ q_addr: PAddr) {
+  pub fn swap(&mut self, root: CellPtr, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) -> Option<(Clock, PAddr)> {
+    match self.replicas.find((locus, pmach)) {
+      None => {
+        TL_PCTX.with(|pctx| {
+          assert_eq!(pctx.set_root(addr, root), None);
+        });
+        self._push(clk, locus, pmach, addr);
+        None
+      }
+      Some((_, rep)) => {
+        let o_clk = rep.clk.get();
+        let o_addr = rep.addr.get();
+        assert!(o_clk <= clk);
+        TL_PCTX.with(|pctx| {
+          assert_eq!(pctx.unset_root(o_addr), Some(root));
+          assert_eq!(pctx.set_root(addr, root), None);
+        });
+        rep.clk.set(clk);
+        rep.addr.set(addr);
+        Some((o_clk, o_addr))
+      }
+    }
+  }
+
+  pub fn _pop(&self, x: CellPtr, /*xclk: Clock,*/ q_addr: PAddr) {
     for (key, rep) in self.replicas.iter() {
       if rep.addr.get() == q_addr {
         TL_PCTX.with(|pctx| {
@@ -1731,7 +1805,6 @@ impl PCell {
   }
 
   pub fn lookup_loc(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
-    //match self.replicas.find_lub_mut((q_locus, PMach::_Bot)) {}
     match self.replicas.find_lub((q_locus, PMach::_Bot)) {
       None => None,
       Some((key, rep)) => {
@@ -1746,7 +1819,7 @@ impl PCell {
     }
   }
 
-  pub fn find_any(&self, q_clk: Clock, ty: &CellType) -> Option<(Locus, PMach, PAddr)> {
+  pub fn find_any(&self, q_clk: Clock, /*ty: &CellType*/) -> Option<(Locus, PMach, PAddr)> {
     for (key, rep) in self.replicas.iter() {
       let &(loc, pm) = key.as_ref();
       if rep.clk.get() == q_clk {
@@ -1756,7 +1829,107 @@ impl PCell {
     None
   }
 
-  pub fn get(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
+  pub fn read_loc(&mut self, root: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+    let mut f_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk > q_clk {
+          println!("DEBUG: PCell::read_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+              root, prev_clk, q_clk, ty, q_locus, pmach);
+          println!("ERROR: PCell::read_loc: read failure");
+          panic!("bug");
+        } else if prev_clk == q_clk {
+          return (pmach, rep.addr.get());
+        }
+        Some(pmach)
+      }
+    };
+    if cfg_debug() {
+    println!("DEBUG: PCell::get_loc: root={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
+        root, q_clk, ty, q_locus, f_pmach);
+    }
+    if f_pmach.is_none() {
+      let (pmach, addr) = TL_PCTX.with(|pctx| {
+        pctx.alloc_loc(ty, q_locus)
+      });
+      self.push_new_replica(root, Clock::default(), q_locus, pmach, addr);
+      f_pmach = Some(pmach);
+    }
+    let f_pmach = f_pmach.unwrap();
+    match self.lookup(q_locus, f_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk >= q_clk {
+          panic!("bug");
+        } else /*if prev_clk < q_clk */{
+          match self.find_any(q_clk) {
+            None => {
+              println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+                  self.optr, &self.ogty,
+                  root, prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+              );
+              println!("ERROR: PCell::read_loc: no replica to copy from");
+              panic!();
+            }
+            Some((o_loc, o_pm, o_addr)) => {
+              if cfg_debug() {
+              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+                  self.optr, &self.ogty,
+                  root, prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+                  o_loc, o_pm, o_addr,
+              );
+              }
+              TL_PCTX.with(|pctx| {
+                pctx.hard_copy(q_locus, f_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
+              });
+            }
+          }
+          rep.clk.set(q_clk);
+        }
+        (f_pmach, rep.addr.get())
+      }
+    }
+  }
+
+  pub fn write_loc(&mut self, root: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
+    let mut f_pmach = match self.lookup_loc(q_locus) {
+      None => None,
+      Some((pmach, rep)) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk >= q_clk {
+          println!("DEBUG: PCell::write_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+              root, prev_clk, q_clk, ty, q_locus, pmach);
+          println!("ERROR: PCell::write_loc: write failure");
+          panic!("bug");
+        }
+        Some(pmach)
+      }
+    };
+    if f_pmach.is_none() {
+      let (pmach, addr) = TL_PCTX.with(|pctx| {
+        pctx.alloc_loc(ty, q_locus)
+      });
+      self.push_new_replica(root, Clock::default(), q_locus, pmach, addr);
+      f_pmach = Some(pmach);
+    }
+    let f_pmach = f_pmach.unwrap();
+    match self.lookup(q_locus, f_pmach) {
+      None => panic!("bug"),
+      Some(rep) => {
+        let prev_clk = rep.clk.get();
+        if prev_clk >= q_clk {
+          panic!("bug");
+        } else /*if prev_clk < q_clk */{
+          rep.clk.set(q_clk);
+        }
+        (f_pmach, rep.addr.get())
+      }
+    }
+  }
+
+  /*pub fn get(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus, q_pmach: PMach) -> PAddr {
     let f = match self.lookup(q_locus, q_pmach) {
       None => None,
       Some(rep) => {
@@ -1787,7 +1960,7 @@ impl PCell {
         } else if prev_clk < q_clk {
           // FIXME: actually copy from any existing replica.
           // FIXME: depends on whether we want fresh or non-fresh get...
-          match self.find_any(q_clk, ty) {
+          match self.find_any(q_clk) {
             None => {
               println!("DEBUG: PCell::get: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
@@ -1854,7 +2027,7 @@ impl PCell {
         } else if prev_clk < q_clk {
           // FIXME: actually copy from any existing replica.
           // FIXME: depends on whether we want fresh or non-fresh get...
-          match self.find_any(q_clk, ty) {
+          match self.find_any(q_clk) {
             None => {
               println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
@@ -1969,7 +2142,7 @@ impl PCell {
         } if prev_clk < q_clk {
           // FIXME: actually copy from any existing replica.
           // FIXME: depends on whether we want fresh or non-fresh get...
-          match self.find_any(q_clk, ty) {
+          match self.find_any(q_clk) {
             None => {
               println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
@@ -2034,7 +2207,7 @@ impl PCell {
   pub fn fresh_loc(&mut self, x: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> PAddr {
     // FIXME FIXME: hack.
     self.fresh(x, q_clk, ty, q_locus, PMach::NvGpu)
-  }
+  }*/
 
   pub fn hardcopy(&self) -> PCell {
     // FIXME FIXME

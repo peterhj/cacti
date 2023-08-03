@@ -4033,6 +4033,66 @@ impl FutharkThunkSpec for BlockTriElemAffineFutThunkSpec {
 pub struct DotThunkSpec;*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct MatrixMulThunkSpec {
+  pub l_t:      bool,
+  pub r_t:      bool,
+  //pub l_dtype:  Dtype,
+  //pub r_dtype:  Dtype,
+  pub o_dtype:  Dtype,
+  pub o_scale:  ScalarVal_,
+}
+
+impl ThunkSpec for MatrixMulThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("matmul")
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((2, 1))
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Time)
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    unimplemented!();
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    unimplemented!();
+  }
+
+  fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
+    match pmach {
+      #[cfg(feature = "nvgpu")]
+      PMach::NvGpu => {
+        unimplemented!();
+        //Some(Rc::new(MatrixMulF16F32GpuThunkImpl::default()))
+      }
+      _ => {
+        println!("WARNING: MatrixMulThunkSpec::gen_impl_: no impl for pmach={:?}", pmach);
+        None
+      }
+    }
+  }
+
+  fn pop_adj(&self, arg: &[(CellPtr, Clock)], out: CellPtr, _out_clk: Clock, _out_mode: ThunkMode, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<(), ThunkAdjErr> {
+    unimplemented!();
+  }
+}
+
+#[cfg(feature = "nvgpu")]
+#[derive(Default)]
+pub struct MatrixMulF16F32GpuThunkImpl {
+  // TODO
+  alpha: Cell<f32>,
+  beta: Cell<f32>,
+}
+
+// TODO
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BlockMatrixMulThunkSpec {
   //pub l_shape:  [i64; 2],
   //pub r_shape:  [i64; 2],
@@ -4157,7 +4217,7 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     let r_ty = arg[1].0.type_();
     let y_ty = out.type_();
     let dy_ty = out_adj.type_();
-    if l_ty.ndim() == 2 && r_ty.ndim() == 2 && y_ty.ndim() == 2 && dy_ty.ndim() == 2 {
+    /*if l_ty.ndim() == 2 && r_ty.ndim() == 2 && y_ty.ndim() == 2 && dy_ty.ndim() == 2 {
     let [l_blk_outer, l_blk_inner] = if self.l_blk_t { [self.l_block[1], self.l_block[0]] } else { self.l_block };
     let [r_blk_inner, r_blk_outer] = if self.r_blk_t { [self.r_block[1], self.r_block[0]] } else { self.r_block };
     assert_eq!(l_blk_inner, r_blk_inner);
@@ -4192,7 +4252,7 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
         arg_adj[1] += out_adj.block_mm_scale(out_block, true, arg[0].0, self.l_block, true, self.o_scale);
       }
     }
-    } else if l_ty.ndim() == 4 && r_ty.ndim() == 4 && y_ty.ndim() == 4 && dy_ty.ndim() == 4 {
+    } else */if l_ty.ndim() == 4 && r_ty.ndim() == 4 && y_ty.ndim() == 4 && dy_ty.ndim() == 4 {
       match (self.l_blk_t, self.r_blk_t) {
         (false, false) => {
           // (O-R, O-C) = (a-R, a-C) x (b-R, b-C)     = (a-R, b-C)
@@ -4380,9 +4440,9 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     }
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match env.lookup_ref(x) {
-        None => panic!("bug"),
-        Some(e) => {
+      match env._lookup_ref_(x) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
           arg_ty_.push(e.ty.clone());
         }
       }
@@ -4453,12 +4513,17 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    match env.pread_ref(arg[0].0, arg[0].1, /*CellEMode::Read,*/ loc) {
-      None => panic!("bug"),
-      Some(e) => {
+    match env.pread_ref_(arg[0].0, arg[0].1, loc) {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &arg_ty_[0]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
+            //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
@@ -4490,12 +4555,17 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    match env.pread_ref(arg[1].0, arg[1].1, /*CellEMode::Read,*/ loc) {
-      None => panic!("bug"),
-      Some(e) => {
+    match env.pread_ref_(arg[1].0, arg[1].1, loc) {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &arg_ty_[1]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
+            //let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
@@ -4527,12 +4597,21 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
-    match env.pwrite_ref(out, prev_oclk, oclk, /*CellEMode::Mutex,*/ loc) {
-      None => panic!("bug"),
-      Some(e) => {
+    match match mode {
+      ThunkMode::Apply => env.pwrite_ref_(out, oclk, loc),
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => env.prewrite_ref_(out, prev_oclk, oclk, loc)
+    } {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &out_ty_);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-            let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
+            //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
@@ -4770,13 +4849,14 @@ pub struct MemcpyNvgpuThunkImpl;
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MemcpyNvgpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
-    if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
+    //if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
+    if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match env.lookup_ref(x) {
-        None => panic!("bug"),
-        Some(e) => {
+      match env._lookup_ref_(x) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
           arg_ty_.push(e.ty.clone());
         }
       }
@@ -4797,13 +4877,25 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       let loc = gpu.device_locus();
-      let src_dptr = match env.pread_ref(arg[0].0, arg[0].1, loc) {
-        None => panic!("bug"),
-        Some(e) => {
+      let src_dptr = match env.pread_ref_(arg[0].0, arg[0].1, loc) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          assert_eq!(&e.ty, &arg_ty_[0]);
           match e.cel_ {
-            &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-              let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
-              let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
+            &mut Cell_::Phy(.., ref pcel) => {
+              //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
+              let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+                None => panic!("bug"),
+                Some(rep) => rep.addr.get()
+              };
+              //let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
+              let dptr = match gpu.lookup_dev(pcel_addr) {
+                None => {
+                  println!("DEBUG: MemcpyNvgpuThunkImpl::apply: no dptr for addr={:?}", pcel_addr);
+                  panic!("bug");
+                }
+                Some((dptr, _)) => dptr
+              };
               dptr
               // FIXME
             }
@@ -4811,13 +4903,18 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
           }
         }
       };
-      let dst_dptr = match env.pwrite_ref(out, prev_oclk, oclk, loc) {
-        None => panic!("bug"),
-        Some(e) => {
+      let dst_dptr = match env.pwrite_ref_(out, oclk, loc) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          assert_eq!(&e.ty, &out_ty_);
           match e.cel_ {
-            &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
-              let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
-              let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
+            &mut Cell_::Phy(.., ref pcel) => {
+              //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
+              let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+                None => panic!("bug"),
+                Some(rep) => rep.addr.get()
+              };
+              let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
               dptr
               // FIXME
             }
