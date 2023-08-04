@@ -3437,92 +3437,6 @@ impl FutharkThunkSpec for InnerConcatFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
-pub struct InnerSymplecticMapFutThunkSpec;
-
-impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
-  fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.inner_symplectic_map")
-  }
-
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
-  }
-
-  fn arity(&self) -> Option<(u16, u16)> {
-    Some((1, 1))
-  }
-
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
-  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    Ok(arg[0].clone())
-  }
-
-  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(arg[0].clone())
-  }
-
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
-    let mut code = FutharkThunkGenCode::default();
-    code.abi.arityout = 1;
-    code.abi.set_out(0, FutharkArrayRepr::Nd);
-    code.abi.arityin = 1;
-    code.abi.set_arg(0, FutharkArrayRepr::Nd);
-    match out[0].ndim {
-      0 => {
-        unimplemented!();
-      }
-      1 => {
-        code.cfg.emit_arg_shapes = true;
-        code.append(format!(r"let a_suf = {{%0.s[0]}} // 2 in"));
-        code.append(format!(r"let (tl, tr) = split ({{%0}} :> [a_suf + a_suf]{}) in",
-            arg[0].dtype.format_futhark(),
-        ));
-        code.append(format!(r"let {{%1}} = ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[0]}}]{} in",
-            arg[0].dtype.format_futhark(),
-        ));
-      }
-      2 => {
-        code.cfg.emit_arg_shapes = true;
-        code.append(format!(r"let a_suf = {{%0.s[1]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t -> let (tl, tr) = split (t :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[1]}}]{}) {{%0}} in",
-            arg[0].dtype.format_futhark(),
-            arg[0].dtype.format_futhark(),
-        ));
-      }
-      3 => {
-        code.cfg.emit_arg_shapes = true;
-        code.append(format!(r"let a_suf = {{%0.s[2]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> let (tl, tr) = split (t2 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[2]}}]{}) t1) {{%0}} in",
-            arg[0].dtype.format_futhark(),
-            arg[0].dtype.format_futhark(),
-        ));
-      }
-      4 => {
-        code.cfg.emit_arg_shapes = true;
-        code.append(format!(r"let a_suf = {{%0.s[3]}} // 2 in"));
-        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> map (\t3 -> let (tl, tr) = split (t3 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[3]}}]{}) t2) t1) {{%0}} in",
-            arg[0].dtype.format_futhark(),
-            arg[0].dtype.format_futhark(),
-        ));
-      }
-      _ => {
-        unimplemented!();
-      }
-    }
-    code.into()
-  }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct InnerTransposeFutThunkSpec;
 
@@ -4513,10 +4427,20 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    match env.pread_ref_(arg[0].0, arg[0].1, loc) {
+    //match env.pread_ref_(arg[0].0, arg[0].1, loc) {}
+    match env.pread_view(arg[0].0, arg[0].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[0]);
+        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            panic!();
+          }
+          Ok(v) => v
+        };
+        assert_eq!(&e.ty, vtype.as_ref());
+        //assert_eq!(vtype.as_ref(), &arg_ty_[0]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
@@ -4524,14 +4448,14 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               None => panic!("bug"),
               Some(rep) => rep.addr.get()
             };
-            let base = TL_PCTX.with(|pctx| {
+            let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
+            let base = base0 + vtype.pointer_offset();
             let inc = spec.l_dtype.size_bytes() as u64;
             let blk_row_len = spec.l_block[0] as u64;
             let blk_col_len = spec.l_block[1] as u64;
-            //let stride = arg_ty_[0].shape[1] as u64;
             let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
               arg_ty_[0].shape[1] as u64
             } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
@@ -4539,7 +4463,6 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
             } else {
               panic!("bug");
             };
-            // FIXME FIXME
             let mult_row = if tys.l_nrow == 1 && tys.l_nrow != tys.nrow { 0 } else { 1 };
             let mult_col = if tys.l_ncol == 1 && tys.l_ncol != tys.ncol { 0 } else { 1 };
             let mut tmp = self.tmp_b.borrow_mut();
@@ -4555,10 +4478,20 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    match env.pread_ref_(arg[1].0, arg[1].1, loc) {
+    //match env.pread_ref_(arg[1].0, arg[1].1, loc) {}
+    match env.pread_view(arg[1].0, arg[1].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[1]);
+        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            panic!();
+          }
+          Ok(v) => v
+        };
+        assert_eq!(&e.ty, vtype.as_ref());
+        //assert_eq!(vtype.as_ref(), &arg_ty_[1]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
@@ -4566,14 +4499,14 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               None => panic!("bug"),
               Some(rep) => rep.addr.get()
             };
-            let base = TL_PCTX.with(|pctx| {
+            let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
+            let base = base0 + vtype.pointer_offset();
             let inc = spec.r_dtype.size_bytes() as u64;
             let blk_row_len = spec.r_block[0] as u64;
             let blk_col_len = spec.r_block[1] as u64;
-            //let stride = arg_ty_[1].shape[1] as u64;
             let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
               arg_ty_[1].shape[1] as u64
             } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {
@@ -4581,7 +4514,6 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
             } else {
               panic!("bug");
             };
-            // FIXME FIXME
             let mult_row = if tys.r_nrow == 1 && tys.r_nrow != tys.nrow { 0 } else { 1 };
             let mult_col = if tys.r_ncol == 1 && tys.r_ncol != tys.ncol { 0 } else { 1 };
             let mut tmp = self.tmp_a.borrow_mut();
@@ -4597,14 +4529,28 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
-    match match mode {
+    /*match match mode {
       ThunkMode::Apply => env.pwrite_ref_(out, oclk, loc),
       ThunkMode::Accumulate |
       ThunkMode::Initialize => env.prewrite_ref_(out, prev_oclk, oclk, loc)
+    } {*/
+    match match mode {
+      ThunkMode::Apply => env.pwrite_view(out, oclk, loc),
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => env.prewrite_view(out, prev_oclk, oclk, loc)
     } {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &out_ty_);
+        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            panic!();
+          }
+          Ok(v) => v
+        };
+        assert_eq!(&e.ty, vtype.as_ref());
+        //assert_eq!(vtype.as_ref(), &out_ty_);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
@@ -4612,14 +4558,14 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               None => panic!("bug"),
               Some(rep) => rep.addr.get()
             };
-            let base = TL_PCTX.with(|pctx| {
+            let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
+            let base = base0 + vtype.pointer_offset();
             let inc = spec.o_dtype.size_bytes() as u64;
             let blk_row_len = tys.l_blk_outer as u64;
             let blk_col_len = tys.r_blk_outer as u64;
-            //let stride = out_ty_.shape[1] as u64;
             let stride = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
               out_ty_.shape[1] as u64
             } else if arg_ty_[0].ndim() == 4 && arg_ty_[1].ndim() == 4 && out_ty_.ndim() == 4 {

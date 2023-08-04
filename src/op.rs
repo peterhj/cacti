@@ -14,7 +14,7 @@ use cacti_cfg_env::*;
 use std::borrow::{Borrow, Cow};
 use std::convert::{TryInto};
 use std::iter::{repeat};
-use std::ops::{AddAssign, BitXor, Index, IndexMut, RangeFull, Add, Sub, Mul, Div, Neg};
+use std::ops::{AddAssign, BitXor, Index, IndexMut, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
 /*impl AddAssign<f32> for CellPtr {
@@ -447,19 +447,19 @@ impl BitXor<T_> for CellViewHandleEx {
   }
 }
 
-impl Index<RangeFull> for CellPtr {
+/*impl Index<RangeFull> for CellPtr {
   type Output = CellPtr;
 
   #[track_caller]
   fn index(&self, _: RangeFull) -> &CellPtr {
-    panick_wrap(|| self)
+    self
   }
 }
 
 impl IndexMut<RangeFull> for CellPtr {
   #[track_caller]
   fn index_mut(&mut self, _: RangeFull) -> &mut CellPtr {
-    panick_wrap(|| self)
+    self
   }
 }
 
@@ -467,37 +467,95 @@ impl Index<IRange> for CellPtr {
   type Output = CellViewHandle;
 
   #[track_caller]
-  fn index(&self, _: IRange) -> &CellViewHandle {
-    panick_wrap(|| {
-      // FIXME
-      CellViewHandle::_from(self)
-      //unimplemented!();
-    })
+  fn index(&self, idx: IRange) -> &CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &[idx] as &[_])
+    }));
+    CellViewHandle::_from2(self, view)
   }
 }
 
 impl IndexMut<IRange> for CellPtr {
   #[track_caller]
-  fn index_mut(&mut self, _: IRange) -> &mut CellViewHandle {
-    /*panick_wrap(|| {
-      // FIXME
-      CellViewHandle::_from_mut(*self)
-      //unimplemented!();
-    })*/
-    CellViewHandle::_from_mut(self)
+  fn index_mut(&mut self, idx: IRange) -> &mut CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &[idx] as &[_])
+    }));
+    CellViewHandle::_from2_mut(self, view)
   }
 }
 
-/*impl Index<[IRange; 2]> for CellPtr {
+impl Index<[IRange; 2]> for CellPtr {
   type Output = CellViewHandle;
 
   #[track_caller]
-  fn index(&self, _: [IRange; 2]) -> &CellViewHandle {
-    panick_wrap(|| {
-      // FIXME
-      //CellViewHandle::_from(self)
-      unimplemented!();
-    })
+  fn index(&self, idx: [IRange; 2]) -> &CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2(self, view)
+  }
+}
+
+impl IndexMut<[IRange; 2]> for CellPtr {
+  #[track_caller]
+  fn index_mut(&mut self, idx: [IRange; 2]) -> &mut CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2_mut(self, view)
+  }
+}
+
+impl Index<[IRange; 3]> for CellPtr {
+  type Output = CellViewHandle;
+
+  #[track_caller]
+  fn index(&self, idx: [IRange; 3]) -> &CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2(self, view)
+  }
+}
+
+impl IndexMut<[IRange; 3]> for CellPtr {
+  #[track_caller]
+  fn index_mut(&mut self, idx: [IRange; 3]) -> &mut CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2_mut(self, view)
+  }
+}
+
+impl Index<[IRange; 4]> for CellPtr {
+  type Output = CellViewHandle;
+
+  #[track_caller]
+  fn index(&self, idx: [IRange; 4]) -> &CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2(self, view)
+  }
+}
+
+impl IndexMut<[IRange; 4]> for CellPtr {
+  #[track_caller]
+  fn index_mut(&mut self, idx: [IRange; 4]) -> &mut CellViewHandle {
+    let this = *self;
+    let view = panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.alias_view_slice(this, &idx as &[_])
+    }));
+    CellViewHandle::_from2_mut(self, view)
   }
 }*/
 
@@ -2035,24 +2093,12 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
   }
 
   #[track_caller]
-  fn inner_symplectic_map(&self) -> CellPtr {
+  fn inner_arg_max(&self, /*new_dtype: Dtype*/) -> CellPtr {
     panick_wrap(|| {
-      let op = InnerSymplecticMapFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_pop_thunk(op)
+      // TODO
+      unimplemented!();
     })
   }
-
-  /*#[track_caller]
-  fn inner_transpose(&self) -> CellPtr {
-    panick_wrap(|| {
-      let op = InnerTransposeFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
-      ctx_pop_thunk(op)
-    })
-  }*/
 
   #[track_caller]
   fn inner_one_hot(&self, inner_len: i64, new_dtype: Dtype) -> CellPtr {
@@ -2071,6 +2117,16 @@ pub trait MathUnaryOps: Borrow<CellPtr> {
       ctx_pop_thunk(op)
     })
   }
+
+  /*#[track_caller]
+  fn inner_transpose(&self) -> CellPtr {
+    panick_wrap(|| {
+      let op = InnerTransposeFutThunkSpec;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self.borrow());
+      ctx_pop_thunk(op)
+    })
+  }*/
 
   #[track_caller]
   fn flat_sum(&self) -> CellPtr {
@@ -2275,6 +2331,14 @@ pub trait CastOps: Borrow<CellPtr> {
     })
   }
 
+  #[track_caller]
+  fn lossy_cast(&self, new_dtype: Dtype) -> CellPtr {
+    panick_wrap(|| {
+      // TODO
+      unimplemented!();
+    })
+  }
+
   /*#[track_caller]
   fn set_cast<R: Borrow<CellPtr>>(&self, rhs: R) {
     panick_wrap(|| {
@@ -2347,7 +2411,7 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn reshape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
 
-  #[track_caller]
+  /*#[track_caller]
   fn _unpack(&self) -> Option<(CellViewType, CellPtr)> {
     // FIXME
     unimplemented!();
@@ -2357,7 +2421,7 @@ pub trait ArrayOps: Borrow<CellPtr> + Sized {
   fn _unview(&self) -> (CellViewType, CellPtr, /*Vec<CellVOp>*/) {
     // FIXME
     unimplemented!();
-  }
+  }*/
 }
 
 impl<L: Borrow<CellPtr> + Sized> ArrayOps for L {}

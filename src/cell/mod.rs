@@ -3,6 +3,7 @@ use crate::algo::fp::*;
 use crate::algo::int::*;
 use crate::clock::*;
 use crate::ctx::*;
+use crate::nd::{IRange};
 use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg};
 use crate::thunk::*;
@@ -19,7 +20,7 @@ use std::cell::{Cell, RefCell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::mem::{forget, size_of, swap};
-use std::ops::{Deref, Neg, Range};
+use std::ops::{Deref, Neg};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
@@ -617,8 +618,18 @@ impl CellViewHandle_ {
     unsafe { &*(from_raw_parts(this as *const CellPtr as *const _Void, ptr) as *const [_Void] as *const CellViewHandle_) }
   }
 
+  pub fn _from2<'a>(this: &'a CellPtr, other: CellPtr) -> &'a CellViewHandle_ {
+    let ptr = { other.raw_ as _ };
+    unsafe { &*(from_raw_parts(this as *const CellPtr as *const _Void, ptr) as *const [_Void] as *const CellViewHandle_) }
+  }
+
   pub fn _from_mut<'a>(this: &'a mut CellPtr) -> &'a mut CellViewHandle_ {
     let ptr = { this.raw_ as _ };
+    unsafe { &mut *(from_raw_parts_mut(this as *mut CellPtr as *mut _Void, ptr) as *mut [_Void] as *mut CellViewHandle_) }
+  }
+
+  pub fn _from2_mut<'a>(this: &'a mut CellPtr, other: CellPtr) -> &'a mut CellViewHandle_ {
+    let ptr = { other.raw_ as _ };
     unsafe { &mut *(from_raw_parts_mut(this as *mut CellPtr as *mut _Void, ptr) as *mut [_Void] as *mut CellViewHandle_) }
   }
 }
@@ -737,28 +748,66 @@ impl<'r> BorrowCellView for CellViewRef<'r> {
   }
 }*/
 
-pub type IRange = Range<i64>;
-
 pub type CellVOp = CellViewOp;
 
 #[derive(Clone, Debug)]
 pub enum CellViewOp {
   Nop,
-  Slice(Rc<IRange>),
-  Slice2(Rc<[IRange; 2]>),
-  Slice3(Rc<[IRange; 3]>),
-  Slice4(Rc<[IRange; 4]>),
-  //Slice(Rc<[IRange]>),
+  //Slice(Rc<IRange>),
+  //Slice2(Rc<[IRange; 2]>),
+  //Slice3(Rc<[IRange; 3]>),
+  //Slice4(Rc<[IRange; 4]>),
+  Slice(Rc<[IRange]>),
+  Proj(u8),
   Swap(i8, i8),
-  //Transpose(Rc<[i8]>),
-  NewShape(Vec<i64>),
-  //NewShape(Rc<[i64]>),
+  Transpose(Rc<[i8]>),
+  //NewShape(Vec<i64>),
+  NewShape(Rc<[i64]>),
+  BitAlias(Dtype),
+}
+
+impl CellViewOp {
+  pub fn nop() -> CellViewOp {
+    CellViewOp::Nop
+  }
+
+  pub fn slice(idx: &[IRange]) -> CellViewOp {
+    CellViewOp::Slice(idx.into())
+  }
+
+  pub fn proj(mask: &[bool]) -> CellViewOp {
+    assert!(mask.len() <= 8);
+    let mut maskbits = 0;
+    for d in 0 .. mask.len() {
+      if mask[d] {
+        maskbits |= (1 << d);
+      }
+    }
+    CellViewOp::Proj(maskbits)
+  }
+
+  pub fn swap(ld: i8, rd: i8) -> CellViewOp {
+    CellViewOp::Swap(ld, rd)
+  }
+
+  pub fn transpose(perm: &[i8]) -> CellViewOp {
+    CellViewOp::Transpose(perm.into())
+  }
+
+  pub fn new_shape(shape: &[i64]) -> CellViewOp {
+    CellViewOp::NewShape(shape.into())
+  }
+
+  pub fn bit_alias(dtype: Dtype) -> CellViewOp {
+    CellViewOp::BitAlias(dtype)
+  }
 }
 
 #[derive(Debug)]
 pub struct CellView {
   // TODO
   pub root: CellPtr,
+  //pub r_ty: CellType,
   pub vlog: Vec<CellViewOp>,
 }
 
@@ -766,6 +815,7 @@ impl Default for CellView {
   fn default() -> CellView {
     CellView{
       root: CellPtr::nil(),
+      //r_ty: CellType::top(),
       vlog: Vec::new(),
     }
   }
@@ -780,6 +830,200 @@ impl From<CellPtr> for CellView {
   }
 }
 
+impl CellView {
+  /*pub fn new(root: CellPtr, r_ty: CellType) -> CellView {
+    CellView{
+      root,
+      r_ty,
+      vlog: Vec::new(),
+    }
+  }*/
+
+  pub fn root(&self) -> CellPtr {
+    self.root
+  }
+
+  pub fn type_eval(&self, root_ty: &CellType) -> Result<CellType, ()> {
+    let mut shape = root_ty.shape.clone();
+    let mut dtype = root_ty.dtype;
+    if self.vlog.is_empty() {
+      return Ok(CellType{shape, dtype});
+    }
+    let mut offset = Vec::with_capacity(root_ty.shape.len());
+    offset.resize(root_ty.shape.len(), 0);
+    let mut end_offset = root_ty.shape.clone();
+    let mut root_shape = root_ty.shape.clone();
+    for vop in self.vlog.iter() {
+      match vop {
+        &CellViewOp::Nop => {}
+        &CellViewOp::Slice(ref idx) => {
+          for d in (0 .. shape.len()).rev() {
+            shape[d] = idx[d].end - idx[d].start;
+            offset[d] += idx[d].start;
+            end_offset[d] = offset[d] + (idx[d].end - idx[d].start);
+          }
+        }
+        &CellViewOp::NewShape(ref new_shape) => {
+          for d in 0 .. shape.len() {
+            if offset[d] == 0 && end_offset[d] == shape[d] {
+              continue;
+            }
+            return Err(());
+          }
+          match (CellType::_shape_compat(&**new_shape, &root_shape),
+                 CellType::_shape_compat(&**new_shape, &shape)) {
+            (ShapeCompat::Equal, ShapeCompat::Equal) |
+            (ShapeCompat::Equal, ShapeCompat::NewShape) |
+            (ShapeCompat::NewShape, ShapeCompat::Equal) |
+            (ShapeCompat::NewShape, ShapeCompat::NewShape) => {
+              offset.clear();
+              offset.resize(new_shape.len(), 0);
+              shape.clear();
+              shape.extend_from_slice(new_shape);
+              end_offset.clear();
+              end_offset.extend_from_slice(new_shape);
+              root_shape.clear();
+              root_shape.extend_from_slice(new_shape);
+            }
+            _ => return Err(())
+          }
+        }
+        &CellViewOp::BitAlias(new_dtype) => {
+          if dtype.size_bits() != new_dtype.size_bits() {
+            return Err(());
+          }
+          dtype = new_dtype;
+        }
+        _ => unimplemented!()
+      }
+    }
+    Ok(CellType{shape, dtype})
+  }
+
+  pub fn eval_contiguous(&self, root_ty: &CellType) -> Result<CellSliceType, ()> {
+    let mut offset = Vec::with_capacity(root_ty.shape.len());
+    offset.resize(root_ty.shape.len(), 0);
+    let mut shape = root_ty.shape.clone();
+    let mut dtype = root_ty.dtype;
+    if self.vlog.is_empty() {
+      return Ok(CellSliceType{offset, type_: CellType{shape, dtype}});
+    }
+    let mut end_offset = root_ty.shape.clone();
+    let mut root_shape = root_ty.shape.clone();
+    for vop in self.vlog.iter() {
+      loop {
+        match vop {
+          &CellViewOp::Nop => {
+            break;
+          }
+          &CellViewOp::Slice(ref idx) => {
+            let mut outer = None;
+            for d in 0 .. shape.len() {
+              if idx[d].start + 1 == idx[d].end {
+                continue;
+              } else if outer.is_none() && idx[d].start < idx[d].end {
+                outer = Some(d);
+                continue;
+              } else if outer.is_some() && idx[d].start == 0 && idx[d].end == shape[d] {
+                continue;
+              }
+              return Err(());
+            }
+            // FIXME: asserts below are kinda ad hoc.
+            let outer = outer.unwrap_or(shape.len());
+            for d in (0 .. shape.len()).rev() {
+              assert!(shape[d] + idx[d].start <= idx[d].end);
+              assert!(offset[d] + idx[d].start <= idx[d].end);
+              if d <= outer {
+                shape[d] = idx[d].end - idx[d].start;
+                offset[d] += idx[d].start;
+                end_offset[d] = offset[d] + (idx[d].end - idx[d].start);
+              } else {
+                assert_eq!(offset[d], 0);
+              }
+            }
+            break;
+          }
+          &CellViewOp::NewShape(ref new_shape) => {
+            for d in 0 .. shape.len() {
+              if offset[d] == 0 && end_offset[d] == shape[d] {
+                continue;
+              }
+              return Err(());
+            }
+            match (CellType::_shape_compat(&**new_shape, &root_shape),
+                   CellType::_shape_compat(&**new_shape, &shape)) {
+              (ShapeCompat::Equal, ShapeCompat::Equal) |
+              (ShapeCompat::Equal, ShapeCompat::NewShape) |
+              (ShapeCompat::NewShape, ShapeCompat::Equal) |
+              (ShapeCompat::NewShape, ShapeCompat::NewShape) => {
+                offset.clear();
+                offset.resize(new_shape.len(), 0);
+                shape.clear();
+                shape.extend_from_slice(new_shape);
+                end_offset.clear();
+                end_offset.extend_from_slice(new_shape);
+                root_shape.clear();
+                root_shape.extend_from_slice(new_shape);
+              }
+              _ => return Err(())
+            }
+            break;
+          }
+          &CellViewOp::BitAlias(new_dtype) => {
+            //assert_eq!(dtype.size_bytes(), new_dtype.size_bytes());
+            if dtype.size_bits() != new_dtype.size_bits() {
+              return Err(());
+            }
+            dtype = new_dtype;
+          }
+          _ => unimplemented!()
+        }
+      }
+    }
+    // NB: check contiguous wrt root.
+    let mut flat_len = 1;
+    let mut start = 0;
+    let mut fin = 0;
+    let mut stride = 1;
+    for d in (0 .. root_shape.len()).rev() {
+      let ds = shape[d];
+      let o = offset[d];
+      let o2 = end_offset[d];
+      let root_ds = root_shape[d];
+      assert!(ds >= 0);
+      assert!(o >= 0);
+      assert!(o2 >= 0);
+      assert!(root_ds >= 0);
+      assert!(o <= o2);
+      assert!(o2 <= root_ds);
+      assert!(ds <= root_ds);
+      flat_len *= ds as u64;
+      start += (o as u64) * stride;
+      fin += ((o2 - 1) as u64) * stride;
+      stride *= root_ds as u64;
+    }
+    if !(start + flat_len == fin + 1) {
+      println!("BUG:   CellView::eval_contiguous: unexpected non-contiguous view:");
+      println!("DEBUG: CellView::eval_contiguous:   root ty={:?}", root_ty);
+      println!("DEBUG: CellView::eval_contiguous:   rshape ={:?}", root_shape);
+      println!("DEBUG: CellView::eval_contiguous:   offset ={:?}", offset);
+      println!("DEBUG: CellView::eval_contiguous:   shape  ={:?}", shape);
+      println!("DEBUG: CellView::eval_contiguous:   eoffset={:?}", end_offset);
+      println!("DEBUG: CellView::eval_contiguous:   dtype  ={:?}", dtype);
+      println!("DEBUG: CellView::eval_contiguous:   flat   ={:?}", flat_len);
+      println!("DEBUG: CellView::eval_contiguous:   start  ={:?}", start);
+      println!("DEBUG: CellView::eval_contiguous:   fin    ={:?}", fin);
+    }
+    assert_eq!(start + flat_len, fin + 1);
+    Ok(CellSliceType{offset, type_: CellType{shape, dtype}})
+  }
+
+  pub fn eval_strided(&self, root_ty: &CellType) -> Result<CellStridedSliceType, ()> {
+    unimplemented!();
+  }
+}
+
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum CellViewStep {
@@ -789,17 +1033,17 @@ pub enum CellViewStep {
   Halt,
 }
 
-pub struct CellViewState {
+pub struct CellViewPermState {
   pub ndim: i8,
   pub swap: bool,
   pub perm: [i8; 8],
 }
 
-impl CellViewState {
-  pub fn new(ndim: i8) -> CellViewState {
+impl CellViewPermState {
+  pub fn new(ndim: i8) -> CellViewPermState {
     /*assert!(ndim <= i8::max_value() as u8);*/
     assert!(ndim >= 0);
-    CellViewState{
+    CellViewPermState{
       ndim: ndim,
       swap: false,
       perm: [0, 1, 2, 3, 4, 5, 6, 7],
@@ -1177,6 +1421,25 @@ impl Dtype {
     }
   }
 
+  pub fn size_bits(self) -> u64 {
+    match self {
+      Dtype::_Top       => panic!("bug"),
+      Dtype::Fp64       => 64,
+      Dtype::Fp32       => 32,
+      Dtype::Fp16       => 16,
+      Dtype::Bfloat16   => 16,
+      Dtype::Int64      => 64,
+      Dtype::Int32      => 32,
+      Dtype::Int16      => 16,
+      Dtype::Int8       => 8,
+      Dtype::UInt64     => 64,
+      Dtype::UInt32     => 32,
+      Dtype::UInt16     => 16,
+      Dtype::UInt8      => 8,
+      Dtype::_Bot       => panic!("bug"),
+    }
+  }
+
   pub fn size_bytes(self) -> usize {
     match self {
       Dtype::_Top       => panic!("bug"),
@@ -1387,32 +1650,38 @@ impl CellType {
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
     assert!(self.dtype != Dtype::_Top);
     assert!(orig.dtype != Dtype::_Top);
-    if &self.shape == &orig.shape {
+    CellType::_shape_compat(&self.shape, &orig.shape)
+  }
+
+  pub fn _shape_compat(shape: &[i64], orig_shape: &[i64]) -> ShapeCompat {
+    if &shape == &orig_shape {
       return ShapeCompat::Equal;
     }
-    let nd = self.ndim() as usize;
-    let o_nd = orig.ndim() as usize;
+    //let nd = self.ndim() as usize;
+    //let o_nd = orig.ndim() as usize;
+    let nd = shape.len();
+    let o_nd = orig_shape.len();
     let mut span = Vec::with_capacity(nd);
     let mut o_span = Vec::with_capacity(o_nd);
     if nd == 0 {
       span.push(1);
     } else {
-      span.push(self.shape[(nd - 1)]);
+      span.push(shape[(nd - 1)]);
     }
     for d in 1 .. nd {
-      span.push(self.shape[(nd - 1) - d] * span[d - 1]);
+      span.push(shape[(nd - 1) - d] * span[d - 1]);
     }
     span.reverse();
     if o_nd == 0 {
       o_span.push(1);
     } else {
-      o_span.push(orig.shape[(o_nd - 1)]);
+      o_span.push(orig_shape[(o_nd - 1)]);
     }
     for d in 1 .. o_nd {
-      o_span.push(orig.shape[(o_nd - 1) - d] * o_span[d - 1]);
+      o_span.push(orig_shape[(o_nd - 1) - d] * o_span[d - 1]);
     }
     o_span.reverse();
-    //println!("DEBUG: CellType:;shape_compat: shape={:?} o_shape={:?}", &self.shape, &orig.shape);
+    //println!("DEBUG: CellType:;shape_compat: shape={:?} o_shape={:?}", &shape, &orig_shape);
     //println!("DEBUG: CellType:;shape_compat: span={:?} o_span={:?}", &span, &o_span);
     if span[0] == o_span[0] {
       return ShapeCompat::NewShape;
@@ -1447,6 +1716,43 @@ impl CellType {
     }
     CellType{shape, dtype: self.dtype}
   }
+}
+
+#[derive(Clone, Debug)]
+pub struct CellSliceType {
+  pub offset:   Vec<i64>,
+  //pub shape:    Vec<i64>,
+  //pub dtype:    Dtype,
+  pub type_:    CellType,
+}
+
+impl AsRef<CellType> for CellSliceType {
+  fn as_ref(&self) -> &CellType {
+    &self.type_
+  }
+}
+
+impl CellSliceType {
+  pub fn pointer_offset(&self) -> u64 {
+    let mut ptroff = 0;
+    let mut pitch = self.type_.dtype.size_bytes() as u64;
+    for d in (0 .. self.type_.shape.len()).rev() {
+      let o = self.offset[d];
+      assert!(o >= 0);
+      ptroff += (o as u64) * pitch;
+      pitch *= self.type_.shape[d] as u64;
+    }
+    ptroff
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct CellStridedSliceType {
+  pub stride:   Vec<i64>,
+  pub offset:   Vec<i64>,
+  pub shape:    Vec<i64>,
+  pub dtype:    Dtype,
+  //pub slice:    CellSliceType,
 }
 
 #[derive(Clone)]
@@ -1500,7 +1806,7 @@ impl CellLayout {
   }
 }
 
-// FIXME
+/*// FIXME
 pub type CellViewType = CellSliceType;
 
 #[derive(Clone, Debug)]
@@ -1533,7 +1839,7 @@ impl CellSliceType {
     }
     true
   }
-}
+}*/
 
 #[derive(Clone, Debug)]
 pub struct CellTransposeType {

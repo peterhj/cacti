@@ -1,6 +1,7 @@
 use crate::algo::{HashMap, HashSet};
 use crate::cell::*;
 use crate::clock::*;
+use crate::nd::{IRange};
 use crate::panick::{panick_wrap};
 use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
 use crate::spine::*;
@@ -624,6 +625,26 @@ pub fn ctx_alias_bits(og: CellPtr, new_dtype: Dtype) -> CellPtr {
 }
 
 impl Ctx {
+  pub fn alias_view_slice(&self, og: CellPtr, idx: &[IRange]) -> CellPtr {
+    let mut env = self.env.borrow_mut();
+    match env._lookup_view(og) {
+      Err(_) => panic!("bug"),
+      Ok(mut e) => {
+        let vop = CellViewOp::slice(idx);
+        e.view_mut().vlog.push(vop.clone());
+        let new_ty = match e.view().type_eval(&e.root_ty) {
+          Err(_) => unimplemented!(),
+          Ok(ty) => ty
+        };
+        let x = self.ctr.fresh_cel();
+        env.insert_alias(x, CellAlias::View(vop), new_ty, og);
+        let spine = self.spine.borrow();
+        spine.alias(x, og);
+        x
+      }
+    }
+  }
+
   pub fn const_(&self, og: CellPtr) -> CellPtr {
     let x = self.ctr.fresh_cel();
     let mut env = self.env.borrow_mut();
@@ -1309,9 +1330,9 @@ impl CellEFlag {
 
 pub struct CellEnvEntry {
   // FIXME
+  pub ty:       CellType,
   pub stablect: Cell<u32>,
   //pub snapshot: Cell<u32>,
-  pub ty:       CellType,
   //pub eflag:    CellEFlag,
   pub cel_:     Cell_,
 }
@@ -1322,7 +1343,7 @@ impl CellEnvEntry {
   }
 }
 
-pub struct CellEnvEntryRef<'a> {
+/*pub struct CellEnvEntryRef<'a> {
   pub root:     CellPtr,
   pub stablect: &'a Cell<u32>,
   //pub snapshot: &'a Cell<u32>,
@@ -1451,7 +1472,7 @@ impl<'a> CellEnvEntryMutRef<'a> {
   pub fn state(&self) -> RefMut<CellState> {
     self.cel_.state_mut()
   }
-}
+}*/
 
 pub struct MCellEnvEntry {
   // FIXME
@@ -1460,8 +1481,9 @@ pub struct MCellEnvEntry {
 
 pub struct CellRef_<'a, R> {
   pub ref_:     R,
-  pub stablect: &'a Cell<u32>,
+  pub root_ty:  &'a CellType,
   pub ty:       &'a CellType,
+  pub stablect: &'a Cell<u32>,
   pub cel_:     &'a Cell_,
 }
 
@@ -1519,12 +1541,21 @@ impl<'a> CellRef_<'a, CellView> {
   pub fn root(&self) -> CellPtr {
     self.ref_.root
   }
+
+  pub fn view(&self) -> &CellView {
+    &self.ref_
+  }
+
+  pub fn view_mut(&mut self) -> &mut CellView {
+    &mut self.ref_
+  }
 }
 
 pub struct CellMutRef_<'a, R> {
   pub ref_:     R,
-  pub stablect: &'a Cell<u32>,
+  pub root_ty:  &'a CellType,
   pub ty:       CellType,
+  pub stablect: &'a Cell<u32>,
   pub cel_:     &'a mut Cell_,
 }
 
@@ -1541,6 +1572,10 @@ impl<'a> CellMutRef_<'a, CellPtr> {
 impl<'a> CellMutRef_<'a, CellView> {
   pub fn root(&self) -> CellPtr {
     self.ref_.root
+  }
+
+  pub fn view(&self) -> &CellView {
+    &self.ref_
   }
 }
 
@@ -1568,7 +1603,7 @@ pub enum CellDerefErr {
 //#[derive(Default)]
 pub struct CtxEnv {
   // FIXME
-  pub alias_root:   RefCell<HashMap<CellPtr, CellPtr>>,
+  //pub alias_root:   RefCell<HashMap<CellPtr, CellPtr>>,
   pub cow_root:     RefCell<HashMap<CellPtr, (CellPtr, Clock)>>,
   //pub stable:   HashSet<CellPtr>,
   pub celtab:   HashMap<CellPtr, CellEnvEntry>,
@@ -1582,7 +1617,7 @@ pub struct CtxEnv {
 impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
-      alias_root:   RefCell::new(HashMap::new()),
+      //alias_root:   RefCell::new(HashMap::new()),
       cow_root:     RefCell::new(HashMap::new()),
       celtab:   HashMap::new(),
       snapshot: HashMap::new(),
@@ -1597,7 +1632,7 @@ impl CtxEnv {
   pub fn reset(&mut self) {
     // FIXME FIXME
     self.celtab.clear();
-    self.alias_root.borrow_mut().clear();
+    //self.alias_root.borrow_mut().clear();
     //self.tag.clear();
   }
 
@@ -1650,6 +1685,7 @@ impl CtxEnv {
             &Cell_::Phy(..) |
             &Cell_::Cow(..) => {
               view.root = cursor;
+              //view.r_ty = e.ty.clone();
               view.vlog.reverse();
               return Ok(view);
             }
@@ -1659,7 +1695,7 @@ impl CtxEnv {
                   view.vlog.push(vop.clone());
                 }
                 &CellAlias::NewShape => {
-                  view.vlog.push(CellViewOp::NewShape(e.ty.shape.clone()));
+                  view.vlog.push(CellViewOp::new_shape(&e.ty.shape));
                 }
                 &CellAlias::BitAlias |
                 &CellAlias::Opaque |
@@ -1703,8 +1739,9 @@ impl CtxEnv {
           &Cell_::Cow(..) => {
             return Ok(CellRef_{
               ref_: query,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty: &e.ty,
+              stablect: &e.stablect,
               cel_: &e.cel_,
             });
           }
@@ -1744,8 +1781,9 @@ impl CtxEnv {
         }
         Ok(CellRef_{
           ref_: root,
-          stablect: &e.stablect,
+          root_ty: &e.ty,
           ty,
+          stablect: &e.stablect,
           cel_: &e.cel_,
         })
       }
@@ -1778,8 +1816,10 @@ impl CtxEnv {
           &Cell_::Cow(..) => {
             return Ok(CellRef_{
               ref_: query.into(),
-              stablect: &e.stablect,
+              //ref_: CellView::new(query, e.ty.clone()),
+              root_ty: &e.ty,
               ty: &e.ty,
+              stablect: &e.stablect,
               cel_: &e.cel_,
             });
           }
@@ -1814,8 +1854,9 @@ impl CtxEnv {
         }
         Ok(CellRef_{
           ref_: view,
-          stablect: &e.stablect,
+          root_ty: &e.ty,
           ty,
+          stablect: &e.stablect,
           cel_: &e.cel_,
         })
       }
@@ -1865,8 +1906,9 @@ impl CtxEnv {
             assert_eq!(root, optr);
             return Ok(CellMutRef_{
               ref_: root,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty,
+              stablect: &e.stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1875,8 +1917,9 @@ impl CtxEnv {
             assert_eq!(&e.ty, &pcel.ogty);
             return Ok(CellMutRef_{
               ref_: root,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty,
+              stablect: &e.stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1956,8 +1999,9 @@ impl CtxEnv {
                     pcel.read_loc(root, clk, &e.ty, loc);
                     return Ok(CellMutRef_{
                       ref_: root,
-                      stablect: &e.stablect,
+                      root_ty: &e.ty,
                       ty,
+                      stablect: &e.stablect,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -1979,9 +2023,10 @@ impl CtxEnv {
                     // FIXME: type compat.
                     return Ok(CellMutRef_{
                       ref_: root,
+                      root_ty: &e.ty,
+                      ty,
                       // FIXME: probably should be the cow stablect.
                       stablect: &e.stablect,
-                      ty,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -2007,7 +2052,112 @@ impl CtxEnv {
   }
 
   pub fn pread_view(&mut self, query: CellPtr, clk: Clock, loc: Locus) -> CellMutDerefView {
-    unimplemented!();
+    let mut noalias = false;
+    let ty = match self.celtab.get(&query) {
+      None => return Err(CellDerefErr::Missing),
+      Some(e) => {
+        match &e.cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(query, optr);
+          }
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Cow(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Alias(..) => {}
+          &Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+        match &e.cel_ {
+          &Cell_::Top(..) |
+          &Cell_::Phy(..) |
+          &Cell_::Cow(..) => {
+            noalias = true;
+          }
+          &Cell_::Alias(..) => {}
+          _ => unreachable!()
+        }
+        e.ty.clone()
+      }
+    };
+    let view = if !noalias { self._probe_view(query)? } else { query.into() };
+    let root = view.root();
+    match self.celtab.get(&root) {
+      None => return Err(CellDerefErr::MissingRoot),
+      Some(e) => {
+        //assert_eq!(root, e.root());
+        match &e.cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(root, optr);
+            panic!("bug");
+            //return Err(CellDerefErr::Read);
+          }
+          &Cell_::Phy(ref state, .., ref pcel) => {
+            assert_eq!(root, pcel.optr);
+            assert_eq!(&e.ty, &pcel.ogty);
+            assert_eq!(clk, state.borrow().clk);
+            match self.celtab.get_mut(&root) {
+              None => panic!("bug"),
+              Some(e) => {
+                match &mut e.cel_ {
+                  &mut Cell_::Phy(.., ref mut pcel) => {
+                    pcel.read_loc(root, clk, &e.ty, loc);
+                    return Ok(CellMutRef_{
+                      ref_: view,
+                      root_ty: &e.ty,
+                      ty,
+                      stablect: &e.stablect,
+                      cel_: &mut e.cel_,
+                    });
+                  }
+                  _ => unreachable!()
+                }
+              }
+            }
+          }
+          &Cell_::Cow(.., ref cel) => {
+            assert_eq!(root, cel.optr);
+            assert!(!cel.pcel.is_nil());
+            let pcel = cel.pcel;
+            match self.celtab.get_mut(&pcel) {
+              None => panic!("bug"),
+              Some(e) => {
+                match &mut e.cel_ {
+                  &mut Cell_::Phy(.., ref mut pcel) => {
+                    pcel.read_loc(root, clk, &e.ty, loc);
+                    // FIXME: type compat.
+                    return Ok(CellMutRef_{
+                      ref_: view,
+                      root_ty: &e.ty,
+                      ty,
+                      // FIXME: probably should be the cow stablect.
+                      stablect: &e.stablect,
+                      cel_: &mut e.cel_,
+                    });
+                  }
+                  &mut Cell_::Cow(..) => {
+                    // FIXME FIXME
+                    unimplemented!();
+                  }
+                  _ => panic!("bug")
+                }
+              }
+            }
+          }
+          &Cell_::Alias(..) => {
+            panic!("bug");
+          }
+          &Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+      }
+    }
   }
 
   pub fn pwrite_ref_(&mut self, query: CellPtr, next_clk: Clock, loc: Locus) -> CellMutDerefPtr {
@@ -2059,8 +2209,9 @@ impl CtxEnv {
             e.cel_ = Cell_::Phy(state, clo, pcel);
             return Ok(CellMutRef_{
               ref_: root,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty,
+              stablect: &e.stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2071,8 +2222,9 @@ impl CtxEnv {
             pcel.write_loc(root, next_clk, &e.ty, loc);
             return Ok(CellMutRef_{
               ref_: root,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty,
+              stablect: &e.stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2093,7 +2245,88 @@ impl CtxEnv {
   }
 
   pub fn pwrite_view(&mut self, query: CellPtr, next_clk: Clock, loc: Locus) -> CellMutDerefView {
-    unimplemented!();
+    let mut noalias = false;
+    let ty = match self.celtab.get(&query) {
+      None => return Err(CellDerefErr::Missing),
+      Some(e) => {
+        match &e.cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(query, optr);
+          }
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Cow(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Alias(..) => {}
+          &Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+        match &e.cel_ {
+          &Cell_::Top(..) |
+          &Cell_::Phy(..) |
+          &Cell_::Cow(..) => {
+            noalias = true;
+          }
+          &Cell_::Alias(..) => {}
+          _ => unreachable!()
+        }
+        e.ty.clone()
+      }
+    };
+    let view = if !noalias { self._probe_view(query)? } else { query.into() };
+    let root = view.root();
+    match self.celtab.get_mut(&root) {
+      None => return Err(CellDerefErr::MissingRoot),
+      Some(e) => {
+        //assert_eq!(root, e.root());
+        match &mut e.cel_ {
+          &mut Cell_::Top(ref state, optr) => {
+            assert_eq!(root, optr);
+            assert_eq!(next_clk, state.borrow().clk);
+            let state = state.clone();
+            let clo = RefCell::new(CellClosure::default());
+            let mut pcel = PCell::new(optr, e.ty.clone());
+            pcel.write_loc(root, next_clk, &e.ty, loc);
+            e.cel_ = Cell_::Phy(state, clo, pcel);
+            return Ok(CellMutRef_{
+              ref_: view,
+              root_ty: &e.ty,
+              ty,
+              stablect: &e.stablect,
+              cel_: &mut e.cel_,
+            });
+          }
+          &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+            assert_eq!(root, pcel.optr);
+            assert_eq!(&e.ty, &pcel.ogty);
+            assert_eq!(next_clk, state.borrow().clk);
+            pcel.write_loc(root, next_clk, &e.ty, loc);
+            return Ok(CellMutRef_{
+              ref_: view,
+              root_ty: &e.ty,
+              ty,
+              stablect: &e.stablect,
+              cel_: &mut e.cel_,
+            });
+          }
+          &mut Cell_::Cow(.., ref cel) => {
+            assert_eq!(root, cel.optr);
+            unimplemented!();
+          }
+          &mut Cell_::Alias(..) => {
+            panic!("bug");
+          }
+          &mut Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+      }
+    }
   }
 
   pub fn prewrite_ref_(&mut self, query: CellPtr, prev_clk: Clock, next_clk: Clock, loc: Locus) -> CellMutDerefPtr {
@@ -2147,8 +2380,9 @@ impl CtxEnv {
             pcel.write_loc(root, next_clk, &e.ty, loc);
             return Ok(CellMutRef_{
               ref_: root,
-              stablect: &e.stablect,
+              root_ty: &e.ty,
               ty,
+              stablect: &e.stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2168,11 +2402,81 @@ impl CtxEnv {
     }
   }
 
-  pub fn prewrite_view(&mut self, x: CellPtr, prev_xclk: Clock, next_xclk: Clock, loc: Locus) -> CellMutDerefView {
-    unimplemented!();
+  pub fn prewrite_view(&mut self, query: CellPtr, prev_clk: Clock, next_clk: Clock, loc: Locus) -> CellMutDerefView {
+    let mut noalias = false;
+    let ty = match self.celtab.get(&query) {
+      None => return Err(CellDerefErr::Missing),
+      Some(e) => {
+        match &e.cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(query, optr);
+          }
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Cow(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Alias(..) => {}
+          &Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+        match &e.cel_ {
+          &Cell_::Top(..) |
+          &Cell_::Phy(..) |
+          &Cell_::Cow(..) => {
+            noalias = true;
+          }
+          &Cell_::Alias(..) => {}
+          _ => unreachable!()
+        }
+        e.ty.clone()
+      }
+    };
+    let view = if !noalias { self._probe_view(query)? } else { query.into() };
+    let root = view.root();
+    match self.celtab.get_mut(&root) {
+      None => return Err(CellDerefErr::MissingRoot),
+      Some(e) => {
+        //assert_eq!(root, e.root());
+        match &mut e.cel_ {
+          &mut Cell_::Top(.., optr) => {
+            assert_eq!(root, optr);
+            panic!("bug");
+          }
+          &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+            assert_eq!(root, pcel.optr);
+            assert_eq!(&e.ty, &pcel.ogty);
+            assert_eq!(next_clk, state.borrow().clk);
+            pcel.read_loc(root, prev_clk, &e.ty, loc);
+            pcel.write_loc(root, next_clk, &e.ty, loc);
+            return Ok(CellMutRef_{
+              ref_: view,
+              root_ty: &e.ty,
+              ty,
+              stablect: &e.stablect,
+              cel_: &mut e.cel_,
+            });
+          }
+          &mut Cell_::Cow(.., ref cel) => {
+            assert_eq!(root, cel.optr);
+            unimplemented!();
+          }
+          &mut Cell_::Alias(..) => {
+            panic!("bug");
+          }
+          &mut Cell_::Bot => {
+            return Err(CellDerefErr::Bot);
+          }
+          _ => unimplemented!()
+        }
+      }
+    }
   }
 
-  pub fn probe(&self, x: CellPtr) -> CellPtr {
+  /*pub fn probe(&self, x: CellPtr) -> CellPtr {
     let mut p = x;
     let mut root = self.alias_root.borrow_mut();
     loop {
@@ -2200,7 +2504,7 @@ impl CtxEnv {
     p
   }
 
-  /*pub fn _lookup_ref(&self, query: CellPtr) -> Option<CellEnvEntryRef> {
+  pub fn _lookup_ref(&self, query: CellPtr) -> Option<CellEnvEntryRef> {
     let ty = match self.celtab.get(&query) {
       None => return None,
       Some(e) => {
@@ -2804,12 +3108,12 @@ impl CtxEnv {
       cel_:     Cell_::Alias(alias, og),
     };
     self.celtab.insert(x, e);
-    let mut root = self.alias_root.borrow_mut();
+    /*let mut root = self.alias_root.borrow_mut();
     match root.get(&x) {
       None => {}
       Some(_) => panic!("bug")
     }
-    root.insert(x, og);
+    root.insert(x, og);*/
   }
 
   pub fn insert_const_(&mut self, x: CellPtr, og: CellPtr) {
@@ -2828,12 +3132,12 @@ impl CtxEnv {
       cel_:     Cell_::Alias(CellAlias::Const_, og),
     };
     self.celtab.insert(x, e);
-    let mut root = self.alias_root.borrow_mut();
+    /*let mut root = self.alias_root.borrow_mut();
     match root.get(&x) {
       None => {}
       Some(_) => panic!("bug")
     }
-    root.insert(x, og);
+    root.insert(x, og);*/
   }
 
   pub fn retain(&self, x: CellPtr) {

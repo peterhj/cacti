@@ -50,6 +50,13 @@ pub struct LanguageModelDeployOutput {
   pub out_lm_prob: StableCell,
 }
 
+pub type LanguageModelBatchDeployIn = LanguageModelBatchDeployInput;
+
+#[derive(Clone)]
+pub struct LanguageModelBatchDeployInput {
+  pub in_tok: Vec<StableCell>,
+}
+
 pub type LanguageModelBatchDeployOut = LanguageModelBatchDeployOutput;
 
 #[derive(Clone)]

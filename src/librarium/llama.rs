@@ -1,4 +1,5 @@
 use crate::prelude::*;
+use crate::prelude_op::*;
 use crate::librarium::lm::*;
 use crate::util::cell::*;
 use crate::util::pickle::*;
@@ -278,8 +279,8 @@ impl Llama {
       let sin = self.sin.as_ref().unwrap()
                .new_shape([1, seq_cap, 1, head_dim])
                .const_();
-      let q = (q * cos) + (q.inner_symplectic_map() * sin);
-      let k = (k * cos) + (k.inner_symplectic_map() * sin);
+      let q = (q * cos) + (inner_symplectic_map(q) * sin);
+      let k = (k * cos) + (inner_symplectic_map(k) * sin);
       (q, k)
     };
     let ubat_sz = self.cfg.ubat_sz;
@@ -368,12 +369,55 @@ pub struct LlamaCached {
 }
 
 impl LlamaCached {
-  /*pub fn make_deploy_input(&self) -> LanguageModelDeployIn {
+  pub fn match_pickle_dir(&self, pickdir: &PickleDir) -> CellInvMatches {
+    let mut matcher = CellMatcher::new();
+    matcher.insert("embed", self.embed.clone());
+    for i in 0 .. self.layers.len() {
+      matcher.insert((i, "attn", "q_proj"), self.layers[i].q.clone());
+      matcher.insert((i, "attn", "k_proj"), self.layers[i].k.clone());
+      matcher.insert((i, "attn", "v_proj"), self.layers[i].v.clone());
+      matcher.insert((i, "attn", "o_proj"), self.layers[i].o.clone());
+      matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
+      matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
+      matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
+      matcher.insert((i, "inv_freq"), self.layers[i].inv_freq.clone());
+      matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
+      matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
+    }
+    matcher.insert("norm", self.head_norm.clone());
+    matcher.insert("lm_head", self.lm_head.clone());
+    let matches = matcher.match_(pickdir.clone_keys());
+    matches.inv()
+  }
+
+  pub fn clone_param(&self) -> Vec<StableCell> {
+    let mut param = Vec::new();
+    param.push(self.embed.clone());
+    for layer in self.layers.iter() {
+      param.push(layer.pre_norm.clone());
+      param.push(layer.q.clone());
+      param.push(layer.k.clone());
+      param.push(layer.v.clone());
+      param.push(layer.o.clone());
+      param.push(layer.post_norm.clone());
+      param.push(layer.gate.clone());
+      param.push(layer.up.clone());
+      param.push(layer.down.clone());
+    }
+    param.push(self.head_norm.clone());
+    param.push(self.lm_head.clone());
+    param
+  }
+
+  pub fn fresh_input(&self) -> LanguageModelBatchDeployIn {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
-    let in_tok = StableCell::array([seq_cap, ubat_sz], u16::dtype());
-    LanguageModelDeployIn{in_tok}
-  }*/
+    let mut in_tok = Vec::with_capacity(ubat_sz as usize);
+    for _ in 0 .. ubat_sz {
+      in_tok.push(StableCell::array([1, seq_cap], u16::dtype()));
+    }
+    LanguageModelBatchDeployIn{in_tok}
+  }
 
   pub fn init_constants(&mut self) {
     let init_embed = || {
@@ -417,7 +461,7 @@ impl LlamaCached {
     }
   }
 
-  pub fn reinit_state(&self) {
+  pub fn reset_state(&self) {
     for ell in 0 .. self.cfg.num_layer as usize {
       self.states[ell].k_cache.set_zeros();
       self.states[ell].v_cache.set_zeros();
@@ -435,11 +479,11 @@ impl LlamaCached {
     unimplemented!();
   }*/
 
-  pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: &[X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+  pub fn apply<X: Borrow<CellPtr>>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
     unimplemented!();
   }
 
-  /*pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: &[X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+  /*pub fn apply<X: Borrow<CellPtr>>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
@@ -457,15 +501,13 @@ impl LlamaCached {
     /*let row_causal_attention_mask = |x: CellPtr| {
     };*/
     let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
-      // FIXME
       let x = x.new_shape([1 * diff_seq_len, num_head * head_dim]);
       let v = x.cast(f32::dtype())
                .square().inner_mean()
                .new_shape([1 * diff_seq_len, 1]);
       let t = x / (v + eps).sqrt();
       let w = weight.new_shape([1, num_head * head_dim]);
-      let y = (w * t).cast(dtype)
-                     .new_shape([1, diff_seq_len, num_head, head_dim]);
+      let y = (w * t).cast(dtype);
       y
     };
     /*let inner_symplectic_map = |x: CellPtr| {
@@ -478,39 +520,41 @@ impl LlamaCached {
                .new_shape([seq_cap, 1, head_dim]);
       let sin = self.sin.as_ref().unwrap()
                .new_shape([seq_cap, 1, head_dim]);
-      let y = (x * cos[[prev_seq_len .. next_seq_len, .., ..]].const_())
-            + (x.inner_symplectic_map() * sin[[prev_seq_len .. next_seq_len, .., ..]].const_());
+      let y = (x * cos[(prev_seq_len .. next_seq_len, .., ..)].const_())
+            + (inner_symplectic_map(x) * sin[(prev_seq_len .. next_seq_len, .., ..)].const_());
       y
     };
     assert_eq!(ubat_sz as usize, in_tok.len());
     // FIXME
-    let mut stream = in_tok;
+    //let mut stream = in_tok;
     let mut stream = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      let in_tok = (*in_tok[i as usize].borrow()).const_();
+      let in_tok = &(*in_tok[i as usize].borrow())[(.., prev_seq_len .. next_seq_len)];
       stream.push(self.embed.outer_select(in_tok)
                  .new_shape([1, diff_seq_len, num_head, head_dim]);
     }
     for ell in 0 .. num_layer as usize {
       // FIXME
       for i in 0 .. ubat_sz {
-        let pre_nrm = rms_norm(&stream[i as usize], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype());
+        let pre_nrm =
+               rms_norm(&stream[i as usize], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype())
+              .new_shape([1, diff_seq_len, num_head, head_dim]);
         let q_proj =
                symplectic_embed(
-               pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+               pre_nrm
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].q, true)
               .new_shape([1, diff_seq_len, num_head, head_dim])
                );
-        self.states[ell].k_cache[[i .. i + 1, prev_seq_len .. next_seq_len, .., ..]]
+        &mut self.states[ell].k_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
             += symplectic_embed(
-               pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+               pre_nrm
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].k, true)
               .new_shape([1, diff_seq_len, num_head, head_dim])
                );
-        self.states[ell].v_cache[[i .. i + 1, prev_seq_len .. next_seq_len, .., ..]]
-            += pre_nrm[[i, prev_seq_len .. next_seq_len, .., ..]]
+        &mut self.states[ell].v_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
+            += pre_nrm
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].v, true)
               .new_shape([1, diff_seq_len, num_head, head_dim]);
@@ -518,7 +562,7 @@ impl LlamaCached {
                q_proj
               .block_matmul_scale(
                    false,
-                   &self.states[ell].k_cache[[i + i + 1, .. /*next_seq_len*/, .., ..]],
+                   &self.states[ell].k_cache[(i + i + 1, .. /*next_seq_len*/, .., ..)],
                    true,
                    1.0 / (head_dim as f32).sqrt()
                );
@@ -530,20 +574,20 @@ impl LlamaCached {
                 attn
                .block_matmul(
                     false,
-                    self.states[ell].v_cache[[i .. i + 1, .. /*next_seq_len*/, .., ..]]
+                    self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)]
                     false
                 )
                .new_shape([diff_seq_len, num_head * head_dim]);
         let o_proj = v_attn.matmul(false, &self.layers[ell].o, true);
         stream[i as usize] = stream[i] + o_proj;
-        let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
+        let post_nrm = rms_norm(&stream[i as usize], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
         let up_proj = post_nrm
-                     .block_matmul(false, &self.layers[ell].up, true);
+                     .matmul(false, &self.layers[ell].up, true);
         let gate_proj = post_nrm
-                       .block_matmul(false, &self.layers[ell].gate, true);
+                       .matmul(false, &self.layers[ell].gate, true);
         let gate_proj = gate_proj.standard_silu();
         let gate_up = gate_proj * up_proj;
-        let down_proj = gate_up.block_matmul(false, &self.layers[ell].down, true)
+        let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
                        .new_shape([1, seq_cap, num_head, head_dim]);
         stream[i as usize] = stream[i as usize] + down_proj;
       }
@@ -552,17 +596,107 @@ impl LlamaCached {
     let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
     let mut out_lm_prob = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      stream[i as usize] = rms_norm(&stream[i], &self.head_norm, rms_norm_eps, f16::dtype());
+      stream[i as usize] = rms_norm(&stream[i as usize], &self.head_norm, rms_norm_eps, f16::dtype());
       out_lm_logit.push(stream[i as usize]
-                       .new_shape([seq_cap, num_head * head_dim])
                        .matmul(false, &self.lm_head, true)
-                       .new_shape([seq_cap, tok_dim])
+                       .new_shape([diff_seq_len, tok_dim])
                        .keep());
       out_lm_prob.push(out_lm_logit[i as usize]
                       .cast(f32::dtype())
                       .inner_softmax()
                       .keep());
+      out_lm_tok.push(out_lm_logit[i as usize]
+                     .arg_max()
+                     .cast(u16::dtype())
+                     .keep());
+      &mut (*in_tok[i as usize].borrow())[(.., next_seq_len .. next_seq_len + 1)]
+          += &out_lm_tok[i as usize][(.., next_seq_len - 1 .. next_seq_len)];
     }
-    LanguageModelBatchDeployOut{out_lm_logit, out_lm_prob}
+    LanguageModelBatchDeployOut{out_lm_logit, out_lm_prob, out_lm_tok}
   }*/
+}
+
+#[track_caller]
+pub fn inner_symplectic_map<X: Borrow<CellPtr>>(x: X) -> CellPtr {
+  panick_wrap(|| {
+    assert!(ctx_clean_arg());
+    ctx_push_cell_arg(*x.borrow());
+    ctx_pop_thunk(InnerSymplecticMapFutThunkSpec)
+  })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct InnerSymplecticMapFutThunkSpec;
+
+impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_symplectic_map")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(arg[0])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(arg[0].clone())
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
+    let mut code = FutharkThunkGenCode::default();
+    code.abi.arityout = 1;
+    code.abi.set_out(0, FutharkArrayRepr::Nd);
+    code.abi.arityin = 1;
+    code.abi.set_arg(0, FutharkArrayRepr::Nd);
+    match out[0].ndim {
+      0 => {
+        unimplemented!();
+      }
+      1 => {
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[0]}} // 2 in"));
+        code.append(format!(r"let (tl, tr) = split ({{%0}} :> [a_suf + a_suf]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.append(format!(r"let {{%1}} = ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[0]}}]{} in",
+            arg[0].dtype.format_futhark(),
+        ));
+      }
+      2 => {
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[1]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t -> let (tl, tr) = split (t :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[1]}}]{}) {{%0}} in",
+            arg[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        ));
+      }
+      3 => {
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[2]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> let (tl, tr) = split (t2 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[2]}}]{}) t1) {{%0}} in",
+            arg[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        ));
+      }
+      4 => {
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let a_suf = {{%0.s[3]}} // 2 in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> map (\t3 -> let (tl, tr) = split (t3 :> [a_suf + a_suf]{}) in ((map (\u -> (-u)) tr) ++ tl) :> [{{%0.s[3]}}]{}) t2) t1) {{%0}} in",
+            arg[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        ));
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+    code.into()
+  }
 }

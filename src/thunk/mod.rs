@@ -4,7 +4,7 @@ use crate::algo::hash::*;
 use crate::algo::str::*;
 use crate::cell::*;
 use crate::clock::*;
-use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellClosure, CowCell, ctx_lookup_type, ctx_clean_arg, ctx_push_cell_arg, ctx_pop_thunk};
+use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellDerefErr, CellClosure, CowCell, ctx_lookup_type, ctx_clean_arg, ctx_push_cell_arg, ctx_pop_thunk};
 use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier};
 #[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
@@ -2424,14 +2424,18 @@ impl FutharkThunkImpl<MulticoreBackend> {
           }
         }
       }
-      /*let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
-        None => panic!("bug"),
-        Some(e) => e
-      };*/
-      let e = match env.pread_ref_(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
+      let e = match env.pread_view(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
         Err(_) => panic!("bug"),
         Ok(e) => e
       };
+      let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        Err(_) => {
+          println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: arg is not a zero-copy view");
+          panic!();
+        }
+        Ok(ty) => ty
+      };
+      assert_eq!(&e.ty, v_ty.as_ref());
       assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
       let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
         (FutharkArrayRepr::Nd, 0) |
@@ -2523,6 +2527,10 @@ impl FutharkThunkImpl<MulticoreBackend> {
             Some(e) => e
           };*/
           let e = match env.prewrite_ref_(out, prev_oclk, oclk, Locus::Mem) {
+            Err(CellDerefErr::View) => {
+              println!("BUG: FutharkThunkImpl::<MulticoreBackend>::_enter: unimplemented: output is a view");
+              panic!();
+            }
             Err(_) => panic!("bug"),
             Ok(e) => e
           };
@@ -3031,14 +3039,18 @@ impl FutharkThunkImpl<CudaBackend> {
       TL_PCTX.with(|pctx| {
         let gpu = pctx.nvgpu.as_ref().unwrap();
         let loc = gpu.device_locus();
-        /*let e = match env.pread_ref(arg[k as usize].0, arg[k as usize].1, loc) {
-          None => panic!("bug"),
-          Some(e) => e
-        };*/
-        let e = match env.pread_ref_(arg[k as usize].0, arg[k as usize].1, loc) {
+        let e = match env.pread_view(arg[k as usize].0, arg[k as usize].1, loc) {
           Err(_) => panic!("bug"),
           Ok(e) => e
         };
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: FutharkThunkImpl::<CudaBackend>::_enter: arg is not a zero-copy view");
+            panic!();
+          }
+          Ok(ty) => ty
+        };
+        assert_eq!(&e.ty, v_ty.as_ref());
         assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
         let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
           (FutharkArrayRepr::Nd, 0) |
@@ -3127,11 +3139,11 @@ impl FutharkThunkImpl<CudaBackend> {
             let gpu = pctx.nvgpu.as_ref().unwrap();
             let loc = gpu.device_locus();
             // FIXME: double check that out does not alias any args.
-            /*let e = match env.pwrite_ref(out, prev_oclk, oclk, loc) {
-              None => panic!("bug"),
-              Some(e) => e
-            };*/
             let e = match env.prewrite_ref_(out, prev_oclk, oclk, loc) {
+              Err(CellDerefErr::View) => {
+                println!("BUG: FutharkThunkImpl::<CudaBackend>::_enter: unimplemented: output is a view");
+                panic!();
+              }
               Err(_) => panic!("bug"),
               Ok(e) => e
             };
