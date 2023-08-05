@@ -493,6 +493,16 @@ pub struct MemReg {
 }
 
 impl MemReg {
+  pub fn is_subregion(&self, other: &MemReg) -> bool {
+    let src = self.ptr as usize;
+    let end_src = src + self.sz;
+    assert!(src <= end_src);
+    let dst = other.ptr as usize;
+    let end_dst = dst + other.sz;
+    assert!(dst <= end_dst);
+    dst <= src && end_src <= end_dst
+  }
+
   #[track_caller]
   pub fn copy_from_slice<T: DtypeConstExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
     panick_wrap(|| self._copy_from_slice(src_buf))

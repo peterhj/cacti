@@ -4432,15 +4432,15 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[0]);
-        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
           Err(_) => {
-            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy (contiguous) view");
             panic!();
           }
-          Ok(v) => v
+          Ok(ty) => ty
         };
-        assert_eq!(&e.ty, vtype.as_ref());
-        //assert_eq!(vtype.as_ref(), &arg_ty_[0]);
+        assert_eq!(&e.ty, v_ty.as_ref());
+        //assert_eq!(v_ty.as_ref(), &arg_ty_[0]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
@@ -4452,7 +4452,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
-            let base = base0 + vtype.pointer_offset();
+            let base = base0 + v_ty.pointer_offset();
             let inc = spec.l_dtype.size_bytes() as u64;
             let blk_row_len = spec.l_block[0] as u64;
             let blk_col_len = spec.l_block[1] as u64;
@@ -4483,15 +4483,15 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[1]);
-        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
           Err(_) => {
-            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: right arg is not a zero-copy (contiguous) view");
             panic!();
           }
-          Ok(v) => v
+          Ok(ty) => ty
         };
-        assert_eq!(&e.ty, vtype.as_ref());
-        //assert_eq!(vtype.as_ref(), &arg_ty_[1]);
+        assert_eq!(&e.ty, v_ty.as_ref());
+        //assert_eq!(v_ty.as_ref(), &arg_ty_[1]);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
@@ -4503,7 +4503,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
-            let base = base0 + vtype.pointer_offset();
+            let base = base0 + v_ty.pointer_offset();
             let inc = spec.r_dtype.size_bytes() as u64;
             let blk_row_len = spec.r_block[0] as u64;
             let blk_col_len = spec.r_block[1] as u64;
@@ -4542,15 +4542,15 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(&e.ty, &out_ty_);
-        let vtype = match e.view().eval_contiguous(&e.root_ty) {
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
           Err(_) => {
-            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy view");
+            println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: output is not a zero-copy (contiguous) view");
             panic!();
           }
-          Ok(v) => v
+          Ok(ty) => ty
         };
-        assert_eq!(&e.ty, vtype.as_ref());
-        //assert_eq!(vtype.as_ref(), &out_ty_);
+        assert_eq!(&e.ty, v_ty.as_ref());
+        //assert_eq!(v_ty.as_ref(), &out_ty_);
         match e.cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
@@ -4562,7 +4562,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
               dptr
             });
-            let base = base0 + vtype.pointer_offset();
+            let base = base0 + v_ty.pointer_offset();
             let inc = spec.o_dtype.size_bytes() as u64;
             let blk_row_len = tys.l_blk_outer as u64;
             let blk_col_len = tys.r_blk_outer as u64;

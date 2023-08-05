@@ -2568,7 +2568,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
     panick_wrap(|| self.mem_set_yield_())
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn mem_init_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut spine = ctx.spine.borrow();
@@ -2579,7 +2579,7 @@ pub trait Ops: Borrow<CellPtr> + Sized {
   #[track_caller]
   fn mem_init_yield_with(&self, _: ()) {
     panick_wrap(|| self.mem_init_yield_())
-  }
+  }*/
 
   /*#[track_caller]
   fn eval(self) -> Self {

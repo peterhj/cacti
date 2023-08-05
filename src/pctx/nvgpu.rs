@@ -1614,6 +1614,14 @@ pub extern "C" fn tl_pctx_gpu_failarg_free_hook(_dptr: u64) -> c_int {
   }).unwrap_or_else(|_| 0)
 }
 
-pub struct GpuDryCtx {
-  // FIXME
+pub fn is_subregion_dev(src_dptr: u64, src_sz: usize, dst_dptr: u64, dst_sz: usize) -> bool {
+  let end_src_dptr = src_dptr + src_sz as u64;
+  let end_dst_dptr = dst_dptr + dst_sz as u64;
+  assert!(src_dptr <= end_src_dptr);
+  assert!(dst_dptr <= end_dst_dptr);
+  dst_dptr <= src_dptr && end_src_dptr <= end_dst_dptr
 }
+
+/*pub struct GpuDryCtx {
+  // FIXME
+}*/
