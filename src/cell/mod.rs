@@ -864,6 +864,23 @@ impl CellView {
             end_offset[d] = offset[d] + (idx[d].end - idx[d].start);
           }
         }
+        &CellViewOp::Proj(maskbits) => {
+          //let mut new_rank = 0;
+          let mut new_shape = Vec::new();
+          for d in 0 .. shape.len() {
+            if ((maskbits >> d) & 1) != 0 {
+              if shape[d] != 1 {
+                return Err(());
+              }
+            } else {
+              //new_rank += 1;
+              new_shape.push(shape[d]);
+            }
+          }
+          //let mut new_shape = Vec::with_capacity(new_rank);
+          // FIXME
+          unimplemented!();
+        }
         &CellViewOp::NewShape(ref new_shape) => {
           for d in 0 .. shape.len() {
             if offset[d] == 0 && end_offset[d] == shape[d] {

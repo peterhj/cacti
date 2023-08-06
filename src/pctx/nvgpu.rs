@@ -11,11 +11,15 @@ use cacti_gpu_cu_ffi::types::*;
 
 use libc::{c_char, c_int, c_void};
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, UnsafeCell};
 use std::convert::{TryInto};
 use std::ffi::{CStr};
+use std::fs::{OpenOptions};
+use std::io::{Write};
 use std::rc::{Rc, Weak};
+use std::path::{PathBuf};
 use std::ptr::{write};
+use std::str::{from_utf8};
 
 pub const ALLOC_ALIGN: usize = 256;
 
@@ -267,10 +271,11 @@ pub struct NvGpuPCtx {
   pub dev_info:     NvGpuDeviceInfo,
   pub blas_ctx:     CublasContext,
   pub compute:      CudartStream,
-  pub copy_to:      CudartStream,
-  pub copy_from:    CudartStream,
+  //pub copy_to:      CudartStream,
+  //pub copy_from:    CudartStream,
   pub page_map:     NvGpuPageMap,
   pub mem_pool:     NvGpuMemPool,
+  pub kernels:      NvGpuCopyKernels,
 }
 
 impl Drop for NvGpuPCtx {
@@ -364,22 +369,24 @@ impl NvGpuPCtx {
     if cfg_info() { println!("INFO:   NvGpuPCtx::new: dev info={:?}", &dev_info); }
     let blas_ctx = CublasContext::create().unwrap();
     let compute = CudartStream::null();
-    let copy_to = CudartStream::create_nonblocking().unwrap();
-    let copy_from = CudartStream::create_nonblocking().unwrap();
+    //let copy_to = CudartStream::create_nonblocking().unwrap();
+    //let copy_from = CudartStream::create_nonblocking().unwrap();
     /*let compute = CudartStream::create().unwrap();
     let copy_to = CudartStream::create().unwrap();
     let copy_from = CudartStream::create().unwrap();*/
     let page_map = NvGpuPageMap::new();
     let mem_pool = NvGpuMemPool::new(dev);
+    let kernels = NvGpuCopyKernels::new();
     Some(NvGpuPCtx{
       pctx,
       dev_info,
       blas_ctx,
       compute,
-      copy_to,
-      copy_from,
+      //copy_to,
+      //copy_from,
       page_map,
       mem_pool,
+      kernels,
     })
   }
 
@@ -1620,6 +1627,191 @@ pub fn is_subregion_dev(src_dptr: u64, src_sz: usize, dst_dptr: u64, dst_sz: usi
   assert!(src_dptr <= end_src_dptr);
   assert!(dst_dptr <= end_dst_dptr);
   dst_dptr <= src_dptr && end_src_dptr <= end_dst_dptr
+}
+
+static ACCUMULATE_1D_F32_FUNCTIONNAME: &'static [u8] = b"cacti_rts_accumulate_1d_f32\0";
+static ACCUMULATE_1D_F32_IDX32_SOURCE: &'static [u8] =
+b"
+typedef int i32;
+extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK) void kernel(float *dst, const float *src, i32 n) {
+  i32 idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < n) {
+    dst[idx] = dst[idx] + src[idx];
+  }
+  return;
+}
+\0";
+
+static ACCUMULATE_1D_F16_FUNCTIONNAME: &'static [u8] = b"cacti_rts_accumulate_1d_f16\0";
+static ACCUMULATE_1D_F16_IDX32_SOURCE: &'static [u8] =
+b"
+#include <cuda_fp16.h>
+typedef int i32;
+typedef unsigned short u16;
+typedef __half f16;
+extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK) void kernel(u16 *dst, const u16 *src, i32 n) {
+  i32 idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < n) {
+    f16 x_0 = __ushort_as_half(src[idx]);
+    f16 x_1 = __ushort_as_half(dst[idx]);
+    f16 y_0 = x_0 + x_1;
+    dst[idx] = __half_as_ushort(y_0);
+  }
+  return;
+}
+\0";
+
+/*static ACCUMULATE_1D_F16_V2_FUNCTIONNAME: &'static [u8] = b"cacti_rts_accumulate_1d_f16_v2\0";
+static ACCUMULATE_1D_F16_V2_IDX32_SOURCE: &'static [u8] =
+b"
+#include <cuda_fp16.h>
+typedef int i32;
+typedef unsigned short u16;
+typedef __half f16;
+typedef __half2 f16x2;
+extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK) void kernel(u16 *dst, const u16 *src, i32 n) {
+  i32 idx = threadIdx.x + blockDim.x * blockIdx.x;
+  // FIXME: pointer alignment.
+  if (idx * 2 + 1 < n) {
+    f16x2 x_0 = __ldg((const f16x2 *)(src + idx));
+    f16x2 x_1 = __ldg((const f16x2 *)(dst + idx));
+    f16x2 y_0 = x_0 + x_1;
+    __stwb((f16x2 *)(dst + idx), y_0);
+  } else if (idx * 2 < n) {
+    f16 x_0 = __ushort_as_half(src[idx]);
+    f16 x_1 = __ushort_as_half(dst[idx]);
+    f16 y_0 = x_0 + x_1;
+    dst[idx] = __half_as_ushort(y_0);
+  }
+  return;
+}
+\0";*/
+
+static ACCUMULATE_1D_U16_FUNCTIONNAME: &'static [u8] = b"cacti_rts_accumulate_1d_u16\0";
+static ACCUMULATE_1D_U16_IDX32_SOURCE: &'static [u8] =
+b"
+typedef int i32;
+typedef unsigned short u16;
+extern \"C\" __global__ __launch_bounds__(MAX_THREADS_PER_BLOCK) void kernel(u16 *dst, const u16 *src, i32 n) {
+  i32 idx = threadIdx.x + blockDim.x * blockIdx.x;
+  if (idx < n) {
+    dst[idx] = dst[idx] + src[idx];
+  }
+  return;
+}
+\0";
+
+pub struct NvGpuCopyKernel {
+  pub ptx:  Box<[u8]>,
+  //pub prog: NvrtcProgram,
+  pub mod_: CudaModule,
+  pub func: CudaFunction,
+}
+
+impl NvGpuCopyKernel {
+  pub fn from_source(fname_buf: &[u8], src_buf: &[u8]) -> NvGpuCopyKernel {
+    assert_eq!(fname_buf[fname_buf.len() - 1], 0);
+    if cfg_devel_dump() {
+      println!("DEBUG: NvGpuCopyKernel: src sz={}", src_buf.len());
+      let path = PathBuf::from(&format!(".tmp.{}.cu", from_utf8(&fname_buf[ .. fname_buf.len() - 1]).unwrap()));
+      let mut tmp = OpenOptions::new().read(false).write(true).create(true).truncate(true).open(&path).unwrap();
+      tmp.write_all(&src_buf[ .. src_buf.len() - 1]).unwrap();
+      //tmp.write_all(src_buf).unwrap();
+    }
+    let prog = NvrtcProgram::create(src_buf).unwrap();
+    // FIXME
+    let mut opts = Vec::new();
+    opts.push(b"-arch\0" as &[_]);
+    opts.push(b"compute_75\0" as &[_]);
+    opts.push(b"-default-device\0" as &[_]);
+    opts.push(b"--disable-warnings\0" as &[_]);
+    opts.push(b"-I/usr/local/cuda/include\0" as &[_]);
+    opts.push(b"-I/usr/include\0" as &[_]);
+    opts.push(b"-DMAX_THREADS_PER_BLOCK=1024\0" as &[_]);
+    let res = prog.compile(&opts);
+    let log_sz = prog.get_log_size().unwrap();
+    let mut log = Vec::with_capacity(log_sz + 1);
+    log.resize(log_sz + 1, 0);
+    prog.get_log(&mut log).unwrap();
+    if cfg_devel_dump() {
+      println!("DEBUG: NvGpuCopyKernel: log sz={}", log_sz);
+      let path = PathBuf::from(&format!(".tmp.{}.log", from_utf8(&fname_buf[ .. fname_buf.len() - 1]).unwrap()));
+      let mut tmp = OpenOptions::new().read(false).write(true).create(true).truncate(true).open(&path).unwrap();
+      tmp.write_all(&log[ .. log_sz - 1]).unwrap();
+    }
+    assert!(res.is_ok());
+    let ptx_sz = prog.get_ptx_size().unwrap();
+    let mut ptx = Vec::with_capacity(ptx_sz + 1);
+    ptx.resize(ptx_sz + 1, 0);
+    prog.get_ptx(&mut ptx).unwrap();
+    if cfg_devel_dump() {
+      println!("DEBUG: NvGpuCopyKernel: ptx sz={}", ptx_sz);
+      let path = PathBuf::from(&format!(".tmp.{}.ptx", from_utf8(&fname_buf[ .. fname_buf.len() - 1]).unwrap()));
+      let mut tmp = OpenOptions::new().read(false).write(true).create(true).truncate(true).open(&path).unwrap();
+      tmp.write_all(&ptx[ .. ptx_sz - 1]).unwrap();
+      //tmp.write_all(&ptx[ .. ptx_sz]).unwrap();
+    }
+    drop(prog);
+    NvGpuCopyKernel::from_ptx(ptx.into())
+  }
+
+  pub fn from_ptx(ptx: Box<[u8]>) -> NvGpuCopyKernel {
+    let mod_ = CudaModule::load_data(ptx.as_ptr() as *const _).unwrap();
+    let func = mod_.get_function(b"kernel\0").unwrap();
+    NvGpuCopyKernel{ptx, mod_, func}
+  }
+
+  pub fn launch32(&self, dst_dptr: u64, src_dptr: u64, len: i32, stream: &CudartStream) -> () {
+    let dst_arg = UnsafeCell::new(dst_dptr);
+    let src_arg = UnsafeCell::new(src_dptr);
+    let len_arg = UnsafeCell::new(len);
+    let args = UnsafeCell::new([
+        dst_arg.get() as *mut _,
+        src_arg.get() as *mut _,
+        len_arg.get() as *mut _,
+    ]);
+    // FIXME
+    self.func.launch_kernel([0, 0, 0], [1024, 1, 1], 0, &args, stream).unwrap();
+  }
+}
+
+pub struct NvGpuCopyKernels {
+  pub accumulate_1d_f32_idx32: Option<NvGpuCopyKernel>,
+  pub accumulate_1d_f16_idx32: Option<NvGpuCopyKernel>,
+  pub accumulate_1d_u16_idx32: Option<NvGpuCopyKernel>,
+  //pub strided_accumulate_2d_f32_idx32: Option<NvGpuCopyKernel>,
+  // TODO
+}
+
+impl NvGpuCopyKernels {
+  pub fn new() -> NvGpuCopyKernels {
+    NvGpuCopyKernels{
+      accumulate_1d_f32_idx32:  Some(NvGpuCopyKernel::from_source(
+          ACCUMULATE_1D_F32_FUNCTIONNAME,
+          ACCUMULATE_1D_F32_IDX32_SOURCE
+      )),
+      accumulate_1d_f16_idx32:  Some(NvGpuCopyKernel::from_source(
+          ACCUMULATE_1D_F16_FUNCTIONNAME,
+          ACCUMULATE_1D_F16_IDX32_SOURCE
+      )),
+      accumulate_1d_u16_idx32:  Some(NvGpuCopyKernel::from_source(
+          ACCUMULATE_1D_U16_FUNCTIONNAME,
+          ACCUMULATE_1D_U16_IDX32_SOURCE
+      )),
+    }
+  }
+
+  /*pub fn accumulate_1d_f32_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
+    unimplemented!();
+  }
+
+  pub fn accumulate_1d_f16_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
+    unimplemented!();
+  }
+
+  pub fn accumulate_1d_u16_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
+    unimplemented!();
+  }*/
 }
 
 /*pub struct GpuDryCtx {

@@ -43,7 +43,6 @@ glob = { path = "../glob" }
 half = { path = "../half" }
 home = { path = "../home" }
 libc = { path = "../libc" }
-#msgpack_serialize = { path = "../msgpack_serialize" }
 once_cell = { path = "../once_cell" }
 repugnant_pickle = { path = "../repugnant_pickle" }
 rustc_serialize = { path = "../rustc_serialize" }
@@ -70,3 +69,7 @@ path = "tools/boot_array.rs"
 [[bin]]
 name = "boot_train"
 path = "tools/boot_train.rs"
+
+[[bin]]
+name = "gen_macros"
+path = "tools/gen_macros.rs"

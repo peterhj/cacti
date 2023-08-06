@@ -2501,22 +2501,34 @@ impl FutharkThunkImpl<MulticoreBackend> {
     let mut out_org = None;
     for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
-      let ty_ = match env._lookup_ref_(out) {
-        Err(_) => panic!("bug"),
-        Ok(e) => {
-          if e.ty.is_top() {
-            match spec_.out_ty_(&arg_ty_) {
+      let ty_ = match mode {
+        ThunkMode::Apply => {
+          let e = match env._lookup_view(out) {
+            Err(_) => panic!("bug"),
+            Ok(e) => e
+          };
+          let ty_ = if e.ty.is_top() {
+            // FIXME FIXME
+            unimplemented!();
+            /*match spec_.out_ty_(&arg_ty_) {
               Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
               Err(_) => panic!("bug"),
               Ok(ty_) => ty_
-            }
+            }*/
           } else {
             e.ty.clone()
-          }
+          };
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: output is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
+          assert_eq!(self.spec_dim[(lar + k) as usize], e.ty.to_dim());
+          ty_
         }
-      };
-      assert_eq!(self.spec_dim[(lar + k) as usize], ty_.to_dim());
-      match mode {
         // FIXME: if we no longer match on mode, then the pwrite check
         // needs to test which of the args are also outs.
         ThunkMode::Accumulate |
@@ -2529,6 +2541,17 @@ impl FutharkThunkImpl<MulticoreBackend> {
             }*/
             Err(_) => panic!("bug"),
             Ok(e) => e
+          };
+          let ty_ = if e.ty.is_top() {
+            // FIXME FIXME
+            unimplemented!();
+            /*match spec_.out_ty_(&arg_ty_) {
+              Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
+              Err(_) => panic!("bug"),
+              Ok(ty_) => ty_
+            }*/
+          } else {
+            e.ty.clone()
           };
           let v_ty = match e.view().eval_contiguous(e.root_ty) {
             Err(_) => {
@@ -2587,9 +2610,9 @@ impl FutharkThunkImpl<MulticoreBackend> {
           }
           arg_ty_.push(ty_.clone());
           arg_arr.push(a.into());
+          ty_
         }
-        _ => {}
-      }
+      };
       out_ty_.push(ty_);
       out_arr.push(FutArray::null().into());
     }
@@ -2810,13 +2833,13 @@ impl FutharkThunkImpl<MulticoreBackend> {
         for k in objects.find(mode).unwrap().1.consts.iter() {
           if k.0 == addr {
             if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   is const"); }
+            // FIXME: view.
             let root_ty = match env._lookup_mut_ref_(out) {
               Err(_) => panic!("bug"),
               Ok(e) => {
                 match e.cel_ {
                   &mut Cell_::Top(ref state, optr) => {
                     assert_eq!(e.root(), optr);
-                    // FIXME: defaults below are placeholders for...?
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
                     *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
@@ -2877,7 +2900,6 @@ impl FutharkThunkImpl<MulticoreBackend> {
                   // FIXME: view: need to do a raw zero-pad.
                   unimplemented!();
                 } else {
-                  // FIXME: defaults below are placeholders for...?
                   let state = RefCell::new(state.borrow().clone());
                   let clo = RefCell::new(CellClosure::default());
                   let mut pcel = PCell::new(optr, e.root_ty.clone());
@@ -2894,10 +2916,19 @@ impl FutharkThunkImpl<MulticoreBackend> {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try old phy..."); }
                 assert_eq!(root, pcel.optr);
                 assert_eq!(oclk, state.borrow().clk);
-                // FIXME: view: this path needs to be more precise.
-                if e.root_ty.span_bytes() != v_ty.as_ref().span_bytes() {
-                  // FIXME: view: need to do a raw memcpy.
-                  unimplemented!();
+                if e.root_ty.span_bytes() != e.ty.span_bytes() {
+                  match mode {
+                    ThunkMode::Apply |
+                    ThunkMode::Initialize => {
+                      // FIXME: view: need to do a raw memcpy;
+                      // but, is this path even reachable?
+                      unimplemented!();
+                    }
+                    ThunkMode::Accumulate => {
+                      // FIXME: view: need to do a raw accumulate.
+                      unimplemented!();
+                    }
+                  }
                 } else {
                   let optr = pcel.optr;
                   // FIXME: pmach.
@@ -3098,31 +3129,43 @@ impl FutharkThunkImpl<CudaBackend> {
     let mut out_org = None;
     for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
-      let ty_ = match env._lookup_ref_(out) {
-        Err(_) => panic!("bug"),
-        Ok(e) => {
-          if e.ty.is_top() {
-            match spec_.out_ty_(&arg_ty_) {
+      let ty_ = match mode {
+        ThunkMode::Apply => {
+          let e = match env._lookup_view(out) {
+            Err(_) => panic!("bug"),
+            Ok(e) => e
+          };
+          let ty_ = if e.ty.is_top() {
+            // FIXME FIXME
+            unimplemented!();
+            /*match spec_.out_ty_(&arg_ty_) {
               Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
               Err(_) => panic!("bug"),
               Ok(ty_) => ty_
-            }
+            }*/
           } else {
             e.ty.clone()
+          };
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: FutharkThunkImpl::<CudaBackend>::_enter: output is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
+          if !(self.spec_dim[(lar + k) as usize] == e.ty.to_dim()) {
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: lar={} rar={} k={}", lar, rar, k);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", &self.spec_dim);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", self.spec_dim[(lar + k) as usize]);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", &arg);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg ty={:?}", &arg_ty_);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?}", out);
+            println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out ty={:?}", ty_);
           }
+          assert_eq!(self.spec_dim[(lar + k) as usize], e.ty.to_dim());
+          ty_
         }
-      };
-      if !(self.spec_dim[(lar + k) as usize] == ty_.to_dim()) {
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: lar={} rar={} k={}", lar, rar, k);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", &self.spec_dim);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", self.spec_dim[(lar + k) as usize]);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg={:?}", &arg);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: arg ty={:?}", &arg_ty_);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?}", out);
-        println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out ty={:?}", ty_);
-      }
-      assert_eq!(self.spec_dim[(lar + k) as usize], ty_.to_dim());
-      match mode {
         // FIXME: if we no longer match on mode, then the pwrite check
         // needs to test which of the args are also outs.
         ThunkMode::Accumulate |
@@ -3138,6 +3181,17 @@ impl FutharkThunkImpl<CudaBackend> {
               }*/
               Err(_) => panic!("bug"),
               Ok(e) => e
+            };
+            let ty_ = if e.ty.is_top() {
+              // FIXME FIXME
+              unimplemented!();
+              /*match spec_.out_ty_(&arg_ty_) {
+                Err(ThunkTypeErr::Nondeterm) => panic!("bug: nondeterm type"),
+                Err(_) => panic!("bug"),
+                Ok(ty_) => ty_
+              }*/
+            } else {
+              e.ty.clone()
             };
             let v_ty = match e.view().eval_contiguous(e.root_ty) {
               Err(_) => {
@@ -3201,10 +3255,10 @@ impl FutharkThunkImpl<CudaBackend> {
             }
             arg_ty_.push(ty_.clone());
             arg_arr.push(a.into());
-          });
+            ty_
+          })
         }
-        _ => {}
-      }
+      };
       out_ty_.push(ty_);
       out_arr.push(FutArrayDev::null().into());
     }
@@ -3522,13 +3576,13 @@ impl FutharkThunkImpl<CudaBackend> {
             for k in objects.find(mode).unwrap().1.consts.iter() {
               if k.0 == addr {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   is const"); }
+                // FIXME: view.
                 let root_ty = match env._lookup_mut_ref_(out) {
                   Err(_) => panic!("bug"),
                   Ok(e) => {
                     match e.cel_ {
                       &mut Cell_::Top(ref state, optr) => {
                         assert_eq!(e.root(), optr);
-                        // FIXME: defaults below are placeholders for...?
                         let state = RefCell::new(state.borrow().clone());
                         let clo = RefCell::new(CellClosure::default());
                         *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
@@ -3595,7 +3649,6 @@ impl FutharkThunkImpl<CudaBackend> {
                       // FIXME: view: need to do a raw zero-pad.
                       unimplemented!();
                     } else {
-                      // FIXME: defaults below are placeholders for...?
                       let state = RefCell::new(state.borrow().clone());
                       let clo = RefCell::new(CellClosure::default());
                       let mut pcel = PCell::new(optr, e.root_ty.clone());
@@ -3606,14 +3659,54 @@ impl FutharkThunkImpl<CudaBackend> {
                   }
                   &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: try old phy..."); }
-                    assert_eq!(root, pcel.optr);
+                    let optr = pcel.optr;
+                    assert_eq!(root, optr);
                     assert_eq!(oclk, state.borrow().clk);
-                    // FIXME: view: this path needs to be more precise.
-                    if e.root_ty.span_bytes() != v_ty.as_ref().span_bytes() {
-                      // FIXME: view: need to do a raw memcpy.
-                      unimplemented!();
+                    if e.root_ty.span_bytes() != e.ty.span_bytes() {
+                      match mode {
+                        ThunkMode::Apply |
+                        ThunkMode::Initialize => {
+                          // FIXME: view: need to do a raw memcpy;
+                          // but, is this path even reachable?
+                          unimplemented!();
+                        }
+                        ThunkMode::Accumulate => {
+                          match pcel.lookup(Locus::VMem, PMach::NvGpu) {
+                            None => panic!("bug"),
+                            Some(rep) => {
+                              let prev_addr = rep.addr.get();
+                              if prev_addr == addr {
+                                panic!("bug");
+                              }
+                              let (dst_base, dst_base_sz) = gpu.lookup_dev(prev_addr).unwrap();
+                              let v_ptroff = v_ty.pointer_offset();
+                              let dst_dptr = dst_base + v_ptroff;
+                              let sz = e.ty.span_bytes() as usize;
+                              assert!(is_subregion_dev(dst_dptr, sz, dst_base, dst_base_sz));
+                              let (src_dptr, src_sz) = gpu.lookup_dev(addr).unwrap();
+                              assert!(sz <= src_sz);
+                              let len = e.ty.flat_len();
+                              assert!(len >= 0);
+                              // FIXME: view: need to do a raw accumulate.
+                              if len <= i32::max_value() as _ {
+                                match e.ty.dtype {
+                                  Dtype::Fp32 => &gpu.kernels.accumulate_1d_f32_idx32,
+                                  Dtype::Fp16 => &gpu.kernels.accumulate_1d_f16_idx32,
+                                  Dtype::UInt16 => &gpu.kernels.accumulate_1d_u16_idx32,
+                                  _ => {
+                                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: unimplemented: accumulate kernel for dtype={:?}", e.ty.dtype);
+                                    unimplemented!();
+                                  }
+                                }.as_ref().unwrap()
+                                .launch32(dst_dptr, src_dptr, len as _, &gpu.compute);
+                              } else {
+                                unimplemented!();
+                              }
+                            }
+                          }
+                        }
+                      }
                     } else {
-                      let optr = pcel.optr;
                       match pcel.swap(optr, oclk, Locus::VMem, PMach::NvGpu, addr) {
                         None => {}
                         Some((_, prev_addr)) => {

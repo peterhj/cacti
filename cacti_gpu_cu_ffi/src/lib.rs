@@ -12,9 +12,11 @@ use cacti_cfg_env::*;
 use libc::{c_void};
 use once_cell::sync::{Lazy};
 
+use std::cell::{UnsafeCell};
 use std::convert::{TryFrom};
+use std::ffi::{CStr};
 use std::ops::{Deref};
-use std::ptr::{null_mut};
+use std::ptr::{null, null_mut};
 
 pub mod bindings;
 #[cfg(feature = "experimental")]
@@ -265,6 +267,66 @@ pub fn cuda_memcpy_d2h_async(dst: *mut c_void, src: u64, sz: usize, stream_raw: 
   Ok(())
 }
 
+pub struct CudaModule {
+  pub raw: CUmodule,
+}
+
+impl Drop for CudaModule {
+  fn drop(&mut self) {
+    let e = (LIBCUDA.cuModuleUnload.as_ref().unwrap())(self.raw);
+    match e {
+      CUDA_SUCCESS | CUDA_ERROR_DEINITIALIZED => {}
+      _ => panic!("bug")
+    }
+  }
+}
+
+impl CudaModule {
+  pub fn load_data(data: *const c_void) -> CudaResult<CudaModule> {
+    let mut raw = null_mut();
+    let e = (LIBCUDA.cuModuleLoadData.as_ref().unwrap())(&mut raw, data);
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    Ok(CudaModule{raw})
+  }
+
+  pub fn get_function(&self, fname_buf: &[u8]) -> CudaResult<CudaFunction> {
+    let fname_cstr = CStr::from_bytes_with_nul(fname_buf).unwrap();
+    let mut func_raw = null_mut();
+    let e = (LIBCUDA.cuModuleGetFunction.as_ref().unwrap())(&mut func_raw, self.raw, fname_cstr.as_ptr());
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    assert!(!func_raw.is_null());
+    Ok(CudaFunction{raw: func_raw})
+  }
+}
+
+pub struct CudaFunction {
+  pub raw: CUfunction,
+}
+
+impl CudaFunction {
+  pub fn launch_kernel(&self, grid_dim: [u32; 3], block_dim: [u32; 3], shared_mem: u32, args: &UnsafeCell<[*mut c_void]>, stream_raw: &CUstream) -> CudaResult {
+    let e = unsafe {
+      (LIBCUDA.cuLaunchKernel.as_ref().unwrap())(
+          self.raw,
+          grid_dim[0], grid_dim[1], grid_dim[2],
+          block_dim[0], block_dim[1], block_dim[2],
+          shared_mem,
+          *stream_raw,
+          args.get() as *mut *mut c_void,
+          null_mut()
+      )
+    };
+    if e != CUDA_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+}
+
 pub type CudartResult<T=()> = Result<T, cudaError_t>;
 
 pub fn cudart_get_dev_count() -> CudartResult<i32> {
@@ -497,6 +559,79 @@ impl CudartStream {
 
   pub fn device(&self) -> i32 {
     self.dev
+  }
+}
+
+pub type NvrtcResult<T=()> = Result<T, nvrtcResult>;
+
+pub struct NvrtcProgram {
+  pub raw:  nvrtcProgram,
+}
+
+impl Drop for NvrtcProgram {
+  fn drop(&mut self) {
+    assert!(!self.raw.is_null());
+    let _e = (LIBNVRTC.nvrtcDestroyProgram.as_ref().unwrap())(&mut self.raw);
+  }
+}
+
+impl NvrtcProgram {
+  pub fn create(src_buf: &[u8]) -> NvrtcResult<NvrtcProgram> {
+    let src_cstr = CStr::from_bytes_with_nul(src_buf).unwrap();
+    let mut raw = null_mut();
+    let e = (LIBNVRTC.nvrtcCreateProgram.as_ref().unwrap())(&mut raw, src_cstr.as_ptr(), null(), 0, null(), null());
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    assert!(!raw.is_null());
+    Ok(NvrtcProgram{raw})
+  }
+
+  pub fn compile(&self, opt_bufs: &[&[u8]]) -> NvrtcResult {
+    let mut opt_cstrs = Vec::with_capacity(opt_bufs.len());
+    for buf in opt_bufs.iter() {
+      opt_cstrs.push(CStr::from_bytes_with_nul(buf).unwrap().as_ptr());
+    }
+    assert!(opt_cstrs.len() <= i32::max_value() as usize);
+    let e = (LIBNVRTC.nvrtcCompileProgram.as_ref().unwrap())(self.raw, opt_cstrs.len() as i32, opt_cstrs.as_ptr());
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn get_log_size(&self) -> NvrtcResult<usize> {
+    let mut size = 0;
+    let e = (LIBNVRTC.nvrtcGetProgramLogSize.as_ref().unwrap())(self.raw, &mut size);
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    Ok(size)
+  }
+
+  pub fn get_log(&self, buf: &mut [u8]) -> NvrtcResult {
+    let e = (LIBNVRTC.nvrtcGetProgramLog.as_ref().unwrap())(self.raw, buf.as_mut_ptr() as *mut _);
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
+  }
+
+  pub fn get_ptx_size(&self) -> NvrtcResult<usize> {
+    let mut size = 0;
+    let e = (LIBNVRTC.nvrtcGetPTXSize.as_ref().unwrap())(self.raw, &mut size);
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    Ok(size)
+  }
+
+  pub fn get_ptx(&self, buf: &mut [u8]) -> NvrtcResult {
+    let e = (LIBNVRTC.nvrtcGetPTX.as_ref().unwrap())(self.raw, buf.as_mut_ptr() as *mut _);
+    if e != NVRTC_SUCCESS {
+      return Err(e);
+    }
+    Ok(())
   }
 }
 

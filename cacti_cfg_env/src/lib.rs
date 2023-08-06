@@ -24,6 +24,7 @@ pub struct CfgEnv {
   pub debug_accumulate: i8,
   pub debug_apply: i8,
   pub debug:      i8,
+  pub devel_dump: bool,
 }
 
 impl CfgEnv {
@@ -104,6 +105,9 @@ impl CfgEnv {
         Err(_) => 1
       })
       .unwrap_or_else(|_| 0);
+    let devel_dump = var("CACTI_DEVEL_DUMP")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     if !silent && debug >= 0 {
       for p in cabalpath.iter() {
         println!("INFO:  cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
@@ -123,8 +127,15 @@ impl CfgEnv {
       debug_accumulate,
       debug_apply,
       debug,
+      devel_dump,
     }
   }
+}
+
+pub fn cfg_devel_dump() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.devel_dump
+  })
 }
 
 pub fn cfg_info() -> bool {

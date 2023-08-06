@@ -10,6 +10,7 @@ pub const CUDA_ERROR_OUT_OF_MEMORY: CUresult = 2;
 pub const CUDA_ERROR_DEINITIALIZED: CUresult = 4;
 pub const CUDA_ERROR_NO_DEVICE: CUresult = 100;
 pub const CUDA_ERROR_INVALID_CONTEXT: CUresult = 201;
+pub const CUDA_ERROR_NOT_FOUND: CUresult = 500;
 pub const CUDA_ERROR_ILLEGAL_ADDRESS: CUresult = 700;
 pub const CUDA_ERROR_MISALIGNED_ADDRESS: CUresult = 716;
 pub const CUDA_ERROR_UNKNOWN: CUresult = 999;
@@ -114,6 +115,8 @@ pub type cudaStream_t = CUstream;
 pub type cublasStatus_t = c_int;
 
 pub type nvrtcResult = c_int;
+
+pub const NVRTC_SUCCESS: c_int = 0;
 
 #[repr(C)]
 pub struct _nvrtcProgram([u8; 0]);

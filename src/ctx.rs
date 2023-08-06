@@ -645,6 +645,26 @@ impl Ctx {
     }
   }
 
+  pub fn alias_view_proj(&self, og: CellPtr, mask: &[bool]) -> CellPtr {
+    let mut env = self.env.borrow_mut();
+    match env._lookup_view(og) {
+      Err(_) => panic!("bug"),
+      Ok(mut e) => {
+        let vop = CellViewOp::proj(mask);
+        e.view_mut().vlog.push(vop.clone());
+        let new_ty = match e.view().type_eval(&e.root_ty) {
+          Err(_) => unimplemented!(),
+          Ok(ty) => ty
+        };
+        let x = self.ctr.fresh_cel();
+        env.insert_alias(x, CellAlias::View(vop), new_ty, og);
+        let spine = self.spine.borrow();
+        spine.alias(x, og);
+        x
+      }
+    }
+  }
+
   pub fn const_(&self, og: CellPtr) -> CellPtr {
     let x = self.ctr.fresh_cel();
     let mut env = self.env.borrow_mut();
