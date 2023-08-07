@@ -255,6 +255,7 @@ pub trait ThunkSpec {
   fn debug_name(&self) -> Option<&'static str> { None }
   fn cost_r0(&self) -> Option<ThunkCostR0> { None }
   fn arity(&self) -> Option<(u16, u16)>;
+  fn param_count(&self) -> u16;
   //fn spine_type(&self) -> ThunkSpineType { unimplemented!(); }
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
@@ -271,6 +272,7 @@ pub trait ThunkSpec_ {
   fn debug_name(&self) -> Option<&'static str>;
   fn cost_r0(&self) -> Option<ThunkCostR0>;
   fn arity(&self) -> Option<(u16, u16)>;
+  fn param_count(&self) -> u16;
   //fn spine_type(&self) -> ThunkSpineType;
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
@@ -304,6 +306,10 @@ impl<T: ThunkSpec + Sized + Eq + Hash + Any> ThunkSpec_ for T {
 
   fn arity(&self) -> Option<(u16, u16)> {
     ThunkSpec::arity(self)
+  }
+
+  fn param_count(&self) -> u16 {
+    ThunkSpec::param_count(self)
   }
 
   /*fn spine_type(&self) -> ThunkSpineType {
@@ -402,6 +408,7 @@ pub trait FutharkThunkSpec {
   fn arity(&self) -> Option<(u16, u16)> { None }
   //fn abi(&self) -> FutAbi;
   fn abi_param(&self, _param: &mut [FutAbiScalar]) -> usize { 0 }
+  fn param_count(&self) -> u16 { 0 }
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr>;
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr>;
   fn set_out_dim(&self, _arg: &[Dim], _out: Dim) -> Result<(), ThunkDimErr> { Err(ThunkDimErr::Immutable) }
@@ -423,6 +430,10 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
     /*let abi = FutharkThunkSpec::abi(self);
     (abi.arityin, abi.arityout)*/
     FutharkThunkSpec::arity(self)
+  }
+
+  fn param_count(&self) -> u16 {
+    FutharkThunkSpec::param_count(self)
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -661,7 +672,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
   }
 }
 
-pub trait FutharkNumExt {
+/*pub trait FutharkNumExt {
   fn as_any(&self) -> &dyn Any;
   fn dtype(&self) -> Dtype;
 }
@@ -707,7 +718,7 @@ impl FutharkNumFormatter {
       _ => panic!("bug")
     }
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct FutharkNdBroadcastMap2MonomorphicSpec {

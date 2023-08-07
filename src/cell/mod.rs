@@ -55,6 +55,12 @@ impl AsRef<CellPtr> for CellPtr {
   }
 }
 
+impl CellDeref for CellPtr {
+  fn _deref(&self) -> CellPtr {
+    *self
+  }
+}
+
 impl Debug for CellPtr {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
     write!(f, "CellPtr({})", self.raw_)
@@ -133,6 +139,18 @@ impl Deref for StableCell {
 
   fn deref(&self) -> &CellPtr {
     self.as_ptr_ref()
+  }
+}
+
+impl<'a> CellDeref for &'a StableCell {
+  fn _deref(&self) -> CellPtr {
+    *self.as_ptr_ref()
+  }
+}
+
+impl CellDeref for StableCell {
+  fn _deref(&self) -> CellPtr {
+    *self.as_ptr_ref()
   }
 }
 
@@ -640,7 +658,19 @@ impl CellDeref for CellViewHandle_ {
   }
 }
 
-#[derive(Clone, Copy)]
+impl<'a> CellDeref for &'a CellViewHandle_ {
+  fn _deref(&self) -> CellPtr {
+    CellPtr::from_unchecked(self.0.len() as _)
+  }
+}
+
+impl<'a> CellDeref for &'a mut CellViewHandle_ {
+  fn _deref(&self) -> CellPtr {
+    CellPtr::from_unchecked(self.0.len() as _)
+  }
+}
+
+/*#[derive(Clone, Copy)]
 #[repr(C)]
 pub struct CellViewHandleEx(usize, usize);
 
@@ -670,7 +700,7 @@ impl CellDeref for CellViewHandleEx {
     //CellPtr::from_unchecked(self.0 as i32)
     CellPtr::from_unchecked(self.1 as i64)
   }
-}
+}*/
 
 /*#[derive(Clone, Debug)]
 pub struct CellView(pub CellPtr, pub Vec<CellVOp>);
@@ -1221,6 +1251,14 @@ impl ScalarVal_ {
       ScalarVal_::F64(_) => Dtype::Fp64,
       ScalarVal_::F32(_) => Dtype::Fp32,
       ScalarVal_::F16(_) => Dtype::Fp16,
+      ScalarVal_::I64(_) => Dtype::Int64,
+      ScalarVal_::I32(_) => Dtype::Int32,
+      ScalarVal_::I16(_) => Dtype::Int16,
+      ScalarVal_::I8(_) => Dtype::Int8,
+      ScalarVal_::U64(_) => Dtype::UInt64,
+      ScalarVal_::U32(_) => Dtype::UInt32,
+      ScalarVal_::U16(_) => Dtype::UInt16,
+      ScalarVal_::U8(_) => Dtype::UInt8,
       ScalarVal_::Bot => Dtype::_Bot,
       _ => unimplemented!()
     }
@@ -1321,6 +1359,18 @@ impl IntoScalarValExt for f64 {
 
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F64(self.into())
+  }
+}
+
+impl IntoScalarValExt for i32 {
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    ScalarVal_::I32(self)
+  }
+}
+
+impl IntoScalarValExt for i64 {
+  fn into_scalar_val_(self) -> ScalarVal_ {
+    ScalarVal_::I64(self)
   }
 }
 

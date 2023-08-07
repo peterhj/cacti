@@ -4,8 +4,6 @@ use crate::librarium::lm::*;
 use crate::util::cell::*;
 use crate::util::pickle::*;
 
-use std::borrow::{Borrow};
-
 // This implementation of the llama architecture is derived
 // (with our own simplifications/modifications/optimizations)
 // from the model code by Eleuther/HuggingFace:
@@ -246,7 +244,7 @@ impl Llama {
     self.sin.as_ref().unwrap().cache();
   }
 
-  pub fn apply<X: Borrow<CellPtr>, Y: Borrow<CellPtr>>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
+  pub fn apply<X: CellDeref, Y: CellDeref>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
     let block_causal_attention_mask = |x: CellPtr| {
       x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
     };
@@ -292,7 +290,7 @@ impl Llama {
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
-    let in_tok = (*in_tok.borrow()).const_();
+    let in_tok = in_tok._deref().const_();
     let mut stream = in_tok;
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
@@ -475,15 +473,15 @@ impl LlamaCached {
     }
   }
 
-  /*pub fn apply<X: Borrow<CellPtr>>(&self, in_tok: X) -> LanguageModelDeployOut {
+  /*pub fn apply<X: CellDeref>(&self, in_tok: X) -> LanguageModelDeployOut {
     unimplemented!();
   }*/
 
-  pub fn apply<X: Borrow<CellPtr>>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+  /*pub fn apply<X: CellDeref>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
     unimplemented!();
-  }
+  }*/
 
-  /*pub fn apply<X: Borrow<CellPtr>>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+  pub fn apply<X: CellDeref>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
@@ -495,10 +493,8 @@ impl LlamaCached {
     let rms_norm_eps = self.cfg.rms_norm_eps;
     let diff_seq_len = next_seq_len - prev_seq_len;
     assert!(diff_seq_len > 0);
-    let block_causal_attention_mask = |x: CellPtr| {
+    /*let block_causal_attention_mask = |x: CellPtr| {
       x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
-    };
-    /*let row_causal_attention_mask = |x: CellPtr| {
     };*/
     let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
       let x = x.new_shape([1 * diff_seq_len, num_head * head_dim]);
@@ -515,11 +511,11 @@ impl LlamaCached {
       let (lx, rx) = x.inner_split(xty.inner_len() / 2);
       (-rx).inner_concat(lx)
     };*/
+    let cos = self.cos.as_ref().unwrap().clone()
+             .new_shape([seq_cap, 1, head_dim]);
+    let sin = self.sin.as_ref().unwrap().clone()
+             .new_shape([seq_cap, 1, head_dim]);
     let symplectic_embed = |x: CellPtr| {
-      let cos = self.cos.as_ref().unwrap()
-               .new_shape([seq_cap, 1, head_dim]);
-      let sin = self.sin.as_ref().unwrap()
-               .new_shape([seq_cap, 1, head_dim]);
       let y = (x * cos[(prev_seq_len .. next_seq_len, .., ..)].const_())
             + (inner_symplectic_map(x) * sin[(prev_seq_len .. next_seq_len, .., ..)].const_());
       y
@@ -529,9 +525,9 @@ impl LlamaCached {
     //let mut stream = in_tok;
     let mut stream = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      let in_tok = &(*in_tok[i as usize].borrow())[(.., prev_seq_len .. next_seq_len)];
+      let in_tok = &in_tok[i as usize]._deref()[(.., prev_seq_len .. next_seq_len)];
       stream.push(self.embed.outer_select(in_tok)
-                 .new_shape([1, diff_seq_len, num_head, head_dim]);
+                 .new_shape([1, diff_seq_len, num_head, head_dim]));
     }
     for ell in 0 .. num_layer as usize {
       // FIXME
@@ -546,14 +542,14 @@ impl LlamaCached {
               .matmul(false, &self.layers[ell].q, true)
               .new_shape([1, diff_seq_len, num_head, head_dim])
                );
-        &mut self.states[ell].k_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
+        self.states[ell].k_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
             += symplectic_embed(
                pre_nrm
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].k, true)
               .new_shape([1, diff_seq_len, num_head, head_dim])
                );
-        &mut self.states[ell].v_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
+        self.states[ell].v_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
             += pre_nrm
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].v, true)
@@ -562,24 +558,23 @@ impl LlamaCached {
                q_proj
               .block_matmul_scale(
                    false,
-                   &self.states[ell].k_cache[(i + i + 1, .. /*next_seq_len*/, .., ..)],
+                   &self.states[ell].k_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
                    true,
                    1.0 / (head_dim as f32).sqrt()
                );
-        // FIXME: row-based causal mask.
-        let attn = _;
-        let attn = inner_softmax(attn)
+        let attn = row_causal_attention_mask(attn, prev_seq_len)
+                  .inner_softmax()
                   .cast(f16::dtype());
         let v_attn =
                 attn
                .block_matmul(
                     false,
-                    self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)]
+                    &self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
                     false
                 )
                .new_shape([diff_seq_len, num_head * head_dim]);
         let o_proj = v_attn.matmul(false, &self.layers[ell].o, true);
-        stream[i as usize] = stream[i] + o_proj;
+        stream[i as usize] = stream[i as usize] + o_proj;
         let post_nrm = rms_norm(&stream[i as usize], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
         let up_proj = post_nrm
                      .matmul(false, &self.layers[ell].up, true);
@@ -595,6 +590,7 @@ impl LlamaCached {
     // TODO
     let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
     let mut out_lm_prob = Vec::with_capacity(ubat_sz as usize);
+    let mut out_lm_tok = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
       stream[i as usize] = rms_norm(&stream[i as usize], &self.head_norm, rms_norm_eps, f16::dtype());
       out_lm_logit.push(stream[i as usize]
@@ -606,21 +602,21 @@ impl LlamaCached {
                       .inner_softmax()
                       .keep());
       out_lm_tok.push(out_lm_logit[i as usize]
-                     .arg_max()
+                     .inner_arg_max()
                      .cast(u16::dtype())
                      .keep());
-      &mut (*in_tok[i as usize].borrow())[(.., next_seq_len .. next_seq_len + 1)]
+      in_tok[i as usize]._deref()[(.., next_seq_len .. next_seq_len + 1)]
           += &out_lm_tok[i as usize][(.., next_seq_len - 1 .. next_seq_len)];
     }
     LanguageModelBatchDeployOut{out_lm_logit, out_lm_prob, out_lm_tok}
-  }*/
+  }
 }
 
 #[track_caller]
-pub fn inner_symplectic_map<X: Borrow<CellPtr>>(x: X) -> CellPtr {
+pub fn inner_symplectic_map<X: CellDeref>(x: X) -> CellPtr {
   panick_wrap(|| {
     assert!(ctx_clean_arg());
-    ctx_push_cell_arg(*x.borrow());
+    ctx_push_cell_arg(x._deref());
     ctx_pop_thunk(InnerSymplecticMapFutThunkSpec)
   })
 }
@@ -692,6 +688,69 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
             arg[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         ));
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+    code.into()
+  }
+}
+
+// TODO
+
+#[track_caller]
+pub fn row_causal_attention_mask<X: CellDeref>(x: X, initial_row: i64) -> CellPtr {
+  panick_wrap(|| {
+    assert!(ctx_clean_arg());
+    ctx_push_cell_arg(x._deref());
+    ctx_push_scalar_param(initial_row);
+    ctx_pop_thunk(RowCausalAttentionMaskFutThunkSpec)
+  })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct RowCausalAttentionMaskFutThunkSpec;
+
+impl FutharkThunkSpec for RowCausalAttentionMaskFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.row_causal_attention_mask")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn param_count(&self) -> u16 {
+    1
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(arg[0])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(arg[0].clone())
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkThunkGenErr> {
+    let mut code = FutharkThunkGenCode::default();
+    code.abi.arityout = 1;
+    code.abi.set_out(0, FutharkArrayRepr::Nd);
+    code.abi.arityin = 1;
+    code.abi.set_arg(0, FutharkArrayRepr::Nd);
+    code.abi.param_ct = 1;
+    code.abi.set_param(0, FutharkParam::Spec, FutAbiScalarType::I64);
+    match out[0].ndim {
+      4 => {
+        code.cfg.emit_arg_shapes = true;
+        code.append(format!(r"let row_idxs = iota {{%0.s[1]}} in"));
+        code.append(format!(r"let col_idxs = iota {{%0.s[3]}} in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map2 (\row_idx, t2 -> map (\t3 -> map2 (\col_idx, u -> if (row_idx + {{%param[0]}}) <= col_idx then u else 0) col_idxs t3) t2) row_idxs t1) {{%0}} in"));
       }
       _ => {
         unimplemented!();

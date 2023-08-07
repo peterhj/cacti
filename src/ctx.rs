@@ -665,6 +665,26 @@ impl Ctx {
     }
   }
 
+  pub fn alias_view_swap(&self, og: CellPtr, ld: i8, rd: i8) -> CellPtr {
+    let mut env = self.env.borrow_mut();
+    match env._lookup_view(og) {
+      Err(_) => panic!("bug"),
+      Ok(mut e) => {
+        let vop = CellViewOp::swap(ld, rd);
+        e.view_mut().vlog.push(vop.clone());
+        let new_ty = match e.view().type_eval(&e.root_ty) {
+          Err(_) => unimplemented!(),
+          Ok(ty) => ty
+        };
+        let x = self.ctr.fresh_cel();
+        env.insert_alias(x, CellAlias::View(vop), new_ty, og);
+        let spine = self.spine.borrow();
+        spine.alias(x, og);
+        x
+      }
+    }
+  }
+
   pub fn const_(&self, og: CellPtr) -> CellPtr {
     let x = self.ctr.fresh_cel();
     let mut env = self.env.borrow_mut();
@@ -675,7 +695,7 @@ impl Ctx {
   }
 }
 
-pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
+/*pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let x = env.snapshot(&ctx.ctr, og);
@@ -683,12 +703,14 @@ pub fn ctx_snapshot(og: CellPtr) -> CellPtr {
     spine.snapshot(x, og);
     x
   })
-}
+}*/
 
 pub fn ctx_clean_arg() -> bool {
   TL_CTX.with(|ctx| {
-    ctx.thunkenv.borrow().arg.is_empty()/* &&
-    ctx.out.borrow().is_empty()*/
+    let thunkenv = ctx.thunkenv.borrow();
+    thunkenv.arg.is_empty()
+    && thunkenv.param.is_empty()
+    /*&& thunkenv.out.is_empty()*/
   })
 }
 
@@ -723,6 +745,14 @@ pub fn ctx_push_cell_arg(x: CellPtr) {
         ctx.thunkenv.borrow_mut().arg.push((x, xclk))
       }
     }
+  })
+}
+
+pub fn ctx_push_scalar_param<T: IntoScalarValExt>(x: T) -> ScalarVal_ {
+  TL_CTX.with(|ctx| {
+    let val = x.into_scalar_val_();
+    ctx.thunkenv.borrow_mut().param.push(val);
+    val
   })
 }
 
@@ -793,7 +823,9 @@ pub fn ctx_pop_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out_ty: CellType) -> Cel
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(y, y, yclk, tp, arg);
+    let mut param = Vec::new();
+    swap(&mut param, &mut ctx.thunkenv.borrow_mut().param);
+    ctx.thunkenv.borrow_mut().update(y, y, yclk, tp, arg, param);
     y
   })
 }
@@ -871,7 +903,9 @@ pub fn ctx_pop_apply_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr, out_
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
+    let mut param = Vec::new();
+    swap(&mut param, &mut ctx.thunkenv.borrow_mut().param);
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg, param);
   })
 }
 
@@ -944,7 +978,9 @@ pub fn ctx_pop_initialize_thunk_<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr,
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
+    let mut param = Vec::new();
+    swap(&mut param, &mut ctx.thunkenv.borrow_mut().param);
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg, param);
   })
 }
 
@@ -999,7 +1035,9 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
     let yclk = spine._version(y).unwrap();
     let mut arg = Vec::new();
     swap(&mut arg, &mut ctx.thunkenv.borrow_mut().arg);
-    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg);
+    let mut param = Vec::new();
+    swap(&mut param, &mut ctx.thunkenv.borrow_mut().param);
+    ctx.thunkenv.borrow_mut().update(yroot, y, yclk, tp, arg, param);
   })
 }
 
@@ -1066,6 +1104,7 @@ pub struct ThunkEnvEntry {
 pub struct ThunkClosure {
   pub pthunk:   ThunkPtr,
   pub arg:      Vec<(CellPtr, Clock)>,
+  pub param:    Vec<ScalarVal_>,
   pub out:      CellPtr,
   pub pmach:    PMach,
 }
@@ -1076,8 +1115,8 @@ pub struct CtxThunkEnv {
   pub thunkidx: HashMap<(u16, u16, Vec<Dim>, ThunkKey, ), ThunkPtr>,
   pub update:   HashMap<(CellPtr, Clock), ThunkClosure>,
   pub arg:      Vec<(CellPtr, Clock)>,
-  pub accumulate_in_place: Cell<bool>,
-  pub assume_uninit_zero: Cell<bool>,
+  pub param:    Vec<ScalarVal_>,
+  //pub out:      Vec<(CellPtr, Clock)>,
 }
 
 impl CtxThunkEnv {
@@ -1086,15 +1125,7 @@ impl CtxThunkEnv {
     //self.update.clear();
   }
 
-  pub fn _set_accumulate_in_place(&self, flag: bool) {
-    self.accumulate_in_place.set(flag);
-  }
-
-  pub fn _set_assume_uninit_zero(&self, flag: bool) {
-    self.assume_uninit_zero.set(flag);
-  }
-
-  pub fn update(&mut self, yroot: CellPtr, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>) {
+  pub fn update(&mut self, yroot: CellPtr, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>, param: Vec<ScalarVal_>) {
     match self.thunktab.get(&tp) {
       None => panic!("bug"),
       Some(te) => {
@@ -1103,7 +1134,7 @@ impl CtxThunkEnv {
         assert_eq!(1, te.pthunk.rar);
         let pmach = TL_CTX.with(|ctx| ctx.ctlstate.primary.get())
             .unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
-        let tclo = ThunkClosure{pthunk: tp, arg, out: y, pmach};
+        let tclo = ThunkClosure{pthunk: tp, arg, param, out: y, pmach};
         self.update.insert((yroot, yclk), tclo);
       }
     }

@@ -63,4 +63,5 @@ pub type LanguageModelBatchDeployOut = LanguageModelBatchDeployOutput;
 pub struct LanguageModelBatchDeployOutput {
   pub out_lm_logit: Vec<StableCell>,
   pub out_lm_prob: Vec<StableCell>,
+  pub out_lm_tok: Vec<StableCell>,
 }

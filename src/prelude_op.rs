@@ -1,6 +1,7 @@
 pub use crate::ctx::{
   ctx_clean_arg,
   ctx_push_cell_arg,
+  ctx_push_scalar_param,
   ctx_pop_thunk,
 };
 pub use crate::panick::{
@@ -12,10 +13,14 @@ pub use crate::cell::{
 };
 pub use crate::thunk::{
   FutharkArrayRepr,
+  FutharkParam,
   FutharkThunkSpec,
   FutharkThunkGenCode,
   FutharkThunkGenErr,
   ThunkCostR0,
   ThunkDimErr,
   ThunkTypeErr,
+};
+pub use futhark_ffi::{
+  AbiScalarType as FutAbiScalarType,
 };

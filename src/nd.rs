@@ -1,4 +1,4 @@
-use crate::cell::{CellPtr, CellViewHandle};
+use crate::cell::{CellPtr, StableCell, CellDeref, CellViewHandle};
 use crate::ctx::{TL_CTX, Ctx};
 use crate::panick::{panick_wrap};
 
@@ -382,6 +382,32 @@ macro_rules! index {
           ctx.alias_view_slice(this, &idx as &[_])
         }));
         CellViewHandle::_from2_mut(self, view)
+      }
+    }
+
+    impl Index<$idxty> for StableCell {
+      type Output = CellViewHandle;
+
+      #[track_caller]
+      fn index(&self, idx: $idxty) -> &CellViewHandle {
+        let this = self._deref();
+        let view = panick_wrap(|| TL_CTX.with(|ctx| {
+          let idx = ctx._convert_index(this, idx);
+          ctx.alias_view_slice(this, &idx as &[_])
+        }));
+        CellViewHandle::_from2(self.as_ptr_ref(), view)
+      }
+    }
+
+    impl IndexMut<$idxty> for StableCell {
+      #[track_caller]
+      fn index_mut(&mut self, idx: $idxty) -> &mut CellViewHandle {
+        let this = self._deref();
+        let view = panick_wrap(|| TL_CTX.with(|ctx| {
+          let idx = ctx._convert_index(this, idx);
+          ctx.alias_view_slice(this, &idx as &[_])
+        }));
+        CellViewHandle::_from2_mut(self.as_ptr_mut(), view)
       }
     }
   };

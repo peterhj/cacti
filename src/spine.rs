@@ -486,6 +486,10 @@ impl SpineEnv {
         log.borrow_mut()[sp as usize] = SpineEntry::Add2(mx, k, kclk, v, vclk);
       }
       SpineEntry::AdjMap(allsrc, sink) => {
+        if cfg_debug() {
+        println!("DEBUG: SpineEnv::step: AdjMap (allsrc={:?} sink={:?})",
+            allsrc, sink);
+        }
         let self_ = this.borrow();
         //match self_.map.range(&(sink, CellPtr::nil(), TotalClock::default()) .. ).next() {}
         match self_.map.range(&(sink, CellPtr::nil()) .. ).next() {
@@ -657,10 +661,12 @@ impl SpineEnv {
                         }
                         arg_adj.reverse();
                       }
+                      TL_CTX.with(|ctx| {
+                        ctx.ctlstate._set_accumulate_in_place(true);
+                        ctx.ctlstate._set_assume_uninit_zero(true);
+                      });
                       {
                         let thunkenv = thunkenv.map(|env| env.borrow()).unwrap();
-                        thunkenv._set_accumulate_in_place(true);
-                        thunkenv._set_assume_uninit_zero(true);
                         match thunkenv.thunktab.get(&th) {
                           None => panic!("bug"),
                           Some(te) => {
@@ -681,11 +687,10 @@ impl SpineEnv {
                           }
                         }
                       }
-                      {
-                        let thunkenv = thunkenv.map(|env| env.borrow()).unwrap();
-                        thunkenv._set_accumulate_in_place(false);
-                        thunkenv._set_assume_uninit_zero(false);
-                      }
+                      TL_CTX.with(|ctx| {
+                        ctx.ctlstate._set_accumulate_in_place(false);
+                        ctx.ctlstate._set_assume_uninit_zero(false);
+                      });
                       for (&(x, xclk), &dx) in arg.iter().zip(arg_adj.iter()).rev() {
                         if dx.is_nil() {
                           if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap:   skip: x={:?} dx={:?}", x, dx); }
@@ -708,11 +713,12 @@ impl SpineEnv {
               }
             }
             SpineEntry::Accumulate(y, yclk, th) => {
-              // TODO TODO
-              unimplemented!();
+              println!("ERROR: SpineEnv::step: unimplemented: autodiff through Accumulate (y={:?} yclk={:?} th={:?})",
+                  y, yclk, th);
+              panic!();
             }
             SpineEntry::UnsafeWrite(y, yclk, th) => {
-              println!("ERROR: SpineEnv::step: cannot differentiate through UnsafeWrite (y={:?} yclk={:?} th={:?})",
+              println!("ERROR: SpineEnv::step: cannot autodiff through UnsafeWrite (y={:?} yclk={:?} th={:?})",
                   y, yclk, th);
               panic!();
             }
@@ -730,8 +736,9 @@ impl SpineEnv {
         if cfg_debug() { println!("DEBUG: SpineEnv::step: AdjMap: done"); }
       }
       SpineEntry::DualMap(allsink, src) => {
-        // FIXME FIXME
-        unimplemented!();
+        println!("ERROR: SpineEnv::step: unimplemented: jacobian-vector product via DualMap (allsink={:?} src={:?})",
+            allsink, src);
+        panic!();
       }
       SpineEntry::Cache(x, _xclk) => {
         let mut self_ = this.borrow_mut();

@@ -749,7 +749,6 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
     //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
     let out = FutharkThunkSpec::out_dim(self, arg).map_err(|e| e.into_gen())?;
-    //let fmt = FutharkNumFormatter::default();
     let mut code = FutharkThunkGenCode::default();
     code.abi.arityout = 1;
     code.abi.set_out(0, FutharkArrayRepr::Nd);
@@ -1241,7 +1240,6 @@ impl FutharkThunkSpec for AddScalarFutThunkSpec {
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //let fmt = FutharkNumFormatter::default();
     FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u + {}", self.val.format_futhark()))
   }
 
@@ -1464,7 +1462,6 @@ impl FutharkThunkSpec for LSubScalarFutThunkSpec {
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //let fmt = FutharkNumFormatter::default();
     FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} - u", self.val.format_futhark()))
   }
 
@@ -1767,7 +1764,6 @@ impl FutharkThunkSpec for MulScalarFutThunkSpec {
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
-    //let fmt = FutharkNumFormatter::default();
     FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> u * {}", self.val.format_futhark()))
   }
 
@@ -1984,7 +1980,6 @@ impl FutharkThunkSpec for LDivScalarFutThunkSpec {
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: param.
-    let fmt = FutharkNumFormatter::default();
     FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> {} / u", self.val.format_futhark()))
   }
 
@@ -3961,12 +3956,16 @@ impl ThunkSpec for MatrixMulThunkSpec {
     Some("matmul")
   }
 
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Time)
+  }
+
   fn arity(&self) -> Option<(u16, u16)> {
     Some((2, 1))
   }
 
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Time)
+  fn param_count(&self) -> u16 {
+    0
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -4027,12 +4026,16 @@ impl ThunkSpec for BlockMatrixMulThunkSpec {
     Some("block_matmul")
   }
 
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Time)
+  }
+
   fn arity(&self) -> Option<(u16, u16)> {
     Some((2, 1))
   }
 
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Time)
+  fn param_count(&self) -> u16 {
+    0
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
@@ -4758,12 +4761,16 @@ impl ThunkSpec for MemcpyThunkSpec {
     Some("memcpy")
   }
 
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
   fn arity(&self) -> Option<(u16, u16)> {
     Some((1, 1))
   }
 
-  fn cost_r0(&self) -> Option<ThunkCostR0> {
-    Some(ThunkCostR0::Space)
+  fn param_count(&self) -> u16 {
+    0
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
