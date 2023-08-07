@@ -587,7 +587,7 @@ impl SpineEnv {
                                 drop(self_);
                                 //let x_ty = ctx.env.lookup_ref(x).map(|e| e.ty.clone()).unwrap();
                                 let env = ctx.env.borrow();
-                                match env._lookup_ref_(x) {
+                                match env._lookup_view(x) {
                                   Err(_) => panic!("bug"),
                                   Ok(e) => {
                                     let x_ty = e.ty.clone();
@@ -1395,12 +1395,21 @@ impl Spine {
         //unimplemented!();
       }
       SpineEntry::Cache(x, _xclk) => {
-        match env._lookup_ref_(x) {
+        match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let base_clk: Clock = self.ctr.into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.init_once();
+            // FIXME: want to put this logic after clock_sync_rec,
+            // but fails the borrowchecker.
+            match e.cel_ {
+              &Cell_::Phy(_, ref clo, _) |
+              &Cell_::Cow(_, ref clo, _) => {
+                clo.borrow_mut().init_once(next_clk, ThunkPtr::opaque());
+              }
+              _ => panic!("bug")
+            }
             if prev_clk >= next_clk {
               panic!("bug");
             } else if prev_clk < next_clk {
@@ -1419,7 +1428,7 @@ impl Spine {
         if cfg_debug() {
         println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
             ctlp, retp, x, loc, item.key());
-        match env._lookup_ref_(x) {
+        match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
@@ -1454,7 +1463,7 @@ impl Spine {
         }
         if Some(ctlp) == retp {
           if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   ...resume"); }
-          let (prev_xclk, xclk) = match env._lookup_ref_(x) {
+          let (prev_xclk, xclk) = match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               let base_clk: Clock = self.ctr.into();
@@ -1476,6 +1485,7 @@ impl Spine {
               (prev_clk, next_clk)
             }
           };
+          // FIXME: view.
           match env.pwrite_ref_(x, xclk, loc) {
             Err(_) => panic!("bug"),
             Ok(e) => {
@@ -1529,7 +1539,7 @@ impl Spine {
         //unimplemented!();
       }
       SpineEntry::PushSeal(x, _xclk) => {
-        match env._lookup_ref_(x) {
+        match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             //e.state().flag.set_seal();
@@ -1540,7 +1550,7 @@ impl Spine {
       }
       SpineEntry::Initialize(x, _xclk, th) => {
         // FIXME FIXME
-        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1568,7 +1578,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.initialize(ctr, env, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.initialize(ctr, env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Initialize: thunk not implemented");
@@ -1580,7 +1590,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_ref_(x) {
+          match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
@@ -1595,7 +1605,7 @@ impl Spine {
         }
       }
       SpineEntry::Apply(x, _xclk, th) => {
-        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1629,7 +1639,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.apply(ctr, env, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.apply(ctr, env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Apply: thunk not implemented");
@@ -1641,7 +1651,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_ref_(x) {
+          match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
@@ -1656,7 +1666,7 @@ impl Spine {
         }
       }
       SpineEntry::Accumulate(x, _xclk, th) => {
-        let (xroot, prev_xclk, xclk) = match env._lookup_ref_(x) {
+        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1685,7 +1695,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.accumulate(ctr, env, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.accumulate(ctr, env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Accumulate: thunk not implemented");
@@ -1697,7 +1707,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_ref_(x) {
+          match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
@@ -1715,7 +1725,7 @@ impl Spine {
         unimplemented!();
       }
       SpineEntry::Seal(x) => {
-        match env._lookup_ref_(x) {
+        match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             assert_eq!(e.state().clk.ctr(), self.ctr);
@@ -1729,7 +1739,7 @@ impl Spine {
         unimplemented!();
       }
       SpineEntry::Unsync(x) => {
-        match env._lookup_ref_(x) {
+        match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             assert_eq!(e.state().clk.ctr(), self.ctr);

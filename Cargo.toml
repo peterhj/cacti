@@ -69,6 +69,10 @@ name = "boot_array"
 path = "tools/boot_array.rs"
 
 [[bin]]
+name = "boot_deploy"
+path = "tools/boot_deploy.rs"
+
+[[bin]]
 name = "boot_train"
 path = "tools/boot_train.rs"
 

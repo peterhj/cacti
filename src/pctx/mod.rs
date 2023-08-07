@@ -546,11 +546,18 @@ impl MemReg {
   }
 
   pub fn _as_slice_f32(&self) -> &[f32] {
+    assert_eq!(self.ptr as usize % 4, 0);
     unsafe { from_raw_parts(self.ptr as *const f32, self.sz / 4) }
   }
 
   pub fn _as_slice_i64(&self) -> &[i64] {
+    assert_eq!(self.ptr as usize % 8, 0);
     unsafe { from_raw_parts(self.ptr as *const i64, self.sz / 8) }
+  }
+
+  pub fn _as_slice_u16(&self) -> &[u16] {
+    assert_eq!(self.ptr as usize % 2, 0);
+    unsafe { from_raw_parts(self.ptr as *const u16, self.sz / 2) }
   }
 
   pub fn _debug_dump_f32(&self) {

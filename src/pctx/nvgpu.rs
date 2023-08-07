@@ -1013,7 +1013,14 @@ impl NvGpuMemPool {
     let q = Region{off: query_off, sz: 0};
     match self.alloc_index.borrow().range(q .. ).next() {
       None => {}
-      Some((&k, &v)) => if k.off == query_off {
+      Some((&k, &v)) => if k.off <= query_off && query_off < k.off + k.sz {
+        assert!(k.sz > 0);
+        return Some((k, Some(v)));
+      }
+    }
+    match self.alloc_index.borrow().range( .. q).rev().next() {
+      None => {}
+      Some((&k, &v)) => if k.off <= query_off && query_off < k.off + k.sz {
         assert!(k.sz > 0);
         return Some((k, Some(v)));
       }
@@ -1770,8 +1777,8 @@ impl NvGpuCopyKernel {
         src_arg.get() as *mut _,
         len_arg.get() as *mut _,
     ]);
-    // FIXME
-    self.func.launch_kernel([0, 0, 0], [1024, 1, 1], 0, &args, stream).unwrap();
+    let gridx = (len as u32 + 256 - 1) / 256;
+    self.func.launch_kernel([gridx, 1, 1], [256, 1, 1], 0, &args, stream).unwrap();
   }
 }
 
@@ -1779,6 +1786,7 @@ pub struct NvGpuCopyKernels {
   pub accumulate_1d_f32_idx32: Option<NvGpuCopyKernel>,
   pub accumulate_1d_f16_idx32: Option<NvGpuCopyKernel>,
   pub accumulate_1d_u16_idx32: Option<NvGpuCopyKernel>,
+  //pub strided_copy_2d_u32_idx32: Option<NvGpuCopyKernel>,
   //pub strided_accumulate_2d_f32_idx32: Option<NvGpuCopyKernel>,
   // TODO
 }
@@ -1800,18 +1808,6 @@ impl NvGpuCopyKernels {
       )),
     }
   }
-
-  /*pub fn accumulate_1d_f32_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
-    unimplemented!();
-  }
-
-  pub fn accumulate_1d_f16_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
-    unimplemented!();
-  }
-
-  pub fn accumulate_1d_u16_idx32(&self, dst_dptr: u64, src_dptr: u64, len: i32) {
-    unimplemented!();
-  }*/
 }
 
 /*pub struct GpuDryCtx {

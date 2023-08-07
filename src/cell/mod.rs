@@ -12,6 +12,7 @@ use crate::util::mmap::{MmapBuf};
 use crate::util::pickle::{TorchDtype};
 use cacti_cfg_env::*;
 
+use futhark_ffi::{AbiScalar as FutAbiScalar};
 use smol_str::{SmolStr};
 
 use std::any::{Any};
@@ -981,7 +982,18 @@ impl CellView {
             // FIXME: asserts below are kinda ad hoc.
             let outer = outer.unwrap_or(shape.len());
             for d in (0 .. shape.len()).rev() {
-              assert!(shape[d] + idx[d].start <= idx[d].end);
+              if !(idx[d].end <= shape[d] + idx[d].start) {
+                println!("DEBUG: CellView::eval_contiguous: Slice: root ty={:?}", root_ty);
+                println!("DEBUG: CellView::eval_contiguous: Slice: vlog   ={:?}", &self.vlog);
+                println!("DEBUG: CellView::eval_contiguous: Slice: offset ={:?}", &offset);
+                println!("DEBUG: CellView::eval_contiguous: Slice: shape  ={:?}", &shape);
+                println!("DEBUG: CellView::eval_contiguous: Slice: eoffset={:?}", &end_offset);
+                println!("DEBUG: CellView::eval_contiguous: Slice: rshape ={:?}", &root_shape);
+                println!("DEBUG: CellView::eval_contiguous: Slice: idx    ={:?}", idx);
+                println!("DEBUG: CellView::eval_contiguous: Slice: outer  ={:?}", outer);
+              }
+              assert!(idx[d].start <= idx[d].end);
+              assert!(idx[d].end <= shape[d] + idx[d].start);
               assert!(offset[d] + idx[d].start <= idx[d].end);
               if d <= outer {
                 shape[d] = idx[d].end - idx[d].start;
@@ -1045,6 +1057,23 @@ impl CellView {
       assert!(o2 >= 0);
       assert!(root_ds >= 0);
       assert!(o <= o2);
+      if !(o2 <= root_ds) {
+        // NB: this failure may indicate a user indexing bug.
+        println!("DEBUG: CellView::eval_contiguous:   root ty={:?}", root_ty);
+        println!("DEBUG: CellView::eval_contiguous:   rshape ={:?}", root_shape);
+        println!("DEBUG: CellView::eval_contiguous:   offset ={:?}", offset);
+        println!("DEBUG: CellView::eval_contiguous:   shape  ={:?}", shape);
+        println!("DEBUG: CellView::eval_contiguous:   eoffset={:?}", end_offset);
+        println!("DEBUG: CellView::eval_contiguous:   dtype  ={:?}", dtype);
+        println!("DEBUG: CellView::eval_contiguous:   flat   ={:?}", flat_len);
+        println!("DEBUG: CellView::eval_contiguous:   start  ={:?}", start);
+        println!("DEBUG: CellView::eval_contiguous:   fin    ={:?}", fin);
+        println!("DEBUG: CellView::eval_contiguous:   d      ={:?}", d);
+        println!("DEBUG: CellView::eval_contiguous:   ds     ={:?}", ds);
+        println!("DEBUG: CellView::eval_contiguous:   o      ={:?}", o);
+        println!("DEBUG: CellView::eval_contiguous:   o2     ={:?}", o2);
+        println!("DEBUG: CellView::eval_contiguous:   root_ds={:?}", root_ds);
+      }
       assert!(o2 <= root_ds);
       assert!(ds <= root_ds);
       flat_len *= ds as u64;
@@ -1260,6 +1289,24 @@ impl ScalarVal_ {
       ScalarVal_::U16(_) => Dtype::UInt16,
       ScalarVal_::U8(_) => Dtype::UInt8,
       ScalarVal_::Bot => Dtype::_Bot,
+      _ => unimplemented!()
+    }
+  }
+
+  pub fn to_abi_scalar(&self) -> FutAbiScalar {
+    match self {
+      &ScalarVal_::F64(x) => FutAbiScalar::F64(x.0.into()),
+      &ScalarVal_::F32(x) => FutAbiScalar::F32(x.0.into()),
+      &ScalarVal_::F16(x) => FutAbiScalar::F16(x.0.to_bits().into()),
+      &ScalarVal_::I64(x) => FutAbiScalar::I64(x.into()),
+      &ScalarVal_::I32(x) => FutAbiScalar::I32(x.into()),
+      &ScalarVal_::I16(x) => FutAbiScalar::I16(x.into()),
+      &ScalarVal_::I8(x) => FutAbiScalar::I8(x.into()),
+      &ScalarVal_::U64(x) => FutAbiScalar::U64(x.into()),
+      &ScalarVal_::U32(x) => FutAbiScalar::U32(x.into()),
+      &ScalarVal_::U16(x) => FutAbiScalar::U16(x.into()),
+      &ScalarVal_::U8(x) => FutAbiScalar::U8(x.into()),
+      &ScalarVal_::Bot => panic!("bug"),
       _ => unimplemented!()
     }
   }

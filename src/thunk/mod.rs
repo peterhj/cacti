@@ -342,16 +342,16 @@ impl<T: ThunkSpec + Sized + Eq + Hash + Any> ThunkSpec_ for T {
 }
 
 pub trait ThunkImpl {
-  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _args: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
-  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
-  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
+  fn apply(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], _args: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
+  fn accumulate(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
+  fn initialize(&self, _ctr: &CtxCtr, _env: &mut CtxEnv, _spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], _arg: &[(CellPtr, Clock)], _th: ThunkPtr, _out: CellPtr, _prev_oclk: Clock, _oclk: Clock) -> ThunkResult { ThunkErr::NotImpl.into() }
 }
 
 pub trait ThunkImpl_ {
   fn as_any(&self) -> &dyn Any;
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, args: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], args: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult;
 }
 
 impl<T: ThunkImpl + Any> ThunkImpl_ for T {
@@ -359,16 +359,16 @@ impl<T: ThunkImpl + Any> ThunkImpl_ for T {
     self
   }
 
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
-    ThunkImpl::apply(self, ctr, env, spec_, arg, th, out, prev_oclk, oclk)
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    ThunkImpl::apply(self, ctr, env, spec_, param, arg, th, out, prev_oclk, oclk)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
-    ThunkImpl::accumulate(self, ctr, env, spec_, arg, th, out, prev_oclk, oclk)
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    ThunkImpl::accumulate(self, ctr, env, spec_, param, arg, th, out, prev_oclk, oclk)
   }
 
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
-    ThunkImpl::initialize(self, ctr, env, spec_, arg, th, out, prev_oclk, oclk)
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    ThunkImpl::initialize(self, ctr, env, spec_, param, arg, th, out, prev_oclk, oclk)
   }
 }
 
@@ -457,18 +457,16 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
       None => unimplemented!(),
       Some(ar) => ar
     };
-    /*let mut abi = FutharkThunkSpec::abi(self);
-    assert_eq!(abi.space, FutAbiSpace::Unspec);*/
     let (arg_dim, out_dim) = (&spec_dim).split_at(lar as usize);
     assert_eq!(out_dim.len(), rar as usize);
     assert_eq!(arg_dim.len(), lar as usize);
-    //let np0 = abi.num_param();
+    /*//let np0 = abi.num_param();
     let np0 = 0;
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np0);
     //param.resize(np0, FutAbiScalar::Unspec);
-    assert_eq!(FutharkThunkSpec::abi_param(self, &mut param), np0);
-    //let mut tmp_abi = FutAbi::default();
-    let code = match FutharkThunkSpec::gen_futhark(self, /*&mut tmp_abi,*/ arg_dim, out_dim) {
+    assert_eq!(FutharkThunkSpec::abi_param(self, &mut param), np0);*/
+    let param_ct = FutharkThunkSpec::param_count(self);
+    let code = match FutharkThunkSpec::gen_futhark(self, arg_dim, out_dim) {
       Err(e) => {
         println!("DEBUG: ThunkSpec::gen_impl_: name={:?} arg={:?} out={:?}",
             FutharkThunkSpec::debug_name(self), arg_dim, out_dim);
@@ -477,11 +475,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
       }
       Ok(code) => code
     };
-    /*if code.cfg.emit_out0_shape_param {
-      for d in 0 .. out_dim[0].ndim {
-        abi.push_param(np0 as u16 + d as u16, FutAbiScalarType::I64);
-      }
-    }*/
+    assert_eq!(code.abi.param_ct, param_ct);
     let name = FutharkThunkSpec::debug_name(self);
     Some(match pmach {
       PMach::Smp => {
@@ -490,7 +484,8 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           //abi,
           lar,
           rar,
-          param,
+          param_ct,
+          //param,
           spec_dim,
           code,
           name,
@@ -509,7 +504,8 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
           //abi,
           lar,
           rar,
-          param,
+          param_ct,
+          //param,
           spec_dim,
           code,
           name,
@@ -535,10 +531,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         assert_eq!(1, primal_rar);
         assert_eq!(arg.len(), primal_lar as usize);
         assert_eq!(arg_adj.len(), primal_lar as usize);
-        /*let abi = FutharkThunkSpec::abi(self);
-        assert_eq!(1, abi.arityout);
-        assert_eq!(arg.len(), abi.arityin as usize);
-        assert_eq!(arg_adj.len(), abi.arityin as usize);*/
+        let primal_param_ct = FutharkThunkSpec::param_count(self);
         let mut dim = Vec::with_capacity((primal_lar + primal_rar) as usize);
         let mut ty_ = Vec::with_capacity((primal_lar + primal_rar) as usize);
         for &(x, _) in arg.iter() {
@@ -561,12 +554,11 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         assert_eq!(FutharkThunkSpec::abi_param(self, &mut param), np0);
         // FIXME: need to capture the out0 shape param in a closure.
         */
-        //let mut tmp_abi = abi.clone();
-        //let mut tmp_abi = FutAbi::default();
-        let mut code = match self.gen_futhark(/*&mut tmp_abi,*/ arg_dim, out_dim) {
+        let mut code = match self.gen_futhark(arg_dim, out_dim) {
           Err(e) => panic!("ERROR: failed to generate futhark thunk code: {:?}", e),
           Ok(code) => code
         };
+        assert_eq!(code.abi.param_ct, primal_param_ct);
         let restore_cfg = code.cfg;
         code.cfg.emit_primal_def = true;
         // FIXME
@@ -575,7 +567,7 @@ impl<T: FutharkThunkSpec> ThunkSpec for T {
         }*/
         //if cfg_debug() { println!("DEBUG: <FutharkThunkSpec as ThunkSpec>::pop_adj:   primal lar={} rar={}", primal_lar, primal_rar, ); }
         if cfg_debug() { println!("DEBUG: <FutharkThunkSpec as ThunkSpec>::pop_adj:   gen source..."); }
-        let (primal_genabi, primal_source) = code.gen_source(/*&abi,*/ primal_lar, primal_rar, &dim, out_mode, FutharkThunkGenConfig::default(), code.abi.clone())
+        let (primal_genabi, primal_source) = code.gen_source(primal_lar, primal_rar, primal_param_ct, &dim, out_mode, FutharkThunkGenConfig::default(), code.abi.clone())
           .map_err(|_| ThunkAdjErr::_Bot)?;
         if cfg_debug() { println!("DEBUG: <FutharkThunkSpec as ThunkSpec>::pop_adj:   primal genabi={:?}", &primal_genabi); }
         assert_eq!(primal_genabi.arityout, primal_rar);
@@ -1373,9 +1365,7 @@ impl FutharkThunkGenCode {
     self.body.push(line.into());
   }
 
-  //pub fn gen_source(&self, abi: &FutAbi, spec_dim: &[Dim], mode: ThunkMode, mut cfg: FutharkThunkGenConfig) -> Result<Vec<String>, ()> {}
-  pub fn gen_source(&self, /*abi: &FutAbi,*/ lar: u16, rar: u16, spec_dim: &[Dim], mode: ThunkMode, mut cfg: FutharkThunkGenConfig, mut genabi: FutharkThunkGenAbi) -> Result<(FutharkThunkGenAbi, Vec<String>), ()> {
-    // TODO
+  pub fn gen_source(&self, lar: u16, rar: u16, param_ct: u16, spec_dim: &[Dim], mode: ThunkMode, mut cfg: FutharkThunkGenConfig, mut genabi: FutharkThunkGenAbi) -> Result<(FutharkThunkGenAbi, Vec<String>), ()> {
     let mut warn = false;
     for k in 0 .. genabi.arityout {
       match genabi.get_out(k) {
@@ -1408,6 +1398,10 @@ impl FutharkThunkGenCode {
     cfg = self.cfg.merge(cfg);
     let mut pats = Vec::new();
     let mut reps = Vec::new();
+    for k in 0 .. param_ct {
+      pats.push(format!(r"{{%param[{}]}}", k));
+      reps.push(format!(r"param_{}", k));
+    }
     for k in 0 .. lar {
       pats.push(format!(r"{{%{}}}", k));
       reps.push(format!(r"x_{}", k));
@@ -1569,6 +1563,14 @@ impl FutharkThunkGenCode {
       let dim = spec_dim[k as usize];
       write!(&mut s, " (x_{}: {})", k, genabi._to_futhark_entry_arg_type(k, dim, cfg.emit_arg_shapes)).unwrap();
     }
+    for k in 0 .. param_ct {
+      match genabi.get_param(k) {
+        (FutharkParam::Spec, sty) => {
+          write!(&mut s, " (param_{}: {})", k, sty.format_futhark()).unwrap();
+        }
+        _ => unimplemented!()
+      }
+    }
     if rar == 1 {
       match mode {
         ThunkMode::Apply => {
@@ -1599,7 +1601,7 @@ impl FutharkThunkGenCode {
           let dim = spec_dim[lar as usize];
           if dim.ndim >= 1 && !cfg.emit_out0_shape {
             cfg.emit_out0_shape = true;
-            return self.gen_source(/*abi,*/ lar, rar, spec_dim, mode, cfg, genabi);
+            return self.gen_source(lar, rar, param_ct, spec_dim, mode, cfg, genabi);
           }
           let fty = if cfg.emit_out0_shape {
             genabi._to_futhark_entry_out0_type(0, dim)
@@ -1786,7 +1788,8 @@ pub struct FutharkThunkImpl<B: FutBackend> where FutharkThunkImpl<B>: FutharkThu
   //pub abi:      FutAbi,
   pub lar:  u16,
   pub rar:  u16,
-  pub param:    Vec<FutAbiScalar>,
+  pub param_ct: u16,
+  //pub param:    Vec<FutAbiScalar>,
   pub spec_dim: Vec<Dim>,
   pub code:     FutharkThunkGenCode,
   pub name:     Option<&'static str>,
@@ -2335,12 +2338,10 @@ impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: Futh
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, rst: Counter) {
     let gencfg = FutharkThunkGenConfig::default();
-    // FIXME: gen abi.
     if cfg_debug() { println!("DEBUG: FutharkThunkImpl::_try_build: name={:?}", self.name); }
-    //let source = self.code.gen_source(&self.abi, &self.spec_dim, mode, gencfg).unwrap();
-    let (genabi, source) = self.code.gen_source(/*&self.abi,*/ self.lar, self.rar, &self.spec_dim, mode, gencfg, self.code.abi.clone()).unwrap();
+    let (genabi, source) = self.code.gen_source(self.lar, self.rar, self.param_ct, &self.spec_dim, mode, gencfg, self.code.abi.clone()).unwrap();
     let mut config = FutConfig::default();
-    // FIXME FIXME: os-specific paths.
+    // FIXME: os-specific paths.
     config.cachedir = home_dir().unwrap().join(".cacti").join("cache");
     TL_CFG_ENV.with(|cfg| {
       if let Some(path) = cfg.cabalpath.first() {
@@ -2365,7 +2366,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
 }
 
 impl FutharkThunkImpl<MulticoreBackend> {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if _cfg_debug_mode(mode) {
     println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: name={:?} mode={:?}",
         spec_.debug_name(), mode);
@@ -2640,29 +2641,39 @@ impl FutharkThunkImpl<MulticoreBackend> {
       println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out_arr[{}]={:?}", k, arr.get_mut());
     }
     }
-    // FIXME: implicit output shape params during gen.
     let np = genabi.param_ct as usize;
-    let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
-    param.resize(np, FutAbiScalar::Unspec);
-    //spec_.set_param(&mut param);
-    let mut flat_out0_shape = false;
-    for pidx in 0 .. np {
-      match genabi.get_param(pidx as _) {
-        (FutharkParam::Out0Shape, FutAbiScalarType::I64) => {
-          match genabi.get_out(0) {
-            FutharkArrayRepr::Nd => {
-              param[pidx] = FutAbiScalar::I64(out_ty_[0].shape[pidx].into());
-            }
-            FutharkArrayRepr::Flat => {
-              assert!(!flat_out0_shape);
-              param[pidx] = FutAbiScalar::I64(out_ty_[0].flat_len().into());
-              flat_out0_shape = true;
-            }
-            _ => unimplemented!()
+    let mut param_buf: Vec<FutAbiScalar> = Vec::with_capacity(np);
+    param_buf.resize(np, FutAbiScalar::Unspec);
+    {
+      let mut spec_ct = 0;
+      let mut shape_idx = 0;
+      let mut flat_out0_shape = false;
+      for pidx in 0 .. np {
+        match genabi.get_param(pidx as _) {
+          (FutharkParam::Spec, sty) => {
+            let val = param[pidx].to_abi_scalar();
+            assert_eq!(sty, val.type_());
+            param_buf[pidx] = val;
+            spec_ct += 1;
           }
+          (FutharkParam::Out0Shape, FutAbiScalarType::I64) => {
+            match genabi.get_out(0) {
+              FutharkArrayRepr::Nd => {
+                param_buf[pidx] = FutAbiScalar::I64(out_ty_[0].shape[shape_idx].into());
+                shape_idx += 1;
+              }
+              FutharkArrayRepr::Flat => {
+                assert!(!flat_out0_shape);
+                param_buf[pidx] = FutAbiScalar::I64(out_ty_[0].flat_len().into());
+                flat_out0_shape = true;
+              }
+              _ => unimplemented!()
+            }
+          }
+          _ => unimplemented!()
         }
-        _ => unimplemented!()
       }
+      assert_eq!(spec_ct, param.len());
     }
     match mode {
       ThunkMode::Accumulate => {
@@ -2691,7 +2702,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
     }
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: enter kernel..."); }
     let eabi = genabi.to_eabi(FutAbiSpace::Default);
-    let o_ret = obj.enter_kernel(eabi, &param, &arg_arr, &out_arr);
+    let o_ret = obj.enter_kernel(eabi, &param_buf, &arg_arr, &out_arr);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: runtime error");
@@ -2979,25 +2990,25 @@ impl FutharkThunkImpl<MulticoreBackend> {
 }
 
 impl ThunkImpl for FutharkThunkImpl<MulticoreBackend> {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Initialize;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
 #[cfg(feature = "nvgpu")]
 impl FutharkThunkImpl<CudaBackend> {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if _cfg_debug_mode(mode) {
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: name={:?} mode={:?}",
         spec_.debug_name(), mode);
@@ -3286,7 +3297,41 @@ impl FutharkThunkImpl<CudaBackend> {
       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out_arr[{}]={:?}", k, arr.get_mut());
     }
     }
-    // FIXME: implicit output shape params during gen.
+    let np = genabi.param_ct as usize;
+    let mut param_buf: Vec<FutAbiScalar> = Vec::with_capacity(np);
+    param_buf.resize(np, FutAbiScalar::Unspec);
+    {
+      let mut spec_ct = 0;
+      let mut shape_idx = 0;
+      let mut flat_out0_shape = false;
+      for pidx in 0 .. np {
+        match genabi.get_param(pidx as _) {
+          (FutharkParam::Spec, sty) => {
+            let val = param[pidx].to_abi_scalar();
+            assert_eq!(sty, val.type_());
+            param_buf[pidx] = val;
+            spec_ct += 1;
+          }
+          (FutharkParam::Out0Shape, FutAbiScalarType::I64) => {
+            match genabi.get_out(0) {
+              FutharkArrayRepr::Nd => {
+                param_buf[pidx] = FutAbiScalar::I64(out_ty_[0].shape[shape_idx].into());
+                shape_idx += 1;
+              }
+              FutharkArrayRepr::Flat => {
+                assert!(!flat_out0_shape);
+                param_buf[pidx] = FutAbiScalar::I64(out_ty_[0].flat_len().into());
+                flat_out0_shape = true;
+              }
+              _ => unimplemented!()
+            }
+          }
+          _ => unimplemented!()
+        }
+      }
+      assert_eq!(spec_ct, param.len());
+    }
+    /*// FIXME: implicit output shape params during gen.
     let np = genabi.param_ct as usize;
     let mut param: Vec<FutAbiScalar> = Vec::with_capacity(np);
     param.resize(np, FutAbiScalar::Unspec);
@@ -3309,7 +3354,7 @@ impl FutharkThunkImpl<CudaBackend> {
         }
         _ => unimplemented!()
       }
-    }
+    }*/
     /*if np == 0 && self.param.len() == 0 {
     } else if np == 1 && self.param.len() == 0 {
       // FIXME FIXME: hack.
@@ -3387,7 +3432,7 @@ impl FutharkThunkImpl<CudaBackend> {
     });
     /*obj.unify_abi(self.abi).unwrap();*/
     let eabi = genabi.to_eabi(FutAbiSpace::Device);
-    let o_ret = obj.enter_kernel(/*&self.abi,*/ eabi, &param, &arg_arr, &out_arr);
+    let o_ret = obj.enter_kernel(eabi, &param_buf, &arg_arr, &out_arr);
     if o_ret.is_err() {
       // FIXME FIXME: error handling.
       println!("ERROR: FutharkThunkImpl::<CudaBackend>::_enter: runtime error");
@@ -3588,6 +3633,9 @@ impl FutharkThunkImpl<CudaBackend> {
               if k.0 == addr {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   is const"); }
                 // FIXME: view.
+                //let reg_dptr = gpu.mem_pool.front_base + region.off as u64;
+                let (reg_dptr, reg_sz) = gpu.lookup_dev(addr).unwrap();
+                assert_eq!(reg_dptr, out_dptr);
                 let root_ty = match env._lookup_mut_ref_(out) {
                   Err(_) => panic!("bug"),
                   Ok(e) => {
@@ -3623,16 +3671,6 @@ impl FutharkThunkImpl<CudaBackend> {
             }
           }
           if !f {
-            /*let oroot = match env._lookup_ref_(out) {
-              Err(_) => panic!("bug"),
-              Ok(e) => e.root()
-            };
-            let oroot_ty = match env._lookup_ref_(oroot) {
-              Err(_) => panic!("bug"),
-              Ok(e) => e.ty.clone()
-            };
-            // FIXME: the out and root types must be concordant.
-            assert_eq!(oroot_ty.span_bytes(), out_ty_[0].span_bytes());*/
             match env._lookup_mut_view(out) {
               Err(_) => panic!("bug"),
               Ok(e) => {
@@ -3686,32 +3724,34 @@ impl FutharkThunkImpl<CudaBackend> {
                             None => panic!("bug"),
                             Some(rep) => {
                               let prev_addr = rep.addr.get();
-                              if prev_addr == addr {
-                                panic!("bug");
-                              }
                               let (dst_base, dst_base_sz) = gpu.lookup_dev(prev_addr).unwrap();
                               let v_ptroff = v_ty.pointer_offset();
                               let dst_dptr = dst_base + v_ptroff;
                               let sz = e.ty.span_bytes() as usize;
                               assert!(is_subregion_dev(dst_dptr, sz, dst_base, dst_base_sz));
-                              let (src_dptr, src_sz) = gpu.lookup_dev(addr).unwrap();
-                              assert!(sz <= src_sz);
-                              let len = e.ty.flat_len();
-                              assert!(len >= 0);
-                              // FIXME: view: need to do a raw accumulate.
-                              if len <= i32::max_value() as _ {
-                                match e.ty.dtype {
-                                  Dtype::Fp32 => &gpu.kernels.accumulate_1d_f32_idx32,
-                                  Dtype::Fp16 => &gpu.kernels.accumulate_1d_f16_idx32,
-                                  Dtype::UInt16 => &gpu.kernels.accumulate_1d_u16_idx32,
-                                  _ => {
-                                    println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: unimplemented: accumulate kernel for dtype={:?}", e.ty.dtype);
-                                    unimplemented!();
-                                  }
-                                }.as_ref().unwrap()
-                                .launch32(dst_dptr, src_dptr, len as _, &gpu.compute);
+                              if prev_addr != addr {
+                                let (src_dptr, src_sz) = gpu.lookup_dev(addr).unwrap();
+                                assert_eq!(src_dptr, out_dptr);
+                                assert!(sz <= src_sz);
+                                let len = e.ty.flat_len();
+                                assert!(len >= 0);
+                                // FIXME: view: need to do a raw accumulate.
+                                if len <= i32::max_value() as _ {
+                                  match e.ty.dtype {
+                                    Dtype::Fp32 => &gpu.kernels.accumulate_1d_f32_idx32,
+                                    Dtype::Fp16 => &gpu.kernels.accumulate_1d_f16_idx32,
+                                    Dtype::UInt16 => &gpu.kernels.accumulate_1d_u16_idx32,
+                                    _ => {
+                                      println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: unimplemented: accumulate kernel for dtype={:?}", e.ty.dtype);
+                                      unimplemented!();
+                                    }
+                                  }.as_ref().unwrap()
+                                  .launch32(dst_dptr, src_dptr, len as _, &gpu.compute);
+                                } else {
+                                  unimplemented!();
+                                }
                               } else {
-                                unimplemented!();
+                                assert_eq!(dst_dptr, out_dptr);
                               }
                             }
                           }
@@ -3799,19 +3839,19 @@ impl FutharkThunkImpl<CudaBackend> {
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for FutharkThunkImpl<CudaBackend> {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     let mode = ThunkMode::Initialize;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
@@ -3862,7 +3902,7 @@ impl PThunk {
     }
   }
 
-  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
+  pub fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
     //let primary = TL_CTX.with(|ctx| ctx.primary.get());
     //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
     //println!("DEBUG: PThunk::apply: pmach={:?} primary={:?}", pmach, primary);
@@ -3882,12 +3922,12 @@ impl PThunk {
     match self.lookup_impl_(pmach) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.apply(ctr, env, &*self.spec_, arg, th, out, prev_oclk, oclk)
+        thimpl_.apply(ctr, env, &*self.spec_, param, arg, th, out, prev_oclk, oclk)
       }
     }
   }
 
-  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
+  pub fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
     //let primary = TL_CTX.with(|ctx| ctx.primary.get());
     //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
     //println!("DEBUG: PThunk::accumulate: pmach={:?} primary={:?}", pmach, primary);
@@ -3907,12 +3947,12 @@ impl PThunk {
     match self.lookup_impl_(pmach) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.accumulate(ctr, env, &*self.spec_, arg, th, out, prev_oclk, oclk)
+        thimpl_.accumulate(ctr, env, &*self.spec_, param, arg, th, out, prev_oclk, oclk)
       }
     }
   }
 
-  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
+  pub fn initialize(&self, ctr: &CtxCtr, env: &mut CtxEnv, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, pmach: PMach) -> ThunkResult {
     //let primary = TL_CTX.with(|ctx| ctx.primary.get());
     //let pmach = primary.unwrap_or_else(|| TL_PCTX.with(|pctx| pctx.fastest_pmach()));
     //println!("DEBUG: PThunk::initialize: pmach={:?} primary={:?}", pmach, primary);
@@ -3932,7 +3972,7 @@ impl PThunk {
     match self.lookup_impl_(pmach) {
       None => panic!("bug"),
       Some(thimpl_) => {
-        thimpl_.initialize(ctr, env, &*self.spec_, arg, th, out, prev_oclk, oclk)
+        thimpl_.initialize(ctr, env, &*self.spec_, param, arg, th, out, prev_oclk, oclk)
       }
     }
   }

@@ -110,10 +110,10 @@ impl CfgEnv {
       .unwrap_or_else(|_| false);
     if !silent && debug >= 0 {
       for p in cabalpath.iter() {
-        println!("INFO:  cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+        println!("INFO:   cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
       for p in cudaprefix.iter() {
-        println!("INFO:  cacti_cfg_env: CACTI_CUDA_PREFIX={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+        println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
     }
     CfgEnv{

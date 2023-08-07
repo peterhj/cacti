@@ -3,7 +3,7 @@ use crate::algo::fp::{TotalOrd};
 use crate::cell::{DtypeExt, Dim, ScalarVal_};
 use crate::op::*;
 use cacti_cfg_env::*;
-use cacti_gpu_cu_ffi::{cuda_memcpy_async, cublas_gemm_batched};
+use cacti_gpu_cu_ffi::{cuda_memcpy_async, cublas_gemm, cublas_gemm_batched};
 use cacti_gpu_cu_ffi::types::{CUDA_R_32F, CUDA_R_16F, CUDA_R_16BF};
 
 //use futhark_syntax::{Exp};
@@ -697,6 +697,82 @@ impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     FutharkThunkGenCode::flat_map(arg[0], r"\u -> u16.u32 ((f32.to_bits u) >> 16)")
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InnerArgMaxFutThunkSpec;
+
+impl FutharkThunkSpec for InnerArgMaxFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_arg_max")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].ndim() < 1 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[0].ndim() - 1, dtype: Dtype::Int64})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].ndim() < 1 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let mut shape = arg[0].shape.clone();
+    shape.pop();
+    Ok(CellType{shape, dtype: Dtype::Int64})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    let mut code = FutharkThunkGenCode::default();
+    code.abi.arityout = 1;
+    code.abi.set_out(0, FutharkArrayRepr::Nd);
+    code.abi.arityin = 1;
+    code.abi.set_arg(0, FutharkArrayRepr::Nd);
+    match arg[0].ndim {
+      2 => {
+        code.cfg.emit_arg_shapes = true;
+        code.body.push(format!(r"let a_pre = {{%0.s[0]}} in"));
+        code.body.push(format!(r"let a_suf = {{%0.s[1]}} in"));
+        code.body.push(format!(r"let t_iota = iota a_suf in"));
+        code.body.push(format!(r"let t0 = unflatten (flatten {{%0}} :> [a_pre * a_suf]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.body.push(format!(r"let t1 = map (\t -> let umax = reduce ({}.max) (-{}.inf) t in let tkey = map2 (\idx u -> if u == umax then idx else a_suf) t_iota t in reduce (i64.min) (i64.highest) tkey) t0 in",
+            arg[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        ));
+        code.body.push(format!(r"let {{%1}} = t1 in"));
+      }
+      3 => {
+        code.cfg.emit_arg_shapes = true;
+        code.body.push(format!(r"let a_pre = {{%0.s[0]}} * {{%0.s[1]}} in"));
+        code.body.push(format!(r"let a_suf = {{%0.s[2]}} in"));
+        code.body.push(format!(r"let t_iota = iota a_suf in"));
+        code.body.push(format!(r"let t0 = unflatten (flatten_3d {{%0}} :> [a_pre * a_suf]{}) in",
+            arg[0].dtype.format_futhark(),
+        ));
+        code.body.push(format!(r"let t1 = map (\t -> let umax = reduce ({}.max) (-{}.inf) t in let tkey = map2 (\idx u -> if u == umax then idx else a_suf) t_iota t in reduce (i64.min) (i64.highest) tkey) t0 in",
+            arg[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        ));
+        code.body.push(format!(r"let {{%1}} = unflatten (t1 :> [{{%0.s[0]}} * {{%0.s[1]}}]i64) in"));
+      }
+      4 => {
+        unimplemented!();
+      }
+      _ => unimplemented!()
+    }
+    code.into()
   }
 }
 
@@ -3969,19 +4045,22 @@ impl ThunkSpec for MatrixMulThunkSpec {
   }
 
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    unimplemented!();
+    if !(arg[0].ndim() == 2 && arg[1].ndim() == 2) {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: 2, dtype: self.o_dtype})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    unimplemented!();
+    let tys = self._calculate_out_ty(arg)?;
+    Ok(tys.o_ty)
   }
 
   fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
     match pmach {
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
-        unimplemented!();
-        //Some(Rc::new(MatrixMulF16F32GpuThunkImpl::default()))
+        Some(Rc::new(MatrixMulF16F32GpuThunkImpl::default()))
       }
       _ => {
         println!("WARNING: MatrixMulThunkSpec::gen_impl_: no impl for pmach={:?}", pmach);
@@ -3995,6 +4074,49 @@ impl ThunkSpec for MatrixMulThunkSpec {
   }
 }
 
+#[derive(Clone, Debug)]
+pub struct MatrixMulTypes {
+  pub l_blk_outer: i64,
+  pub l_blk_inner: i64,
+  pub r_blk_inner: i64,
+  pub r_blk_outer: i64,
+  pub o_ty:   CellType,
+}
+
+impl MatrixMulThunkSpec {
+  pub fn _calculate_out_ty(&self, arg: &[CellType]) -> Result<MatrixMulTypes, ThunkTypeErr> {
+    if !(arg[0].ndim() == 2 && arg[1].ndim() == 2) {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let l_dtype = arg[0].dtype;
+    let r_dtype = arg[1].dtype;
+    let l_block = [arg[0].shape[0], arg[0].shape[1]];
+    let r_block = [arg[1].shape[0], arg[1].shape[1]];
+    let [l_blk_outer, l_blk_inner] = if self.l_t { [l_block[1], l_block[0]] } else { l_block };
+    let [r_blk_inner, r_blk_outer] = if self.r_t { [r_block[1], r_block[0]] } else { r_block };
+    if l_blk_inner != r_blk_inner {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let m = l_blk_outer;
+    let n = r_blk_outer;
+    let o_ty = CellType{shape: vec![m, n], dtype: self.o_dtype};
+    if cfg_debug() {
+    println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: {:?}{} x {:?}{} = {:?}",
+        &arg[0].shape, if self.l_t { " T" } else { "" },
+        &arg[1].shape, if self.r_t { " T" } else { "" },
+        &o_ty.shape);
+    }
+    let tys = MatrixMulTypes{
+      l_blk_outer,
+      l_blk_inner,
+      r_blk_inner,
+      r_blk_outer,
+      o_ty,
+    };
+    Ok(tys)
+  }
+}
+
 #[cfg(feature = "nvgpu")]
 #[derive(Default)]
 pub struct MatrixMulF16F32GpuThunkImpl {
@@ -4003,7 +4125,288 @@ pub struct MatrixMulF16F32GpuThunkImpl {
   beta: Cell<f32>,
 }
 
-// TODO
+#[cfg(feature = "nvgpu")]
+impl MatrixMulF16F32GpuThunkImpl {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter"); }
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      let ret = gpu.compute.sync();
+      match ret {
+        Err(e) => {
+          println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm pre sync error: {:?}", e);
+          Err(ThunkErr::Failure)
+        }
+        Ok(_) => Ok(())
+      }
+    })?;
+    let t0 = Stopwatch::tl_stamp();
+    let spec = spec_.as_any().downcast_ref::<MatrixMulThunkSpec>().unwrap();
+    match &spec.o_scale {
+      &ScalarVal_::F32(ref val) => {
+        self.alpha.set(*val.borrow());
+      }
+      _ => unimplemented!()
+    }
+    match mode {
+      ThunkMode::Apply => {
+        self.beta.set(0.0);
+      }
+      ThunkMode::Accumulate => {
+        self.beta.set(1.0);
+      }
+      _ => unimplemented!()
+    }
+    let mut arg_ty_ = Vec::with_capacity(arg.len());
+    for &(x, _) in arg.iter() {
+      match env._lookup_ref_(x) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          arg_ty_.push(e.ty.clone());
+        }
+      }
+    }
+    let tys = spec._calculate_out_ty(&arg_ty_).unwrap();
+    if cfg_debug() {
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: arg_ty_={:?}", &arg_ty_);
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemmtys={:?}", &tys);
+    }
+    let out_ty_ = tys.o_ty.clone();
+    let colmajor_bt = spec.l_t;
+    let colmajor_at = spec.r_t;
+    let colmajor_n = tys.l_blk_outer;
+    let colmajor_m = tys.r_blk_outer;
+    let inner_len = tys.l_blk_inner;
+    if cfg_debug() {
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: m={}", colmajor_m);
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: n={}", colmajor_n);
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: k={}", inner_len);
+    }
+    assert_eq!(inner_len, tys.r_blk_inner);
+    assert!(colmajor_m >= 0);
+    assert!(colmajor_m <= i32::max_value() as _);
+    assert!(colmajor_n >= 0);
+    assert!(colmajor_n <= i32::max_value() as _);
+    assert!(inner_len >= 0);
+    assert!(inner_len <= i32::max_value() as _);
+    // FIXME: does ldx need multiplying by elem size?
+    let (lda, ldb, ldc) = if arg_ty_[0].ndim() == 2 && arg_ty_[1].ndim() == 2 && out_ty_.ndim() == 2 {
+      let ldb = arg_ty_[0].shape[1];
+      let lda = arg_ty_[1].shape[1];
+      let ldc = out_ty_.shape[1];
+      (lda, ldb, ldc)
+    } else {
+      panic!("bug");
+    };
+    if cfg_debug() {
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: lda={}", lda);
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: ldb={}", ldb);
+    println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: ldc={}", ldc);
+    }
+    assert!(lda >= 0);
+    assert!(lda <= i32::max_value() as _);
+    assert!(ldb >= 0);
+    assert!(ldb <= i32::max_value() as _);
+    assert!(ldc >= 0);
+    assert!(ldc <= i32::max_value() as _);
+    let loc = TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      gpu.device_locus()
+    });
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
+    let b_dptr = match env.pread_view(arg[0].0, arg[0].1, loc) {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &arg_ty_[0]);
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy (contiguous) view");
+            panic!();
+          }
+          Ok(ty) => ty
+        };
+        assert_eq!(&e.ty, v_ty.as_ref());
+        match e.cel_ {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
+            let base = TL_PCTX.with(|pctx| {
+              let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
+              dptr
+            });
+            base + v_ty.pointer_offset()
+          }
+          _ => panic!("bug")
+        }
+      }
+    };
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
+    let a_dptr = match env.pread_view(arg[1].0, arg[1].1, loc) {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &arg_ty_[1]);
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: right arg is not a zero-copy (contiguous) view");
+            panic!();
+          }
+          Ok(ty) => ty
+        };
+        assert_eq!(&e.ty, v_ty.as_ref());
+        match e.cel_ {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
+            let base = TL_PCTX.with(|pctx| {
+              let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
+              dptr
+            });
+            base + v_ty.pointer_offset()
+          }
+          _ => panic!("bug")
+        }
+      }
+    };
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
+    let c_dptr = match match mode {
+      ThunkMode::Apply => env.pwrite_view(out, oclk, loc),
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => env.prewrite_view(out, prev_oclk, oclk, loc)
+    } {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        assert_eq!(&e.ty, &out_ty_);
+        let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+          Err(_) => {
+            println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: output is not a zero-copy (contiguous) view");
+            panic!();
+          }
+          Ok(ty) => ty
+        };
+        assert_eq!(&e.ty, v_ty.as_ref());
+        match e.cel_ {
+          &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
+            let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
+              None => panic!("bug"),
+              Some(rep) => rep.addr.get()
+            };
+            let base = TL_PCTX.with(|pctx| {
+              let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
+              dptr
+            });
+            base + v_ty.pointer_offset()
+          }
+          _ => panic!("bug")
+        }
+      }
+    };
+    let b_gputy = match arg_ty_[0].dtype {
+      Dtype::Fp32 => CUDA_R_32F,
+      Dtype::Fp16 => CUDA_R_16F,
+      Dtype::Bfloat16 => CUDA_R_16BF,
+      _ => unimplemented!()
+    };
+    let a_gputy = match arg_ty_[1].dtype {
+      Dtype::Fp32 => CUDA_R_32F,
+      Dtype::Fp16 => CUDA_R_16F,
+      Dtype::Bfloat16 => CUDA_R_16BF,
+      _ => unimplemented!()
+    };
+    let c_gputy = match out_ty_.dtype {
+      Dtype::Fp32 => CUDA_R_32F,
+      Dtype::Fp16 => CUDA_R_16F,
+      Dtype::Bfloat16 => CUDA_R_16BF,
+      _ => unimplemented!()
+    };
+    TL_PCTX.with(|pctx| {
+      let gpu = pctx.nvgpu.as_ref().unwrap();
+      if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm..."); }
+      let ret = gpu.compute.sync();
+      match ret {
+        Err(e) => {
+          println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: pre gemm sync error: {:?}", e);
+          Err(ThunkErr::Failure)
+        }
+        Ok(_) => Ok(())
+      }?;
+      let t1 = Stopwatch::tl_stamp();
+      if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0); }
+      TL_CTX.with(|ctx| {
+        if oclk.rst <= 0 {
+          panic!("bug");
+        } else if oclk.rst == 1 {
+          ctx.timing.pregemm1.borrow_mut().push(t1 - t0);
+        } else {
+          ctx.timing.pregemm.borrow_mut().push(t1 - t0);
+        }
+      });
+      let t0 = t1;
+      if cfg_debug() {
+      let alpha_ptr = self.alpha.as_ptr() as usize;
+      let beta_ptr = self.beta.as_ptr() as usize;
+      println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: alpha ptr=0x{:016x}", alpha_ptr);
+      println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: beta ptr =0x{:016x}", beta_ptr);
+      }
+      let ret = cublas_gemm(
+          &gpu.blas_ctx,
+          colmajor_at, colmajor_bt,
+          colmajor_m as _, colmajor_n as _, inner_len as _,
+          self.alpha.as_ptr() as *const f32 as *const c_void,
+          a_dptr, a_gputy, lda as _,
+          b_dptr, b_gputy, ldb as _,
+          self.beta.as_ptr() as *const f32 as *const c_void,
+          c_dptr, c_gputy, ldc as _,
+          &gpu.compute,
+      );
+      match ret {
+        Err(e) => {
+          println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm error: {:?}", e);
+          Err(ThunkErr::Failure)
+        }
+        Ok(_) => Ok(())
+      }?;
+      let ret = gpu.compute.sync();
+      match ret {
+        Err(e) => {
+          println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm sync error: {:?}", e);
+          Err(ThunkErr::Failure)
+        }
+        Ok(_) => Ok(())
+      }?;
+      let t1 = Stopwatch::tl_stamp();
+      if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0); }
+      TL_CTX.with(|ctx| {
+        if oclk.rst <= 0 {
+          panic!("bug");
+        } else if oclk.rst == 1 {
+          ctx.timing.gemm1.borrow_mut().push(t1 - t0);
+        } else {
+          ctx.timing.gemm.borrow_mut().push(t1 - t0);
+        }
+      });
+      Ok(())
+    })
+  }
+}
+
+#[cfg(feature = "nvgpu")]
+impl ThunkImpl for MatrixMulF16F32GpuThunkImpl {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::apply"); }
+    let mode = ThunkMode::Apply;
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+  }
+
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::accumulate"); }
+    let mode = ThunkMode::Accumulate;
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+  }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BlockMatrixMulThunkSpec {
@@ -4325,7 +4728,7 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl BlockMatrixMulF16F32GpuThunkImpl {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter"); }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -4632,6 +5035,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         }
       });
       let t0 = t1;
+      if cfg_debug() {
       //let tmp_a = self.tmp_a.borrow();
       //let tmp_b = self.tmp_b.borrow();
       //let tmp_c = self.tmp_c.borrow();
@@ -4640,13 +5044,12 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       //let tmp_a_ptr = tmp_a.as_ptr() as usize;
       //let tmp_b_ptr = tmp_b.as_ptr() as usize;
       //let tmp_c_ptr = tmp_c.as_ptr() as usize;
-      if cfg_debug() {
       println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: alpha ptr=0x{:016x}", alpha_ptr);
       println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: beta ptr =0x{:016x}", beta_ptr);
-      }
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp a ptr=0x{:016x}", tmp_a_ptr);
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp b ptr=0x{:016x}", tmp_b_ptr);
       //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp c ptr=0x{:016x}", tmp_c_ptr);
+      }
       // FIXME FIXME: the arrays to blocks have to be in vmem...
       let (nblk, tmp_a_dptr, tmp_b_dptr, tmp_c_dptr) = {
         let nblk = self.tmp_c.borrow().len();
@@ -4740,16 +5143,16 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply"); }
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate"); }
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
@@ -4801,7 +5204,7 @@ pub struct MemcpyNvgpuThunkImpl;
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MemcpyNvgpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     //if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
     if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();

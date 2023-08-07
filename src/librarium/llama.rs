@@ -366,6 +366,44 @@ pub struct LlamaCached {
   pub lm_head: StableCell,
 }
 
+impl From<LlamaConfig> for LlamaCached {
+  fn from(cfg: LlamaConfig) -> LlamaCached {
+    let ubat_sz = cfg.ubat_sz;
+    let seq_cap = cfg.seq_cap;
+    let num_head = cfg.num_head;
+    let head_dim = cfg.head_dim;
+    let inner_dim = num_head * head_dim;
+    let mlp_inner_dim = cfg.mlp_inner_dim;
+    let tok_dim = cfg.tok_dim;
+    let num_layers = cfg.num_layer as usize;
+    assert!(tok_dim <= u16::max_value() as i64 + 1);
+    let cos = None;
+    let sin = None;
+    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    let mut layers = Vec::with_capacity(num_layers);
+    let mut states = Vec::with_capacity(num_layers);
+    for _ in 0 .. num_layers {
+      let q = StableCell::array([inner_dim, inner_dim], f16::dtype());
+      let k = StableCell::array([inner_dim, inner_dim], f16::dtype());
+      let v = StableCell::array([inner_dim, inner_dim], f16::dtype());
+      let o = StableCell::array([inner_dim, inner_dim], f16::dtype());
+      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
+      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
+      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
+      let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
+      let pre_norm = StableCell::array([inner_dim], f16::dtype());
+      let post_norm = StableCell::array([inner_dim], f16::dtype());
+      layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype());
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype());
+      states.push(LlamaCachedState{k_cache, v_cache});
+    }
+    let head_norm = StableCell::array([inner_dim], f16::dtype());
+    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    LlamaCached{cfg, cos, sin, embed, layers, states, head_norm, lm_head}
+  }
+}
+
 impl LlamaCached {
   pub fn match_pickle_dir(&self, pickdir: &PickleDir) -> CellInvMatches {
     let mut matcher = CellMatcher::new();
@@ -407,14 +445,16 @@ impl LlamaCached {
     param
   }
 
-  pub fn fresh_input(&self) -> LanguageModelBatchDeployIn {
+  pub fn fresh_input(&self) -> Vec<LanguageModelDeployIn> {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
-    let mut in_tok = Vec::with_capacity(ubat_sz as usize);
+    //let mut in_tok = Vec::with_capacity(ubat_sz as usize);
+    let mut in_ = Vec::with_capacity(ubat_sz as usize);
     for _ in 0 .. ubat_sz {
-      in_tok.push(StableCell::array([1, seq_cap], u16::dtype()));
+      let in_tok = StableCell::array([1, seq_cap], u16::dtype());
+      in_.push(LanguageModelDeployIn{in_tok});
     }
-    LanguageModelBatchDeployIn{in_tok}
+    in_
   }
 
   pub fn init_constants(&mut self) {
@@ -481,7 +521,7 @@ impl LlamaCached {
     unimplemented!();
   }*/
 
-  pub fn apply<X: CellDeref>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
+  pub fn apply(&mut self, in_: &mut [LanguageModelDeployIn], prev_seq_len: i64, next_seq_len: i64) -> Vec<LanguageModelDeployOut> {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
@@ -512,20 +552,21 @@ impl LlamaCached {
       (-rx).inner_concat(lx)
     };*/
     let cos = self.cos.as_ref().unwrap().clone()
-             .new_shape([seq_cap, 1, head_dim]);
+             .new_shape([1, seq_cap, 1, head_dim]);
     let sin = self.sin.as_ref().unwrap().clone()
-             .new_shape([seq_cap, 1, head_dim]);
+             .new_shape([1, seq_cap, 1, head_dim]);
     let symplectic_embed = |x: CellPtr| {
-      let y = (x * cos[(prev_seq_len .. next_seq_len, .., ..)].const_())
-            + (inner_symplectic_map(x) * sin[(prev_seq_len .. next_seq_len, .., ..)].const_());
-      y
+      let y = inner_symplectic_map(x);
+      let z = (x * cos[(.., prev_seq_len .. next_seq_len, .., ..)].const_())
+            + (y * sin[(.., prev_seq_len .. next_seq_len, .., ..)].const_());
+      z
     };
-    assert_eq!(ubat_sz as usize, in_tok.len());
+    assert_eq!(ubat_sz as usize, in_.len());
     // FIXME
     //let mut stream = in_tok;
     let mut stream = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      let in_tok = &in_tok[i as usize]._deref()[(.., prev_seq_len .. next_seq_len)];
+      let in_tok = &in_[i as usize].in_tok._deref()[(.., prev_seq_len .. next_seq_len)];
       stream.push(self.embed.outer_select(in_tok)
                  .new_shape([1, diff_seq_len, num_head, head_dim]));
     }
@@ -561,7 +602,8 @@ impl LlamaCached {
                    &self.states[ell].k_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
                    true,
                    1.0 / (head_dim as f32).sqrt()
-               );
+               )
+              .cast(f32::dtype());
         let attn = row_causal_attention_mask(attn, prev_seq_len)
                   .inner_softmax()
                   .cast(f16::dtype());
@@ -573,7 +615,8 @@ impl LlamaCached {
                     false
                 )
                .new_shape([diff_seq_len, num_head * head_dim]);
-        let o_proj = v_attn.matmul(false, &self.layers[ell].o, true);
+        let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
+                    .new_shape([1, diff_seq_len, num_head, head_dim]);
         stream[i as usize] = stream[i as usize] + o_proj;
         let post_nrm = rms_norm(&stream[i as usize], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
         let up_proj = post_nrm
@@ -583,32 +626,34 @@ impl LlamaCached {
         let gate_proj = gate_proj.standard_silu();
         let gate_up = gate_proj * up_proj;
         let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
-                       .new_shape([1, seq_cap, num_head, head_dim]);
+                       .new_shape([1, diff_seq_len, num_head, head_dim]);
         stream[i as usize] = stream[i as usize] + down_proj;
       }
     }
     // TODO
-    let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
+    /*let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
     let mut out_lm_prob = Vec::with_capacity(ubat_sz as usize);
-    let mut out_lm_tok = Vec::with_capacity(ubat_sz as usize);
+    let mut out_lm_tok = Vec::with_capacity(ubat_sz as usize);*/
+    let mut out = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
       stream[i as usize] = rms_norm(&stream[i as usize], &self.head_norm, rms_norm_eps, f16::dtype());
-      out_lm_logit.push(stream[i as usize]
+      let out_lm_logit = stream[i as usize]
                        .matmul(false, &self.lm_head, true)
-                       .new_shape([diff_seq_len, tok_dim])
-                       .keep());
-      out_lm_prob.push(out_lm_logit[i as usize]
+                       .new_shape([1, diff_seq_len, tok_dim])
+                       .keep();
+      let out_lm_prob = out_lm_logit
                       .cast(f32::dtype())
                       .inner_softmax()
-                      .keep());
-      out_lm_tok.push(out_lm_logit[i as usize]
+                      .keep();
+      let out_lm_tok = out_lm_logit
                      .inner_arg_max()
                      .cast(u16::dtype())
-                     .keep());
-      in_tok[i as usize]._deref()[(.., next_seq_len .. next_seq_len + 1)]
-          += &out_lm_tok[i as usize][(.., next_seq_len - 1 .. next_seq_len)];
+                     .keep();
+      in_[i as usize].in_tok._deref()[(.., next_seq_len .. next_seq_len + 1)]
+          += &out_lm_tok[(.., diff_seq_len - 1 .. diff_seq_len)];
+      out.push(LanguageModelDeployOut{out_lm_logit, out_lm_prob, out_lm_tok});
     }
-    LanguageModelBatchDeployOut{out_lm_logit, out_lm_prob, out_lm_tok}
+    out
   }
 }
 
@@ -750,7 +795,9 @@ impl FutharkThunkSpec for RowCausalAttentionMaskFutThunkSpec {
         code.cfg.emit_arg_shapes = true;
         code.append(format!(r"let row_idxs = iota {{%0.s[1]}} in"));
         code.append(format!(r"let col_idxs = iota {{%0.s[3]}} in"));
-        code.append(format!(r"let {{%1}} = map (\t1 -> map2 (\row_idx, t2 -> map (\t3 -> map2 (\col_idx, u -> if (row_idx + {{%param[0]}}) <= col_idx then u else 0) col_idxs t3) t2) row_idxs t1) {{%0}} in"));
+        code.append(format!(r"let {{%1}} = map (\t1 -> map2 (\row_idx t2 -> map (\t3 -> map2 (\col_idx u -> if (row_idx + {{%param[0]}}) >= col_idx then u else (-{}.inf)) col_idxs t3) t2) row_idxs t1) {{%0}} in",
+            arg[0].dtype.format_futhark(),
+        ));
       }
       _ => {
         unimplemented!();

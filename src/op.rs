@@ -243,18 +243,18 @@ impl<R: CellDeref> AddAssign<R> for CellPtr {
       /*println!("DEBUG: AddAssign::add_assign: fallback:   {:?}",
           ctx.ctlstate.accumulate_in_place.get());
       println!("DEBUG: AddAssign::add_assign: fallback:   {:?}",
-          ctx.ctlstate.assume_uninit_zero.get());*/
-        if ctx.ctlstate.assume_uninit_zero.get() {
-          let spine = ctx.spine.borrow();
-          let base_clk = spine._counter();
-          let mut this_clk = spine._version(this).unwrap_or_else(|| Clock::default());
-          this_clk = base_clk.max(this_clk).init_or_update();
-          if this_clk.is_update() {
-            let op = IdentityFutThunkSpec;
-            assert!(ctx_clean_arg());
-            ctx_push_cell_arg(rhs);
-            ctx_pop_accumulate_thunk(op, this)
-          } else if this_clk.is_init_once() {
+        ctx.ctlstate.assume_uninit_zero.get());*/
+        let spine = ctx.spine.borrow();
+        let base_clk = spine._counter();
+        let mut this_clk = spine._version(this).unwrap_or_else(|| Clock::default());
+        this_clk = base_clk.max(this_clk).init_or_update();
+        if this_clk.is_update() {
+          let op = IdentityFutThunkSpec;
+          assert!(ctx_clean_arg());
+          ctx_push_cell_arg(rhs);
+          ctx_pop_accumulate_thunk(op, this)
+        } else if this_clk.is_init_once() {
+          if ctx.ctlstate.assume_uninit_zero.get() {
             // FIXME: could just snapshot.
             //let op = IdentityFutThunkSpec;
             let op = MemcpyThunkSpec;
@@ -262,10 +262,10 @@ impl<R: CellDeref> AddAssign<R> for CellPtr {
             ctx_push_cell_arg(rhs);
             ctx_pop_apply_thunk(op, this)
           } else {
-            unreachable!();
+            unimplemented!();
           }
         } else {
-          unimplemented!();
+          unreachable!();
         }
       });
     })
@@ -762,6 +762,7 @@ impl Add<f32> for StableCell {
 impl<'l, R: CellDeref> Add<R> for &'l CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
       let x0 = *self;
@@ -784,6 +785,7 @@ impl<'l, R: CellDeref> Add<R> for &'l CellPtr {
 impl<R: CellDeref> Add<R> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: R) -> CellPtr {
     panick_wrap(|| (&self).add(rhs))
   }
@@ -792,6 +794,7 @@ impl<R: CellDeref> Add<R> for CellPtr {
 impl<'l, R: CellDeref> Add<R> for &'l StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().add(rhs))
   }
@@ -800,6 +803,7 @@ impl<'l, R: CellDeref> Add<R> for &'l StableCell {
 impl<R: CellDeref> Add<R> for StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn add(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().add(rhs))
   }
@@ -877,6 +881,7 @@ impl Sub<f32> for CellPtr {
 impl<'l, R: CellDeref> Sub<R> for &'l CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
       let x0 = *self.borrow();
@@ -899,6 +904,7 @@ impl<'l, R: CellDeref> Sub<R> for &'l CellPtr {
 impl<R: CellDeref> Sub<R> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| (&self).sub(rhs))
   }
@@ -907,6 +913,7 @@ impl<R: CellDeref> Sub<R> for CellPtr {
 impl<'l, R: CellDeref> Sub<R> for &'l StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().sub(rhs))
   }
@@ -915,6 +922,7 @@ impl<'l, R: CellDeref> Sub<R> for &'l StableCell {
 impl<R: CellDeref> Sub<R> for StableCell {
   type Output = CellPtr;
 
+  #[track_caller]
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| self.as_ptr_ref().sub(rhs))
   }
@@ -1079,6 +1087,7 @@ impl<'l> Div<ScalarVal_> for &'l CellPtr {
 impl Div<ScalarVal_> for CellPtr {
   type Output = CellPtr;
 
+  #[track_caller]
   fn div(self, rhs: ScalarVal_) -> CellPtr {
     panick_wrap(|| (&self).div(rhs))
   }
@@ -2125,8 +2134,9 @@ pub trait MathUnaryOps: CellDeref {
   #[track_caller]
   fn inner_arg_max(&self, /*new_dtype: Dtype*/) -> CellPtr {
     panick_wrap(|| {
-      // TODO
-      unimplemented!();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self._deref());
+      ctx_pop_thunk(InnerArgMaxFutThunkSpec)
     })
   }
 
