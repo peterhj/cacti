@@ -81,13 +81,13 @@ impl PartialOrd for TotalOrd<f16> {
 
 impl Ord for TotalOrd<f16> {
   fn cmp(&self, other: &TotalOrd<f16>) -> Ordering {
-    self.to_signed_bits().cmp(&other.to_signed_bits())
+    self.to_signed_ord_bits().cmp(&other.to_signed_ord_bits())
   }
 }
 
 impl Hash for TotalOrd<f16> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_signed_bits().hash(hasher);
+    self.to_signed_ord_bits().hash(hasher);
   }
 }
 
@@ -101,7 +101,7 @@ impl Neg for TotalOrd<f16> {
 
 impl TotalOrd<f16> {
   #[inline]
-  pub fn to_bits(&self) -> u16 {
+  pub fn to_ord_bits(&self) -> u16 {
     // NB: This should be the same 1-to-1 mapping as done by `total_cmp`
     // in libcore.
     let mut bits = (self.0).to_bits();
@@ -110,8 +110,8 @@ impl TotalOrd<f16> {
   }
 
   #[inline]
-  pub fn to_signed_bits(&self) -> i16 {
-    self.to_bits() as i16
+  pub fn to_signed_ord_bits(&self) -> i16 {
+    self.to_ord_bits() as i16
   }
 }
 
@@ -140,13 +140,13 @@ impl PartialOrd for TotalOrd<f32> {
 
 impl Ord for TotalOrd<f32> {
   fn cmp(&self, other: &TotalOrd<f32>) -> Ordering {
-    self.to_signed_bits().cmp(&other.to_signed_bits())
+    self.to_signed_ord_bits().cmp(&other.to_signed_ord_bits())
   }
 }
 
 impl Hash for TotalOrd<f32> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_signed_bits().hash(hasher);
+    self.to_signed_ord_bits().hash(hasher);
   }
 }
 
@@ -160,7 +160,7 @@ impl Neg for TotalOrd<f32> {
 
 impl TotalOrd<f32> {
   #[inline]
-  pub fn to_bits(&self) -> u32 {
+  pub fn to_ord_bits(&self) -> u32 {
     // NB: This should be the same 1-to-1 mapping as done by `total_cmp`
     // in libcore.
     let mut bits = (self.0).to_bits();
@@ -169,8 +169,8 @@ impl TotalOrd<f32> {
   }
 
   #[inline]
-  pub fn to_signed_bits(&self) -> i32 {
-    self.to_bits() as i32
+  pub fn to_signed_ord_bits(&self) -> i32 {
+    self.to_ord_bits() as i32
   }
 }
 
@@ -199,13 +199,13 @@ impl PartialOrd for TotalOrd<f64> {
 
 impl Ord for TotalOrd<f64> {
   fn cmp(&self, other: &TotalOrd<f64>) -> Ordering {
-    self.to_signed_bits().cmp(&other.to_signed_bits())
+    self.to_signed_ord_bits().cmp(&other.to_signed_ord_bits())
   }
 }
 
 impl Hash for TotalOrd<f64> {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
-    self.to_signed_bits().hash(hasher);
+    self.to_signed_ord_bits().hash(hasher);
   }
 }
 
@@ -219,7 +219,7 @@ impl Neg for TotalOrd<f64> {
 
 impl TotalOrd<f64> {
   #[inline]
-  pub fn to_bits(&self) -> u64 {
+  pub fn to_ord_bits(&self) -> u64 {
     // NB: This should be the same 1-to-1 mapping as done by `total_cmp`
     // in libcore.
     let mut bits = (self.0).to_bits();
@@ -228,70 +228,10 @@ impl TotalOrd<f64> {
   }
 
   #[inline]
-  pub fn to_signed_bits(&self) -> i64 {
-    self.to_bits() as i64
+  pub fn to_signed_ord_bits(&self) -> i64 {
+    self.to_ord_bits() as i64
   }
 }
-
-/*#[derive(Clone, Copy)]
-#[repr(transparent)]
-pub struct Nan<F: Copy>(F);
-
-impl<F: Copy + Debug> Debug for Nan<F> {
-  fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    (self.0).fmt(f)
-  }
-}
-
-impl<F: Copy> AsRef<F> for Nan<F> {
-  fn as_ref(&self) -> &F {
-    &self.0
-  }
-}
-
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-#[repr(transparent)]
-pub struct NonNan<F: Copy>(F);
-
-impl<F: Copy + Debug> Debug for NonNan<F> {
-  fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    (self.0).fmt(f)
-  }
-}
-
-impl<F: Copy> AsRef<F> for NonNan<F> {
-  fn as_ref(&self) -> &F {
-    &self.0
-  }
-}
-
-impl TryFrom<f32> for NonNan<f32> {
-  type Error = Nan<f32>;
-
-  fn try_from(x: f32) -> Result<NonNan<f32>, Nan<f32>> {
-    if x.is_nan() {
-      return Err(Nan(x));
-    }
-    Ok(NonNan(x))
-  }
-}
-
-impl Eq for NonNan<f32> {}
-
-impl Ord for NonNan<f32> {
-  fn cmp(&self, other: &NonNan<f32>) -> Ordering {
-    match self.partial_cmp(other) {
-      None => panic!("bug"),
-      Some(o) => o
-    }
-  }
-}
-
-/*impl Hash for NonNan<f32> {
-  fn hash<H: Hasher>(&self, hasher: &mut H) {
-    (self.0).to_bits().hash(hasher)
-  }
-}*/*/
 
 pub trait FpConstExt: Sized {
   fn zero()     -> Self;

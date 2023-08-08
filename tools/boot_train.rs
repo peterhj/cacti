@@ -71,9 +71,9 @@ fn main() {
   let mut grad_avg = Vec::with_capacity(param.len());
   let mut grad2_avg = Vec::with_capacity(param.len());
   for p in param.iter() {
-    let p_ = StableCell::from(p.type_().cast(f32::dtype()));
-    let g_ = StableCell::from(p.type_().cast(f32::dtype()));
-    let g2 = StableCell::from(p.type_().cast(f32::dtype()));
+    let p_ = StableCell::from(p.type_().cast(f32::dtype_()));
+    let g_ = StableCell::from(p.type_().cast(f32::dtype_()));
+    let g2 = StableCell::from(p.type_().cast(f32::dtype_()));
     println!("boot: master={:?} ty={:?} grad avg={:?} ty={:?} grad2 avg={:?} ty={:?}",
         p_, p_.type_(), g_, g_.type_(), g2, g2.type_());
     master.push(p_);
@@ -109,7 +109,7 @@ fn main() {
           g2.set_zeros();
         }
       });
-      model.init();
+      model.init_constants();
     } else {
       smp_scope().with(|_| {
         for (idx, ((((g, g_), g2), p_), p)) in
@@ -150,7 +150,7 @@ fn main() {
           }
         }
       });
-      model.cache();
+      model.cache_constants();
     }
     in_tok.mem_set_yield_();
     in_.in_lm_tok.mem_set_yield_();

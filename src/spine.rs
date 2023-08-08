@@ -1029,7 +1029,7 @@ impl Default for Spine {
 }
 
 impl Spine {
-  pub fn _reset(&mut self) {
+  pub fn _reset(&mut self) -> Counter {
     if cfg_debug() {
     println!("DEBUG: Spine::_reset: ctr={:?} ctlp={} hltp={} curp={}",
         self.ctr, self.ctlp, self.hltp, self.curp.get());
@@ -1041,6 +1041,7 @@ impl Spine {
     self.retp = u32::max_value();
     self.log.borrow_mut().clear();
     self.cur_env.borrow_mut().reset(self.ctr);
+    self.ctr
   }
 
   /*pub fn _fastfwd(&mut self, sp: u32) {
@@ -1433,7 +1434,7 @@ impl Spine {
           Ok(e) => {
             println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
             match e.ty.dtype {
-              Dtype::Fp32 => {
+              Dtype::F32 => {
                 //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
                 match &item {
                   SpineResume::_Top => {

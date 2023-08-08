@@ -6,15 +6,19 @@ use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
 use crate::panick::*;
 use cacti_cfg_env::*;
 
+use smol_str::{SmolStr};
+
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
 use std::cmp::{max, min};
+use std::convert::{TryFrom};
 use std::ffi::{c_void};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::io::{Read};
 use std::mem::{align_of};
 use std::rc::{Rc};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::str::{FromStr};
 
 pub mod nvgpu;
 pub mod smp;
@@ -29,6 +33,26 @@ pub enum Locus {
   Mem  = 63,
   VMem = 127,
   _Bot = 255,
+}
+
+impl<'a> TryFrom<&'a str> for Locus {
+  type Error = SmolStr;
+
+  fn try_from(s: &'a str) -> Result<Locus, SmolStr> {
+    Locus::from_str(s)
+  }
+}
+
+impl FromStr for Locus {
+  type Err = SmolStr;
+
+  fn from_str(s: &str) -> Result<Locus, SmolStr> {
+    Ok(match s {
+      "mem" => Locus::Mem,
+      "vmem" => Locus::VMem,
+      _ => return Err(s.into())
+    })
+  }
 }
 
 impl Locus {
@@ -51,7 +75,30 @@ pub enum PMach {
   _Bot = 255,
 }
 
-#[derive(Clone, Copy)]
+impl<'a> TryFrom<&'a str> for PMach {
+  type Error = SmolStr;
+
+  fn try_from(s: &'a str) -> Result<PMach, SmolStr> {
+    PMach::from_str(s)
+  }
+}
+
+impl FromStr for PMach {
+  type Err = SmolStr;
+
+  fn from_str(s: &str) -> Result<PMach, SmolStr> {
+    Ok(match s {
+      "smp" => PMach::Smp,
+      #[cfg(feature = "nvgpu")]
+      "gpu" => PMach::NvGpu,
+      #[cfg(feature = "nvgpu")]
+      "nvgpu" => PMach::NvGpu,
+      _ => return Err(s.into())
+    })
+  }
+}
+
+/*#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct PMachSet {
   bits: u8,
@@ -89,12 +136,12 @@ impl PMachSet {
       PMach::_Bot => panic!("bug")
     }
   }
-}
+}*/
 
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum PMemErr {
-  Oom,
+  Oom = 2,
   Bot,
 }
 
@@ -215,7 +262,7 @@ impl TagUnifier {
 pub struct PCtx {
   // TODO TODO
   pub ctr:      PCtxCtr,
-  pub pmset:    PMachSet,
+  //pub pmset:    PMachSet,
   pub lpmatrix: RevSortMap8<(Locus, PMach), ()>,
   pub plmatrix: RevSortMap8<(PMach, Locus), ()>,
   pub tagunify: RefCell<TagUnifier>,
@@ -233,7 +280,7 @@ impl PCtx {
     if cfg_debug() { println!("DEBUG: PCtx::new"); }
     let mut pctx = PCtx{
       ctr:      PCtxCtr::default(),
-      pmset:    PMachSet::default(),
+      //pmset:    PMachSet::default(),
       lpmatrix: RevSortMap8::default(),
       plmatrix: RevSortMap8::default(),
       tagunify: RefCell::new(TagUnifier::default()),
@@ -245,6 +292,7 @@ impl PCtx {
     };
     #[cfg(feature = "nvgpu")]
     {
+      // FIXME: multi-gpu.
       let gpu_ct = NvGpuPCtx::dev_count();
       pctx.nvgpu_ct = gpu_ct;
       for dev in 0 .. gpu_ct {
@@ -253,11 +301,11 @@ impl PCtx {
       }
     }
     pctx.smp.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
-    pctx.pmset.insert(PMach::Smp);
+    //pctx.pmset.insert(PMach::Smp);
     #[cfg(feature = "nvgpu")]
     if let Some(gpu) = pctx.nvgpu.as_ref() {
       gpu.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
-      pctx.pmset.insert(PMach::NvGpu);
+      //pctx.pmset.insert(PMach::NvGpu);
     }
     pctx
   }
@@ -280,30 +328,6 @@ impl PCtx {
   pub fn fastest_pmach(&self) -> PMach {
     PMach::NvGpu
   }
-
-  /*//pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Weak<dyn InnerCell_>>, PMemErr> {}
-  pub fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Option<Rc<dyn InnerCell_>>, PMemErr> {
-    match self.lpmatrix.find_lub((locus, PMach::_Top)) {
-      None => Ok(None),
-      Some((key, _)) => {
-        let pmach = key.key.as_ref().1;
-        let ret = match pmach {
-          PMach::Smp => {
-            self.smp.try_alloc(x, sz, locus)
-              //.map(|r| Some(Rc::downgrade(&r) as _))
-              .map(|r| Some(r as _))
-          }
-          PMach::NvGpu => {
-            self.nvgpu.as_ref().unwrap().try_alloc(x, sz, locus)
-              //.map(|r| Some(Rc::downgrade(&r) as _))
-              .map(|r| Some(r as _))
-          }
-          _ => panic!("bug")
-        };
-        ret
-      }
-    }
-  }*/
 
   pub fn alloc(&self, ty: &CellType, locus: Locus, pmach: PMach) -> PAddr {
     match pmach {
@@ -472,9 +496,6 @@ impl PCtx {
 }
 
 pub trait PCtxImpl {
-  // FIXME: don't need this associated type.
-  //type ICel: InnerCell;
-
   fn pmach(&self) -> PMach;
   fn fastest_locus(&self) -> Locus;
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>);
@@ -504,14 +525,14 @@ impl MemReg {
   }
 
   #[track_caller]
-  pub fn copy_from_slice<T: DtypeConstExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
+  pub fn copy_from_slice<T: DtypeConstExt + Copy>(&self, src_buf: &[T]) {
     panick_wrap(|| self._copy_from_slice(src_buf))
   }
 
-  pub fn _copy_from_slice<T: DtypeConstExt + Copy/*, Buf: Borrow<[T]>*/>(&self, src_buf: &[T]) {
+  pub fn _copy_from_slice<T: DtypeConstExt + Copy>(&self, src_buf: &[T]) {
     //let src_buf = src_buf.borrow();
     let src_len = src_buf.len();
-    let dsz = <T as DtypeConstExt>::dtype().size_bytes();
+    let dsz = <T as DtypeConstExt>::dtype_().size_bytes();
     let src_sz = dsz * src_len;
     assert_eq!(self.sz, src_sz);
     let src_start = src_buf.as_ptr() as usize;

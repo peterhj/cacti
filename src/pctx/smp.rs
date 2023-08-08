@@ -3,12 +3,6 @@ use crate::algo::{RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
 use cacti_cfg_env::*;
-/*#[cfg(feature = "nvgpu")]
-use crate::pctx::nvgpu::{GpuOuterCell};
-#[cfg(feature = "nvgpu")]
-use cacti_gpu_cu_ffi::{cuda_mem_free_host, cuda_mem_alloc_host};
-#[cfg(feature = "nvgpu")]
-use cacti_gpu_cu_ffi::types::{CUDA_ERROR_OUT_OF_MEMORY, CUDA_ERROR_DEINITIALIZED};*/
 use cacti_smp_c_ffi::*;
 
 #[cfg(target_os = "linux")]
@@ -23,39 +17,20 @@ use std::cell::{Cell};
 #[repr(C)]
 pub struct MemCell {
   pub ptr:  *mut c_void,
-  pub mask: usize,
+  pub sz:   usize,
 }
 
 impl Drop for MemCell {
   fn drop(&mut self) {
-    if self.ptr.is_null() {
-      return;
-    }
-    match (self.mask as u8) {
-      0 => {
-        unsafe {
-          free(self.ptr);
-        }
-      }
-      /*1 => {
-        #[cfg(feature = "nvgpu")]
-        unsafe {
-          match cuda_mem_free_host(self.ptr) {
-            Ok(_) => {}
-            Err(CUDA_ERROR_DEINITIALIZED) => {}
-            Err(_) => panic!("bug"),
-          }
-        }
-      }*/
-      _ => unreachable!()
+    assert!(!self.ptr.is_null());
+    unsafe {
+      free(self.ptr);
     }
   }
 }
 
 impl MemCell {
   pub fn try_alloc(sz: usize) -> Result<MemCell, PMemErr> {
-    // FIXME: assure 64-bit ptr.
-    assert!(sz <= 0x00ff_ffff_ffff_ffff);
     unsafe {
       let ptr = malloc(sz);
       if ptr.is_null() {
@@ -66,35 +41,9 @@ impl MemCell {
           return Err(PMemErr::Bot);
         }
       }
-      let mask = (sz << 8);
-      Ok(MemCell{ptr, mask})
+      Ok(MemCell{ptr, sz})
     }
   }
-
-  /*#[cfg(not(feature = "nvgpu"))]
-  pub fn try_alloc_page_locked(sz: usize) -> Result<MemCell, PMemErr> {
-    unimplemented!();
-  }
-
-  #[cfg(feature = "nvgpu")]
-  pub fn try_alloc_page_locked(sz: usize) -> Result<MemCell, PMemErr> {
-    // FIXME: assure 64-bit ptr.
-    assert!(sz <= 0x00ff_ffff_ffff_ffff);
-    let ptr = match cuda_mem_alloc_host(sz) {
-      Err(CUDA_ERROR_OUT_OF_MEMORY) => {
-        return Err(PMemErr::Oom);
-      }
-      Err(_) => {
-        return Err(PMemErr::Bot);
-      }
-      Ok(ptr) => ptr
-    };
-    if ptr.is_null() {
-      return Err(PMemErr::Bot);
-    }
-    let mask = (sz << 8) | 1;
-    Ok(MemCell{ptr, mask})
-  }*/
 
   pub fn as_reg(&self) -> MemReg {
     MemReg{
@@ -104,11 +53,11 @@ impl MemCell {
   }
 
   pub fn size_bytes(&self) -> usize {
-    self.mask >> 8
+    self.sz
   }
 }
 
-pub struct SmpInnerCell {
+/*pub struct SmpInnerCell {
   pub clk:  Cell<Clock>,
   pub mem:  MemCell,
   // FIXME
@@ -129,9 +78,10 @@ impl SmpInnerCell {
   }*/
 }
 
-impl InnerCell for SmpInnerCell {}
+impl InnerCell for SmpInnerCell {}*/
 
 pub struct SmpPCtx {
+  pub pcore_ct: Cell<u32>,
 }
 
 impl PCtxImpl for SmpPCtx {
@@ -158,21 +108,33 @@ impl PCtxImpl for SmpPCtx {
 
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
-    let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
-    // FIXME FIXME: debugging.
-    let n = 1;
-    (LIBCBLAS.openblas_set_num_threads.as_ref().unwrap())(n);
-    if cfg_info() { println!("INFO:   SmpPCtx::new: blas set num threads={}", n); }
-    let n = (LIBCBLAS.openblas_get_num_threads.as_ref().unwrap())();
-    if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
+    let n = if LIBCBLAS.openblas.get_num_threads.is_some() {
+      let n = (LIBCBLAS.openblas.get_num_threads.as_ref().unwrap())();
+      if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
+      assert!(n >= 1);
+      /*// FIXME FIXME: debugging.
+      let n = 1;
+      (LIBCBLAS.openblas.set_num_threads.as_ref().unwrap())(n);
+      if cfg_info() { println!("INFO:   SmpPCtx::new: blas set num threads={}", n); }
+      let n = (LIBCBLAS.openblas.get_num_threads.as_ref().unwrap())();
+      if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }*/
+      n as _
+    } else {
+      1
+    };
     SmpPCtx{
+      pcore_ct: Cell::new(n),
     }
   }
 
   pub fn phy_core_ct(&self) -> u32 {
+    self.physical_core_count()
+  }
+
+  pub fn physical_core_count(&self) -> u32 {
     // FIXME
-    1
+    //1
+    self.pcore_ct.get()
   }
 
   /*pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {

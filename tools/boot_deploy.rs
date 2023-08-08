@@ -55,12 +55,12 @@ fn main() {
       model.init_constants();
       model.init_state();
     } else {
-      for p in param.iter() {
+      /*for p in param.iter() {
         p.cache();
-      }
+      }*/
       model.cache_constants();
-      //model.reset_state();
       model.cache_state();
+      /*model.reset_state();*/
     }
     if iter_nr == 0 {
       in_[0].in_tok.mem_set_yield_();
@@ -141,13 +141,13 @@ fn main() {
         0
       };
       let prev_tok = in_tok_u16[prev_pos];
-      let act_next_tok = if pos < text_tok.len() + 1 {
+      /*let act_next_tok = if pos < text_tok.len() + 1 {
         text_tok.as_ref()[pos - 1]
       } else {
         0
-      };
-      //let next_tok = in_tok_u16[pos];
+      };*/
       let next_tok = out_tok_u16[pos - start_pos];
+      let act_next_tok = in_tok_u16[pos];
       println!("boot: pos={} act prev={} prev={} next={} act next={} act prev={:?} prev={:?} next={:?} act next={:?}",
           pos, act_prev_tok, prev_tok, next_tok, act_next_tok,
           tokenizer.id_to_piece(act_prev_tok as _).map(|s| sane_ascii(s.as_bytes())),

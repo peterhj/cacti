@@ -35,7 +35,7 @@ use futhark_ffi::{
   AbiSpace as FutAbiSpace,
   EntryAbi as FutEntryAbi,
   Array as FutArray,
-  FutharkFloatFormatter,
+  //FutharkFloatFormatter,
 };
 #[cfg(feature = "nvgpu")]
 use futhark_ffi::{
@@ -687,26 +687,26 @@ pub struct FutharkNumFormatter {
 impl FutharkNumFormatter {
   pub fn format(&self, x: &dyn FutharkNumExt) -> String {
     match x.dtype() {
-      Dtype::Fp64       => {
+      Dtype::F64    => {
         unimplemented!();
         /*let x = x.as_any();
         self.ffmt.format_f64(*x.downcast_ref::<TotalOrd<f64>>().map(|x| x.as_ref()).unwrap())*/
       }
-      Dtype::Fp32       => {
+      Dtype::F32    => {
         let x = x.as_any();
         self.ffmt.format_f32(*x.downcast_ref::<TotalOrd<f32>>().map(|x| x.as_ref())/*.or_else(||
                               x.downcast_ref::<NonNan<f32>>().map(|x| x.as_ref()))*/.unwrap())
       }
-      Dtype::Fp16       => unimplemented!(),
-      Dtype::Bfloat16   => unimplemented!(),
-      Dtype::Int64      => format!("{}i64", x.as_any().downcast_ref::<i64>().unwrap()),
-      Dtype::Int32      => format!("{}i32", x.as_any().downcast_ref::<i32>().unwrap()),
-      Dtype::Int16      => format!("{}i16", x.as_any().downcast_ref::<i16>().unwrap()),
-      Dtype::Int8       => format!("{}i8", x.as_any().downcast_ref::<i8>().unwrap()),
-      Dtype::UInt64     => format!("{}u64", x.as_any().downcast_ref::<u64>().unwrap()),
-      Dtype::UInt32     => format!("{}u32", x.as_any().downcast_ref::<u32>().unwrap()),
-      Dtype::UInt16     => format!("{}u16", x.as_any().downcast_ref::<u16>().unwrap()),
-      Dtype::UInt8      => format!("{}u8", x.as_any().downcast_ref::<u8>().unwrap()),
+      Dtype::F16    => unimplemented!(),
+      Dtype::Bf16   => unimplemented!(),
+      Dtype::I64    => format!("{}i64", x.as_any().downcast_ref::<i64>().unwrap()),
+      Dtype::I32    => format!("{}i32", x.as_any().downcast_ref::<i32>().unwrap()),
+      Dtype::I16    => format!("{}i16", x.as_any().downcast_ref::<i16>().unwrap()),
+      Dtype::I8     => format!("{}i8", x.as_any().downcast_ref::<i8>().unwrap()),
+      Dtype::U64    => format!("{}u64", x.as_any().downcast_ref::<u64>().unwrap()),
+      Dtype::U32    => format!("{}u32", x.as_any().downcast_ref::<u32>().unwrap()),
+      Dtype::U16    => format!("{}u16", x.as_any().downcast_ref::<u16>().unwrap()),
+      Dtype::U8     => format!("{}u8", x.as_any().downcast_ref::<u8>().unwrap()),
       _ => panic!("bug")
     }
   }
@@ -3738,9 +3738,9 @@ impl FutharkThunkImpl<CudaBackend> {
                                 // FIXME: view: need to do a raw accumulate.
                                 if len <= i32::max_value() as _ {
                                   match e.ty.dtype {
-                                    Dtype::Fp32 => &gpu.kernels.accumulate_1d_f32_idx32,
-                                    Dtype::Fp16 => &gpu.kernels.accumulate_1d_f16_idx32,
-                                    Dtype::UInt16 => &gpu.kernels.accumulate_1d_u16_idx32,
+                                    Dtype::F32 => &gpu.kernels.accumulate_1d_f32_idx32,
+                                    Dtype::F16 => &gpu.kernels.accumulate_1d_f16_idx32,
+                                    Dtype::U16 => &gpu.kernels.accumulate_1d_u16_idx32,
                                     _ => {
                                       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: unimplemented: accumulate kernel for dtype={:?}", e.ty.dtype);
                                       unimplemented!();

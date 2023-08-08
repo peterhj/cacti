@@ -252,14 +252,14 @@ impl StableCell {
 }
 
 pub struct StableSnapshot {
-}*/
+}
 
-/*pub struct Checkpoint {
+pub struct Checkpoint {
 }
 
 pub type StableCheckpoint = Checkpoint;*/
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Atom {
   pub raw_: i64,
@@ -281,7 +281,7 @@ impl Atom {
   pub fn is_nil(&self) -> bool {
     self.raw_ == 0
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -469,151 +469,6 @@ pub trait CellDeref {
 
 enum _Void {}
 
-/*const VOID_MAP_SIZE: usize = 0x1_0000_0000;
-const VOID_MAP_HI: usize = 0x8000_0000;
-
-thread_local! {
-  static TL_HANDLE_TAB: RefCell<CellViewHandleTab> = RefCell::new(CellViewHandleTab::new());
-}
-
-struct CellViewHandleTab {
-  base: MmapBuf,
-  lock: HashSet<CellPtr>,
-  read: HashMap<CellPtr, u32>,
-}
-
-impl CellViewHandleTab {
-  pub fn new() -> CellViewHandleTab {
-    assert_eq!(VOID_MAP_SIZE, VOID_MAP_HI << 1);
-    let base = MmapBuf::new_noderef(VOID_MAP_SIZE).unwrap();
-    let lock = HashSet::new();
-    let read = HashMap::new();
-    CellViewHandleTab{base, lock, read}
-  }
-}
-
-#[repr(transparent)]
-pub struct CellViewHandle([_Void]);
-
-impl Debug for CellViewHandle {
-  fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "CellViewHandle({})", self._deref().raw_)
-  }
-}
-
-impl Drop for CellViewHandle {
-  fn drop(&mut self) {
-    TL_HANDLE_TAB.with(|tab| {
-      let mut tab = tab.borrow_mut();
-      let base = tab.base.as_ptr() as usize;
-      let val = self.0.as_ptr() as usize;
-      let mut raw = val - base;
-      if (raw & VOID_MAP_HI) != 0 {
-        raw ^= VOID_MAP_HI;
-        let x = CellPtr::from_unchecked(raw as i32);
-        match tab.lock.remove(&x) {
-          false => {
-            panic!("ERROR: CellViewHandle::drop: expired mutable borrow");
-          }
-          true => {}
-        }
-      } else {
-        let x = CellPtr::from_unchecked(raw as i32);
-        match tab.read.get_mut(&x) {
-          None => {
-            panic!("ERROR: CellViewHandle::drop: expired immutable borrow");
-          }
-          Some(ref_ct) => {
-            *ref_ct -= 1;
-            if *ref_ct <= 0 {
-              assert_eq!(tab.read.remove(&x), Some(0));
-            }
-          }
-        }
-      }
-    });
-  }
-}
-
-impl CellViewHandle {
-  pub fn _from<'a>(x: CellPtr) -> &'a CellViewHandle {
-    let base = TL_HANDLE_TAB.with(|tab| {
-      let mut tab = tab.borrow_mut();
-      match tab.lock.contains(&x) {
-        false => {}
-        true => {
-          panic!("ERROR: CellViewHandle::_from: existing mutable borrow");
-        }
-      }
-      match tab.read.get_mut(&x) {
-        None => {
-          tab.read.insert(x, 1);
-        }
-        Some(ref_ct) => {
-          *ref_ct += 1;
-        }
-      }
-      tab.base.as_ptr() as usize
-    });
-    let raw = x.raw_ as usize;
-    assert!(raw < VOID_MAP_HI);
-    let val = base + raw;
-    unsafe { &*(from_raw_parts(val as *const _Void, 0) as *const [_Void] as *const CellViewHandle) }
-  }
-
-  pub fn _from_mut<'a>(x: CellPtr) -> &'a mut CellViewHandle {
-    let base = TL_HANDLE_TAB.with(|tab| {
-      let mut tab = tab.borrow_mut();
-      match tab.read.get(&x) {
-        None => {}
-        Some(ref_ct) => {
-          assert!(*ref_ct > 0);
-          panic!("ERROR: CellViewHandle::_from_mut: existing immutable borrow");
-        }
-      }
-      match tab.lock.contains(&x) {
-        false => {
-          tab.lock.insert(x);
-        }
-        true => {
-          panic!("ERROR: CellViewHandle::_from_mut: double mutable borrow");
-        }
-      }
-      tab.base.as_ptr() as usize
-    });
-    let raw = x.raw_ as usize;
-    assert!(raw < VOID_MAP_HI);
-    let val = base + (raw ^ VOID_MAP_HI);
-    unsafe { &mut *(from_raw_parts_mut(val as *mut _Void, 0) as *mut [_Void] as *mut CellViewHandle) }
-  }
-
-  pub fn materialize(&self) -> CellPtr {
-    // FIXME FIXME
-    self._deref()
-    //unimplemented!();
-  }
-}
-
-impl CellDeref for CellViewHandle {
-  fn _deref(&self) -> CellPtr {
-    let base = TL_HANDLE_TAB.with(|tab| {
-      let tab = tab.borrow();
-      tab.base.as_ptr() as usize
-    });
-    //println!("DEBUG: CellViewHandle::_deref: base=0x{:016x}", base);
-    let val = self.0.as_ptr() as usize;
-    //println!("DEBUG: CellViewHandle::_deref: val =0x{:016x}", val);
-    let mut raw = val - base;
-    //println!("DEBUG: CellViewHandle::_deref: raw =0x{:016x}", raw);
-    if (raw & VOID_MAP_HI) != 0 {
-      raw ^= VOID_MAP_HI;
-    }
-    //println!("DEBUG: CellViewHandle::_deref: raw2=0x{:016x}", raw);
-    //println!("DEBUG: CellViewHandle::_deref: ptr ={}", raw as i32);
-    CellPtr::from_unchecked(raw as i32)
-  }
-}*/
-
 pub type CellViewHandle = CellViewHandle_;
 
 #[repr(transparent)]
@@ -622,12 +477,6 @@ pub struct CellViewHandle_([_Void]);
 /*impl Debug for CellViewHandle_ {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
     write!(f, "CellViewHandle({})", self._deref().raw_)
-  }
-}*/
-
-/*impl Borrow<CellPtr> for CellViewHandle_ {
-  fn borrow(&self) -> &CellPtr {
-    unsafe { &*(self.0.as_ptr() as *const CellPtr) }
   }
 }*/
 
@@ -670,114 +519,6 @@ impl<'a> CellDeref for &'a mut CellViewHandle_ {
     CellPtr::from_unchecked(self.0.len() as _)
   }
 }
-
-/*#[derive(Clone, Copy)]
-#[repr(C)]
-pub struct CellViewHandleEx(usize, usize);
-
-impl Debug for CellViewHandleEx {
-  fn fmt(&self, f: &mut Formatter) -> FmtResult {
-    write!(f, "CellViewHandleEx({})", self._deref().raw_)
-  }
-}
-
-impl CellViewHandleEx {
-  pub fn _from(x: CellPtr) -> CellViewHandleEx {
-    let raw = x.raw_ as usize;
-    //assert!(raw < VOID_MAP_HI);
-    //CellViewHandleEx(raw, 0)
-    CellViewHandleEx(0, raw)
-  }
-
-  pub fn materialize(&self) -> CellPtr {
-    // FIXME FIXME
-    self._deref()
-    //unimplemented!();
-  }
-}
-
-impl CellDeref for CellViewHandleEx {
-  fn _deref(&self) -> CellPtr {
-    //CellPtr::from_unchecked(self.0 as i32)
-    CellPtr::from_unchecked(self.1 as i64)
-  }
-}*/
-
-/*#[derive(Clone, Debug)]
-pub struct CellView(pub CellPtr, pub Vec<CellVOp>);
-
-impl From<CellPtr> for CellView {
-  fn from(x: CellPtr) -> CellView {
-    CellView(x, Vec::new())
-  }
-}
-
-impl<'a> From<&'a CellPtr> for CellView {
-  fn from(x: &'a CellPtr) -> CellView {
-    CellView(*x, Vec::new())
-  }
-}
-
-impl From<StableCell> for CellView {
-  fn from(x: StableCell) -> CellView {
-    CellView(*x.as_ptr_ref(), Vec::new())
-  }
-}
-
-impl<'a> From<&'a StableCell> for CellView {
-  fn from(x: &'a StableCell) -> CellView {
-    CellView(*x.as_ptr_ref(), Vec::new())
-  }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct CellViewRef<'a>(pub &'a CellPtr, pub Option<&'a [CellVOp]>);
-
-pub trait BorrowCellView {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a>;
-}
-
-impl BorrowCellView for CellPtr {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(self, None)
-  }
-}
-
-impl<'r> BorrowCellView for &'r CellPtr {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(*self, None)
-  }
-}
-
-impl BorrowCellView for StableCell {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(self.as_ptr_ref(), None)
-  }
-}
-
-impl<'r> BorrowCellView for &'r StableCell {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(self.as_ptr_ref(), None)
-  }
-}
-
-impl BorrowCellView for CellView {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(&self.0, Some(&self.1))
-  }
-}
-
-impl<'r> BorrowCellView for &'r CellView {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(&self.0, Some(&self.1))
-  }
-}
-
-impl<'r> BorrowCellView for CellViewRef<'r> {
-  fn _borrow<'a>(&'a self) -> CellViewRef<'a> {
-    CellViewRef(self.0, self.1)
-  }
-}*/
 
 pub type CellVOp = CellViewOp;
 
@@ -838,7 +579,6 @@ impl CellViewOp {
 pub struct CellView {
   // TODO
   pub root: CellPtr,
-  //pub r_ty: CellType,
   pub vlog: Vec<CellViewOp>,
 }
 
@@ -846,7 +586,6 @@ impl Default for CellView {
   fn default() -> CellView {
     CellView{
       root: CellPtr::nil(),
-      //r_ty: CellType::top(),
       vlog: Vec::new(),
     }
   }
@@ -862,14 +601,6 @@ impl From<CellPtr> for CellView {
 }
 
 impl CellView {
-  /*pub fn new(root: CellPtr, r_ty: CellType) -> CellView {
-    CellView{
-      root,
-      r_ty,
-      vlog: Vec::new(),
-    }
-  }*/
-
   pub fn root(&self) -> CellPtr {
     self.root
   }
@@ -1192,6 +923,8 @@ impl CellViewPermState {
   }
 }
 
+pub type ScalarVal = ScalarVal_;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum ScalarVal_ {
   F64(TotalOrd<f64>),
@@ -1225,45 +958,34 @@ impl Neg for ScalarVal_ {
 impl ScalarVal_ {
   pub fn zero(dtype: Dtype) -> ScalarVal_ {
     match dtype {
-      /*Dtype::Fp64 => ScalarVal_::F64(f64::zero().into()),
-      Dtype::Fp32 => ScalarVal_::F32(f32::zero().into()),
-      Dtype::Fp16 => ScalarVal_::F16(f16::zero().into()),
-      Dtype::Int64 => ScalarVal_::I64(i64::zero().into()),
-      Dtype::Int32 => ScalarVal_::I32(i32::zero().into()),
-      Dtype::Int16 => ScalarVal_::I16(i16::zero().into()),
-      Dtype::Int8 => ScalarVal_::I8(i8::zero().into()),
-      Dtype::UInt64 => ScalarVal_::U64(u64::zero().into()),
-      Dtype::UInt32 => ScalarVal_::U32(u32::zero().into()),
-      Dtype::UInt16 => ScalarVal_::U16(u16::zero().into()),
-      Dtype::UInt8 => ScalarVal_::U8(u8::zero().into()),*/
-      Dtype::Fp64 => ScalarVal_::F64(<f64 as FpConstExt>::zero().into()),
-      Dtype::Fp32 => ScalarVal_::F32(<f32 as FpConstExt>::zero().into()),
-      Dtype::Fp16 => ScalarVal_::F16(<f16 as FpConstExt>::zero().into()),
-      Dtype::Int64 => ScalarVal_::I64(<i64 as UintConstExt>::zero().into()),
-      Dtype::Int32 => ScalarVal_::I32(<i32 as UintConstExt>::zero().into()),
-      Dtype::Int16 => ScalarVal_::I16(<i16 as UintConstExt>::zero().into()),
-      Dtype::Int8 => ScalarVal_::I8(<i8 as UintConstExt>::zero().into()),
-      Dtype::UInt64 => ScalarVal_::U64(<u64 as UintConstExt>::zero().into()),
-      Dtype::UInt32 => ScalarVal_::U32(<u32 as UintConstExt>::zero().into()),
-      Dtype::UInt16 => ScalarVal_::U16(<u16 as UintConstExt>::zero().into()),
-      Dtype::UInt8 => ScalarVal_::U8(<u8 as UintConstExt>::zero().into()),
+      Dtype::F64 => ScalarVal_::F64(<f64 as FpConstExt>::zero().into()),
+      Dtype::F32 => ScalarVal_::F32(<f32 as FpConstExt>::zero().into()),
+      Dtype::F16 => ScalarVal_::F16(<f16 as FpConstExt>::zero().into()),
+      Dtype::I64 => ScalarVal_::I64(<i64 as UintConstExt>::zero().into()),
+      Dtype::I32 => ScalarVal_::I32(<i32 as UintConstExt>::zero().into()),
+      Dtype::I16 => ScalarVal_::I16(<i16 as UintConstExt>::zero().into()),
+      Dtype::I8 => ScalarVal_::I8(<i8 as UintConstExt>::zero().into()),
+      Dtype::U64 => ScalarVal_::U64(<u64 as UintConstExt>::zero().into()),
+      Dtype::U32 => ScalarVal_::U32(<u32 as UintConstExt>::zero().into()),
+      Dtype::U16 => ScalarVal_::U16(<u16 as UintConstExt>::zero().into()),
+      Dtype::U8 => ScalarVal_::U8(<u8 as UintConstExt>::zero().into()),
       _ => unimplemented!()
     }
   }
 
   pub fn one(dtype: Dtype) -> ScalarVal_ {
     match dtype {
-      Dtype::Fp64 => ScalarVal_::F64(<f64 as FpConstExt>::one().into()),
-      Dtype::Fp32 => ScalarVal_::F32(<f32 as FpConstExt>::one().into()),
-      Dtype::Fp16 => ScalarVal_::F16(<f16 as FpConstExt>::one().into()),
-      Dtype::Int64 => ScalarVal_::I64(<i64 as UintConstExt>::one().into()),
-      Dtype::Int32 => ScalarVal_::I32(<i32 as UintConstExt>::one().into()),
-      Dtype::Int16 => ScalarVal_::I16(<i16 as UintConstExt>::one().into()),
-      Dtype::Int8 => ScalarVal_::I8(<i8 as UintConstExt>::one().into()),
-      Dtype::UInt64 => ScalarVal_::U64(<u64 as UintConstExt>::one().into()),
-      Dtype::UInt32 => ScalarVal_::U32(<u32 as UintConstExt>::one().into()),
-      Dtype::UInt16 => ScalarVal_::U16(<u16 as UintConstExt>::one().into()),
-      Dtype::UInt8 => ScalarVal_::U8(<u8 as UintConstExt>::one().into()),
+      Dtype::F64 => ScalarVal_::F64(<f64 as FpConstExt>::one().into()),
+      Dtype::F32 => ScalarVal_::F32(<f32 as FpConstExt>::one().into()),
+      Dtype::F16 => ScalarVal_::F16(<f16 as FpConstExt>::one().into()),
+      Dtype::I64 => ScalarVal_::I64(<i64 as UintConstExt>::one().into()),
+      Dtype::I32 => ScalarVal_::I32(<i32 as UintConstExt>::one().into()),
+      Dtype::I16 => ScalarVal_::I16(<i16 as UintConstExt>::one().into()),
+      Dtype::I8 => ScalarVal_::I8(<i8 as UintConstExt>::one().into()),
+      Dtype::U64 => ScalarVal_::U64(<u64 as UintConstExt>::one().into()),
+      Dtype::U32 => ScalarVal_::U32(<u32 as UintConstExt>::one().into()),
+      Dtype::U16 => ScalarVal_::U16(<u16 as UintConstExt>::one().into()),
+      Dtype::U8 => ScalarVal_::U8(<u8 as UintConstExt>::one().into()),
       _ => unimplemented!()
     }
   }
@@ -1277,17 +999,17 @@ impl ScalarVal_ {
 
   pub fn dtype(self) -> Dtype {
     match self {
-      ScalarVal_::F64(_) => Dtype::Fp64,
-      ScalarVal_::F32(_) => Dtype::Fp32,
-      ScalarVal_::F16(_) => Dtype::Fp16,
-      ScalarVal_::I64(_) => Dtype::Int64,
-      ScalarVal_::I32(_) => Dtype::Int32,
-      ScalarVal_::I16(_) => Dtype::Int16,
-      ScalarVal_::I8(_) => Dtype::Int8,
-      ScalarVal_::U64(_) => Dtype::UInt64,
-      ScalarVal_::U32(_) => Dtype::UInt32,
-      ScalarVal_::U16(_) => Dtype::UInt16,
-      ScalarVal_::U8(_) => Dtype::UInt8,
+      ScalarVal_::F64(_) => Dtype::F64,
+      ScalarVal_::F32(_) => Dtype::F32,
+      ScalarVal_::F16(_) => Dtype::F16,
+      ScalarVal_::I64(_) => Dtype::I64,
+      ScalarVal_::I32(_) => Dtype::I32,
+      ScalarVal_::I16(_) => Dtype::I16,
+      ScalarVal_::I8(_) => Dtype::I8,
+      ScalarVal_::U64(_) => Dtype::U64,
+      ScalarVal_::U32(_) => Dtype::U32,
+      ScalarVal_::U16(_) => Dtype::U16,
+      ScalarVal_::U8(_) => Dtype::U8,
       ScalarVal_::Bot => Dtype::_Bot,
       _ => unimplemented!()
     }
@@ -1360,11 +1082,12 @@ impl ScalarVal_ {
   }
 }
 
-pub trait IntoScalarValExt/*: DtypeExt*/ {
-  /*type Val: DtypeExt + Copy + Eq + Any;
-
-  fn into_scalar_val(self) -> Self::Val;*/
+pub trait IntoScalarValExt {
   fn into_scalar_val_(self) -> ScalarVal_;
+
+  fn into_scalar_val(self) -> ScalarVal_ where Self: Sized {
+    self.into_scalar_val_()
+  }
 }
 
 impl IntoScalarValExt for ScalarVal_ {
@@ -1374,36 +1097,18 @@ impl IntoScalarValExt for ScalarVal_ {
 }
 
 impl IntoScalarValExt for f16 {
-  /*type Val = TotalOrd<f16>;
-
-  fn into_scalar_val(self) -> Self::Val {
-    self.into()
-  }*/
-
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F16(self.into())
   }
 }
 
 impl IntoScalarValExt for f32 {
-  /*type Val = TotalOrd<f32>;
-
-  fn into_scalar_val(self) -> Self::Val {
-    self.into()
-  }*/
-
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F32(self.into())
   }
 }
 
 impl IntoScalarValExt for f64 {
-  /*type Val = TotalOrd<f64>;
-
-  fn into_scalar_val(self) -> Self::Val {
-    self.into()
-  }*/
-
   fn into_scalar_val_(self) -> ScalarVal_ {
     ScalarVal_::F64(self.into())
   }
@@ -1422,21 +1127,28 @@ impl IntoScalarValExt for i64 {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum DtypeKind_ {
+  Fp(u8, u8),
+  Int,
+  Uint,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
 pub enum Dtype {
   _Top,
-  Fp64,
-  Fp32,
-  Fp16,
-  Bfloat16,
-  Int64,
-  Int32,
-  Int16,
-  Int8,
-  UInt64,
-  UInt32,
-  UInt16,
-  UInt8,
+  F64,
+  F32,
+  F16,
+  Bf16,
+  I64,
+  I32,
+  I16,
+  I8,
+  U64,
+  U32,
+  U16,
+  U8,
   _Bot,
 }
 
@@ -1446,24 +1158,23 @@ impl TryFrom<TorchDtype> for Dtype {
 
   fn try_from(t: TorchDtype) -> Result<Dtype, SmolStr> {
     Ok(match t {
-      TorchDtype::Float64 => Dtype::Fp64,
-      TorchDtype::Float32 => Dtype::Fp32,
-      TorchDtype::Float16 => Dtype::Fp16,
-      TorchDtype::Bfloat16 => Dtype::Bfloat16,
-      TorchDtype::Int64 => Dtype::Int64,
-      TorchDtype::Int32 => Dtype::Int32,
-      TorchDtype::Int16 => Dtype::Int16,
-      TorchDtype::Int8 => Dtype::Int8,
-      TorchDtype::UInt64 => Dtype::UInt64,
-      TorchDtype::UInt32 => Dtype::UInt32,
-      TorchDtype::UInt16 => Dtype::UInt16,
-      TorchDtype::UInt8 => Dtype::UInt8,
+      TorchDtype::Float64 => Dtype::F64,
+      TorchDtype::Float32 => Dtype::F32,
+      TorchDtype::Float16 => Dtype::F16,
+      TorchDtype::Bfloat16 => Dtype::Bf16,
+      TorchDtype::Int64 => Dtype::I64,
+      TorchDtype::Int32 => Dtype::I32,
+      TorchDtype::Int16 => Dtype::I16,
+      TorchDtype::Int8 => Dtype::I8,
+      TorchDtype::UInt64 => Dtype::U64,
+      TorchDtype::UInt32 => Dtype::U32,
+      TorchDtype::UInt16 => Dtype::U16,
+      TorchDtype::UInt8 => Dtype::U8,
     })
   }
 }
 
 impl TryFrom<SmolStr> for Dtype {
-  //type Error = String;
   type Error = SmolStr;
 
   fn try_from(s: SmolStr) -> Result<Dtype, SmolStr> {
@@ -1472,7 +1183,6 @@ impl TryFrom<SmolStr> for Dtype {
 }
 
 impl TryFrom<String> for Dtype {
-  //type Error = String;
   type Error = SmolStr;
 
   fn try_from(s: String) -> Result<Dtype, SmolStr> {
@@ -1481,7 +1191,6 @@ impl TryFrom<String> for Dtype {
 }
 
 impl<'a> TryFrom<&'a str> for Dtype {
-  //type Error = String;
   type Error = SmolStr;
 
   fn try_from(s: &'a str) -> Result<Dtype, SmolStr> {
@@ -1490,35 +1199,34 @@ impl<'a> TryFrom<&'a str> for Dtype {
 }
 
 impl FromStr for Dtype {
-  //type Err = String;
   type Err = SmolStr;
 
   fn from_str(s: &str) -> Result<Dtype, SmolStr> {
     Ok(match s {
       "f64"     |
-      "float64" => Dtype::Fp64,
+      "float64" => Dtype::F64,
       "f32"     |
-      "float32" => Dtype::Fp32,
+      "float32" => Dtype::F32,
       "f16"     |
-      "float16" => Dtype::Fp16,
+      "float16" => Dtype::F16,
       "bf16"    |
-      "bfloat16" => Dtype::Bfloat16,
+      "bfloat16" => Dtype::Bf16,
       "i64"     |
-      "int64"   => Dtype::Int64,
+      "int64"   => Dtype::I64,
       "i32"     |
-      "int32"   => Dtype::Int32,
+      "int32"   => Dtype::I32,
       "i16"     |
-      "int16"   => Dtype::Int16,
+      "int16"   => Dtype::I16,
       "i8"      |
-      "int8"    => Dtype::Int8,
+      "int8"    => Dtype::I8,
       "u64"     |
-      "uint64"  => Dtype::UInt64,
+      "uint64"  => Dtype::U64,
       "u32"     |
-      "uint32"  => Dtype::UInt32,
+      "uint32"  => Dtype::U32,
       "u16"     |
-      "uint16"  => Dtype::UInt16,
+      "uint16"  => Dtype::U16,
       "u8"      |
-      "uint8"   => Dtype::UInt8,
+      "uint8"   => Dtype::U8,
       _ => return Err(s.into())
     })
   }
@@ -1531,59 +1239,54 @@ impl Dtype {
 
   pub fn format_futhark(self) -> &'static str {
     match self {
-      Dtype::_Top       => panic!("bug"),
-      Dtype::Fp64       => "f64",
-      Dtype::Fp32       => "f32",
-      Dtype::Fp16       => "f16",
-      Dtype::Bfloat16   => unimplemented!(),
-      Dtype::Int64      => "i64",
-      Dtype::Int32      => "i32",
-      Dtype::Int16      => "i16",
-      Dtype::Int8       => "i8",
-      Dtype::UInt64     => "u64",
-      Dtype::UInt32     => "u32",
-      Dtype::UInt16     => "u16",
-      Dtype::UInt8      => "u8",
-      Dtype::_Bot       => panic!("bug"),
+      Dtype::_Top   => panic!("bug"),
+      Dtype::F64    => "f64",
+      Dtype::F32    => "f32",
+      Dtype::F16    => "f16",
+      Dtype::Bf16   => {
+        println!("DEBUG: Dtype::format_futhark: unimplemented: bfloat16 is not currently supported by Futhark");
+        panic!();
+      }
+      Dtype::I64    => "i64",
+      Dtype::I32    => "i32",
+      Dtype::I16    => "i16",
+      Dtype::I8     => "i8",
+      Dtype::U64    => "u64",
+      Dtype::U32    => "u32",
+      Dtype::U16    => "u16",
+      Dtype::U8     => "u8",
+      Dtype::_Bot   => panic!("bug"),
     }
   }
 
-  pub fn size_bits(self) -> u64 {
+  pub fn parts(self) -> (DtypeKind_, u8) {
     match self {
-      Dtype::_Top       => panic!("bug"),
-      Dtype::Fp64       => 64,
-      Dtype::Fp32       => 32,
-      Dtype::Fp16       => 16,
-      Dtype::Bfloat16   => 16,
-      Dtype::Int64      => 64,
-      Dtype::Int32      => 32,
-      Dtype::Int16      => 16,
-      Dtype::Int8       => 8,
-      Dtype::UInt64     => 64,
-      Dtype::UInt32     => 32,
-      Dtype::UInt16     => 16,
-      Dtype::UInt8      => 8,
-      Dtype::_Bot       => panic!("bug"),
+      Dtype::_Top   => panic!("bug"),
+      Dtype::F64    => (DtypeKind_::Fp(11, 52), 64),
+      Dtype::F32    => (DtypeKind_::Fp(8, 23), 32),
+      Dtype::F16    => (DtypeKind_::Fp(5, 10), 16),
+      Dtype::Bf16   => (DtypeKind_::Fp(8, 7), 16),
+      Dtype::I64    => (DtypeKind_::Int, 64),
+      Dtype::I32    => (DtypeKind_::Int, 32),
+      Dtype::I16    => (DtypeKind_::Int, 16),
+      Dtype::I8     => (DtypeKind_::Int, 8),
+      Dtype::U64    => (DtypeKind_::Uint, 64),
+      Dtype::U32    => (DtypeKind_::Uint, 32),
+      Dtype::U16    => (DtypeKind_::Uint, 16),
+      Dtype::U8     => (DtypeKind_::Uint, 8),
+      Dtype::_Bot   => panic!("bug"),
     }
+  }
+
+  pub fn size_bits(self) -> u8 {
+    let (_, nbits) = self.parts();
+    nbits
   }
 
   pub fn size_bytes(self) -> usize {
-    match self {
-      Dtype::_Top       => panic!("bug"),
-      Dtype::Fp64       => 8,
-      Dtype::Fp32       => 4,
-      Dtype::Fp16       => 2,
-      Dtype::Bfloat16   => 2,
-      Dtype::Int64      => 8,
-      Dtype::Int32      => 4,
-      Dtype::Int16      => 2,
-      Dtype::Int8       => 1,
-      Dtype::UInt64     => 8,
-      Dtype::UInt32     => 4,
-      Dtype::UInt16     => 2,
-      Dtype::UInt8      => 1,
-      Dtype::_Bot       => panic!("bug"),
-    }
+    let (_, nbits) = self.parts();
+    assert_eq!(nbits % 8, 0);
+    (nbits / 8) as usize
   }
 
   pub fn align_bytes(self) -> usize {
@@ -1592,33 +1295,21 @@ impl Dtype {
   }
 
   pub fn is_float(self) -> bool {
-    match self {
-      Dtype::Fp64 |
-      Dtype::Fp32 |
-      Dtype::Fp16 |
-      Dtype::Bfloat16 => true,
+    let (kind, _) = self.parts();
+    match kind {
+      DtypeKind_::Fp(..) => true,
       _ => false
     }
   }
 
   pub fn is_signed_int(self) -> bool {
-    match self {
-      Dtype::Int64 |
-      Dtype::Int32 |
-      Dtype::Int16 |
-      Dtype::Int8 => true,
-      _ => false
-    }
+    let (kind, _) = self.parts();
+    kind == DtypeKind_::Int
   }
 
   pub fn is_unsigned_int(self) -> bool {
-    match self {
-      Dtype::UInt64 |
-      Dtype::UInt32 |
-      Dtype::UInt16 |
-      Dtype::UInt8 => true,
-      _ => false
-    }
+    let (kind, _) = self.parts();
+    kind == DtypeKind_::Uint
   }
 
   pub fn is_uint(self) -> bool {
@@ -1626,18 +1317,27 @@ impl Dtype {
   }
 
   pub fn max(self, rhs: Dtype) -> Option<Dtype> {
-    match (self, rhs) {
-      (Dtype::_Top, _) |
-      (_, Dtype::_Top) => Some(Dtype::_Top),
-      (Dtype::Fp32, Dtype::Fp32) |
-      (Dtype::Fp32, Dtype::Fp16) |
-      (Dtype::Fp32, Dtype::Bfloat16) |
-      (Dtype::Fp16, Dtype::Fp32) |
-      (Dtype::Bfloat16, Dtype::Fp32) => Some(Dtype::Fp32),
-      (Dtype::Fp16, Dtype::Fp16) => Some(Dtype::Fp16),
-      (Dtype::Bfloat16, Dtype::Bfloat16) => Some(Dtype::Bfloat16),
-      _ => None
+    let (lkind, lnbits) = self.parts();
+    let (rkind, rnbits) = rhs.parts();
+    match (lkind, rkind) {
+      (DtypeKind_::Fp(le, lm), DtypeKind_::Fp(re, rm)) => {
+        if le >= re && lm >= rm {
+          return Some(self);
+        } else if le <= re && lm <= rm {
+          return Some(rhs);
+        }
+      }
+      (DtypeKind_::Int, DtypeKind_::Int) |
+      (DtypeKind_::Uint, DtypeKind_::Uint) => {
+        if lnbits >= rnbits {
+          return Some(self);
+        } else {
+          return Some(rhs);
+        }
+      }
+      _ => {}
     }
+    None
   }
 }
 
@@ -1653,33 +1353,29 @@ pub trait DtypeExt {
 }
 
 pub trait DtypeConstExt {
-  fn dtype() -> Dtype where Self: Sized;
+  fn dtype_() -> Dtype where Self: Sized;
 }
 
-impl DtypeConstExt for TotalOrd<f64> { fn dtype() -> Dtype { Dtype::Fp64 } }
-impl DtypeConstExt for TotalOrd<f32> { fn dtype() -> Dtype { Dtype::Fp32 } }
-//impl DtypeConstExt for NonNan<f32>   { fn dtype() -> Dtype { Dtype::Fp32 } }
-impl DtypeConstExt for TotalOrd<f16> { fn dtype() -> Dtype { Dtype::Fp16 } }
+impl DtypeConstExt for TotalOrd<f64> { fn dtype_() -> Dtype { Dtype::F64 } }
+impl DtypeConstExt for TotalOrd<f32> { fn dtype_() -> Dtype { Dtype::F32 } }
+impl DtypeConstExt for TotalOrd<f16> { fn dtype_() -> Dtype { Dtype::F16 } }
+//impl DtypeConstExt for TotalOrd<bf16> { fn dtype_() -> Dtype { Dtype::Bf16 } }
 
-impl DtypeConstExt for f64 { fn dtype() -> Dtype { Dtype::Fp64 } }
-impl DtypeConstExt for f32 { fn dtype() -> Dtype { Dtype::Fp32 } }
-impl DtypeConstExt for f16 { fn dtype() -> Dtype { Dtype::Fp16 } }
-impl DtypeConstExt for bf16 { fn dtype() -> Dtype { Dtype::Bfloat16 } }
-impl DtypeConstExt for i64 { fn dtype() -> Dtype { Dtype::Int64 } }
-impl DtypeConstExt for i32 { fn dtype() -> Dtype { Dtype::Int32 } }
-impl DtypeConstExt for i16 { fn dtype() -> Dtype { Dtype::Int16 } }
-impl DtypeConstExt for i8  { fn dtype() -> Dtype { Dtype::Int8 } }
-impl DtypeConstExt for u64 { fn dtype() -> Dtype { Dtype::UInt64 } }
-impl DtypeConstExt for u32 { fn dtype() -> Dtype { Dtype::UInt32 } }
-impl DtypeConstExt for u16 { fn dtype() -> Dtype { Dtype::UInt16 } }
-impl DtypeConstExt for u8  { fn dtype() -> Dtype { Dtype::UInt8 } }
+impl DtypeConstExt for f64 { fn dtype_() -> Dtype { Dtype::F64 } }
+impl DtypeConstExt for f32 { fn dtype_() -> Dtype { Dtype::F32 } }
+impl DtypeConstExt for f16 { fn dtype_() -> Dtype { Dtype::F16 } }
+impl DtypeConstExt for bf16 { fn dtype_() -> Dtype { Dtype::Bf16 } }
+impl DtypeConstExt for i64 { fn dtype_() -> Dtype { Dtype::I64 } }
+impl DtypeConstExt for i32 { fn dtype_() -> Dtype { Dtype::I32 } }
+impl DtypeConstExt for i16 { fn dtype_() -> Dtype { Dtype::I16 } }
+impl DtypeConstExt for i8  { fn dtype_() -> Dtype { Dtype::I8 } }
+impl DtypeConstExt for u64 { fn dtype_() -> Dtype { Dtype::U64 } }
+impl DtypeConstExt for u32 { fn dtype_() -> Dtype { Dtype::U32 } }
+impl DtypeConstExt for u16 { fn dtype_() -> Dtype { Dtype::U16 } }
+impl DtypeConstExt for u8  { fn dtype_() -> Dtype { Dtype::U8 } }
 
-pub fn dtype<T: DtypeConstExt>() -> Dtype {
-  T::dtype()
-}
-
-pub fn dtype_of<T: DtypeConstExt>(_: T) -> Dtype {
-  T::dtype()
+pub fn dtype_of<T: DtypeConstExt>() -> Dtype {
+  T::dtype_()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -1933,41 +1629,6 @@ impl CellLayout {
   }
 }
 
-/*// FIXME
-pub type CellViewType = CellSliceType;
-
-#[derive(Clone, Debug)]
-pub struct CellSliceType {
-  pub base:     Vec<i64>,
-  pub shape:    Vec<i64>,
-  pub oshape:   Vec<i64>,
-  pub dtype:    Dtype,
-}
-
-impl CellSliceType {
-  pub fn is_packed(&self) -> bool {
-    let nd = self.shape.len();
-    let mut fakestride = Vec::with_capacity(nd);
-    let mut origstride = Vec::with_capacity(nd);
-    if nd > 1 {
-      fakestride.push(1);
-      origstride.push(1);
-    }
-    for d in 1 .. nd {
-      let s = self.shape[nd - d];
-      assert!(s > 0);
-      let og_s = self.oshape[nd - d];
-      assert!(og_s > 0);
-      fakestride.push(s * fakestride[d - 1]);
-      origstride.push(og_s * origstride[d - 1]);
-      if fakestride[d] != origstride[d] {
-        return false;
-      }
-    }
-    true
-  }
-}*/
-
 #[derive(Clone, Debug)]
 pub struct CellTransposeType {
   pub perm: Vec<i8>,
@@ -2022,124 +1683,8 @@ impl CellTransposeType {
   }
 }
 
-/*#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[repr(u8)]
-pub enum CellMode {
-  _Top,
-  Aff,
-  Init,
-  //Fin,
-  //Unsafe,
-}
-
-impl Default for CellMode {
-  fn default() -> CellMode {
-    CellMode::_Top
-  }
-}
-
-impl CellMode {
-  pub fn set_aff(&mut self) -> Result<bool, ()> {
-    match *self {
-      CellMode::_Top => {
-        *self = CellMode::Aff;
-        Ok(false)
-      }
-      CellMode::Aff => {
-        Ok(true)
-      }
-      _ => {
-        return Err(());
-      }
-    }
-  }
-
-  pub fn set_init(&mut self) -> Result<bool, ()> {
-    match *self {
-      CellMode::_Top => {
-        *self = CellMode::Init;
-        Ok(false)
-      }
-      CellMode::Init => {
-        Ok(true)
-      }
-      _ => {
-        return Err(());
-      }
-    }
-  }
-}
-
-#[derive(Clone, Copy, Default, Debug)]
-#[repr(transparent)]
-pub struct CellFlag {
-  bits: u8,
-}
-
-impl CellFlag {
-  pub fn reset(&mut self) {
-    // FIXME FIXME
-    /*self.bits &= 0xf0;*/
-    self.bits = 0;
-  }
-
-  pub fn intro(&self) -> bool {
-    (self.bits & 1) != 0
-  }
-
-  pub fn set_intro(&mut self) -> bool {
-    let prev = self.intro();
-    self.bits |= 1;
-    prev
-  }
-
-  pub fn unset_intro(&mut self) -> bool {
-    let prev = self.intro();
-    self.bits &= !1;
-    prev
-  }
-
-  pub fn seal(&self) -> bool {
-    (self.bits & 2) != 0
-  }
-
-  pub fn set_seal(&mut self) -> bool {
-    let prev = self.seal();
-    self.bits |= 2;
-    prev
-  }
-
-  pub fn unset_seal(&mut self) -> bool {
-    let prev = self.seal();
-    self.bits &= !2;
-    prev
-  }
-
-  pub fn cache(&self) -> bool {
-    (self.bits & 4) != 0
-  }
-
-  pub fn set_cache(&mut self) -> bool {
-    let prev = self.cache();
-    self.bits |= 4;
-    prev
-  }
-
-  /*pub fn eval(&self) -> bool {
-    (self.bits & 8) != 0
-  }
-
-  pub fn set_eval(&mut self) -> bool {
-    let prev = self.eval();
-    self.bits |= 8;
-    prev
-  }*/
-}*/
-
 #[derive(Clone, Default, Debug)]
 pub struct CellState {
-  //pub mode: CellMode,
-  //pub flag: CellFlag,
   pub clk:  Clock,
   // FIXME
   //pub seal: Clock,
@@ -2366,10 +1911,10 @@ impl PCell {
     }
   }
 
-  pub fn hardcopy(&self) -> PCell {
+  /*pub fn hardcopy(&self) -> PCell {
     // FIXME FIXME
     unimplemented!();
-  }
+  }*/
 }
 
 pub trait InnerCell {
@@ -2439,17 +1984,7 @@ impl<C: InnerCell + Any> InnerCell_ for C {
   }
 }
 
-/*pub struct CellSet {
-  // TODO TODO
-  pub ptr_: CellPtr,
-}
-
-pub struct CellMap {
-  // TODO TODO
-  pub ptr_: CellPtr,
-}*/
-
-pub struct MSet {
+/*pub struct MSet {
   // TODO TODO
   pub ptr_: MCellPtr,
 }
@@ -2559,4 +2094,4 @@ impl MCellMap {
     self.kidx.insert((key, kclk), idx);
     self.log.push(MCellMapEntry{key, val, kclk, vclk, rev_: Cell::new(false)});
   }
-}
+}*/

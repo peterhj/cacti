@@ -4,15 +4,42 @@ use libc::{c_char, c_int, cpu_set_t};
 use libloading::nonsafe::{Library, Symbol};
 
 #[derive(Default)]
+pub struct Libopenblas {
+  pub set_num_threads:  Option<Symbol<extern "C" fn (c_int)>>,
+  pub get_num_threads:  Option<Symbol<extern "C" fn () -> c_int>>,
+  pub get_config:       Option<Symbol<extern "C" fn () -> *mut c_char>>,
+  pub get_corename:     Option<Symbol<extern "C" fn () -> *mut c_char>>,
+  pub setaffinity:      Option<Symbol<extern "C" fn (c_int, usize, *mut cpu_set_t) -> c_int>>,
+  pub getaffinity:      Option<Symbol<extern "C" fn (c_int, usize, *mut cpu_set_t) -> c_int>>,
+  pub get_parallel:     Option<Symbol<extern "C" fn () -> c_int>>,
+  // TODO
+}
+
+impl Libopenblas {
+  pub unsafe fn load_symbols(&mut self, library: &Library) -> Result<(), ()> {
+    self.set_num_threads = library.get(b"openblas_set_num_threads").ok();
+    self.get_num_threads = library.get(b"openblas_get_num_threads").ok();
+    self.get_config = library.get(b"openblas_get_config").ok();
+    self.get_corename = library.get(b"openblas_get_corename").ok();
+    self.setaffinity = library.get(b"openblas_setaffinity").ok();
+    self.getaffinity = library.get(b"openblas_getaffinity").ok();
+    self.get_parallel = library.get(b"openblas_get_parallel").ok();
+    // TODO
+    self._check_required()?;
+    Ok(())
+  }
+
+  fn _check_required(&self) -> Result<(), ()> {
+    //self._.as_ref().ok_or(())?;
+    // TODO
+    Ok(())
+  }
+}
+
+#[derive(Default)]
 pub struct Libcblas {
-  inner_library:                Option<Library>,
-  pub openblas_set_num_threads: Option<Symbol<extern "C" fn (c_int)>>,
-  pub openblas_get_num_threads: Option<Symbol<extern "C" fn () -> c_int>>,
-  pub openblas_get_config:      Option<Symbol<extern "C" fn () -> *mut c_char>>,
-  pub openblas_get_corename:    Option<Symbol<extern "C" fn () -> *mut c_char>>,
-  pub openblas_setaffinity:     Option<Symbol<extern "C" fn (c_int, usize, *mut cpu_set_t) -> c_int>>,
-  pub openblas_getaffinity:     Option<Symbol<extern "C" fn (c_int, usize, *mut cpu_set_t) -> c_int>>,
-  pub openblas_get_parallel:    Option<Symbol<extern "C" fn () -> c_int>>,
+  inner_library:        Option<Library>,
+  pub openblas:         Libopenblas,
   // TODO
   pub cblas_sdot:       Option<Symbol<extern "C" fn (
                             c_int,
@@ -113,13 +140,7 @@ impl Libcblas {
 
   pub unsafe fn load_symbols(&mut self) -> Result<(), ()> {
     let library = self.inner_library.as_ref().unwrap();
-    self.openblas_set_num_threads = library.get(b"openblas_set_num_threads").ok();
-    self.openblas_get_num_threads = library.get(b"openblas_get_num_threads").ok();
-    self.openblas_get_config = library.get(b"openblas_get_config").ok();
-    self.openblas_get_corename = library.get(b"openblas_get_corename").ok();
-    self.openblas_setaffinity = library.get(b"openblas_setaffinity").ok();
-    self.openblas_getaffinity = library.get(b"openblas_getaffinity").ok();
-    self.openblas_get_parallel = library.get(b"openblas_get_parallel").ok();
+    self.openblas.load_symbols(library)?;
     self.cblas_sdot = library.get(b"cblas_sdot").ok();
     self.cblas_sasum = library.get(b"cblas_sasum").ok();
     self.cblas_ssum = library.get(b"cblas_ssum").ok();

@@ -55,7 +55,7 @@ impl LlamaConfig {
       seq_cap:    2048,
       ubat_sz:    1,
       rms_norm_eps:   1.0e-6,
-      dtype:      f16::dtype(),
+      dtype:      f16::dtype_(),
     }
   }
 
@@ -69,7 +69,7 @@ impl LlamaConfig {
       seq_cap:    2048,
       ubat_sz:    1,
       rms_norm_eps:   1.0e-6,
-      dtype:      f16::dtype(),
+      dtype:      f16::dtype_(),
     }
   }
 
@@ -83,12 +83,12 @@ impl LlamaConfig {
       seq_cap:    2048,
       ubat_sz:    1,
       rms_norm_eps:   1.0e-6,
-      dtype:      f16::dtype(),
+      dtype:      f16::dtype_(),
     }
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LlamaLayer {
   pub pre_norm: StableCell,
   pub inv_freq: StableCell,
@@ -102,7 +102,7 @@ pub struct LlamaLayer {
   pub down: StableCell,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Llama {
   pub cfg: LlamaConfig,
   pub cos: Option<StableCell>,
@@ -124,27 +124,25 @@ impl From<LlamaConfig> for Llama {
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
     assert!(tok_dim <= u16::max_value() as i64 + 1);
-    //let cos = StableCell::array([seq_cap, head_dim], f16::dtype());
-    //let sin = StableCell::array([seq_cap, head_dim], f16::dtype());
     let cos = None;
     let sin = None;
-    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
     let mut layers = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let q = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
-      let k = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
-      let v = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
-      let o = StableCell::array([1, inner_dim, 1, inner_dim], f16::dtype());
-      let gate = StableCell::array([1, mlp_inner_dim, 1, inner_dim], f16::dtype());
-      let up = StableCell::array([1, mlp_inner_dim, 1, inner_dim], f16::dtype());
-      let down = StableCell::array([1, inner_dim, 1, mlp_inner_dim], f16::dtype());
-      let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
-      let pre_norm = StableCell::array([inner_dim], f16::dtype());
-      let post_norm = StableCell::array([inner_dim], f16::dtype());
+      let q = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let k = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let v = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let o = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
+      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
+      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype_());
+      let inv_freq = StableCell::array([head_dim / 2], f32::dtype_());
+      let pre_norm = StableCell::array([inner_dim], f16::dtype_());
+      let post_norm = StableCell::array([inner_dim], f16::dtype_());
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
     }
-    let head_norm = StableCell::array([inner_dim], f16::dtype());
-    let lm_head = StableCell::array([1, tok_dim, 1, inner_dim], f16::dtype());
+    let head_norm = StableCell::array([inner_dim], f16::dtype_());
+    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype_());
     Llama{cfg, cos, sin, embed, layers, head_norm, lm_head}
   }
 }
@@ -190,10 +188,6 @@ impl Llama {
     param
   }
 
-  /*pub fn param(&self) -> Vec<StableCell> {
-    self.clone_param()
-  }*/
-
   /*pub fn fresh_grad(&self) -> Vec<StableCell> {
     // FIXME
     unimplemented!();
@@ -207,22 +201,17 @@ impl Llama {
   pub fn fresh_input(&self) -> LanguageModelIn {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
-    let in_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
-    let in_lm_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype());
-    let in_lm_loss_scale = StableCell::array([ubat_sz, seq_cap], f32::dtype());
+    let in_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype_());
+    let in_lm_tok = StableCell::array([ubat_sz, seq_cap], u16::dtype_());
+    let in_lm_loss_scale = StableCell::array([ubat_sz, seq_cap], f32::dtype_());
     LanguageModelIn{in_tok, in_lm_tok, in_lm_loss_scale}
   }
 
-  /*pub fn make_input(&self) -> LanguageModelIn {
-    self.fresh_input()
-  }*/
-
-  pub fn init(&mut self) {
-    // TODO
+  pub fn init_constants(&mut self) {
     let init_embed = || {
       let seq_cap = self.cfg.seq_cap;
       let dtype = self.cfg.dtype;
-      let pos = iota(seq_cap).cast(f32::dtype());
+      let pos = iota(seq_cap).cast(f32::dtype_());
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
       let freq2 = freq.inner_concat(freq);
       let cos = freq2.cos().cast(dtype);
@@ -238,49 +227,12 @@ impl Llama {
     self.sin = Some(sin.keep());
   }
 
-  pub fn cache(&self) {
-    // TODO
+  pub fn cache_constants(&self) {
     self.cos.as_ref().unwrap().cache();
     self.sin.as_ref().unwrap().cache();
   }
 
   pub fn apply<X: CellDeref, Y: CellDeref>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
-    let block_causal_attention_mask = |x: CellPtr| {
-      x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
-    };
-    let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
-      let ubat_sz = self.cfg.ubat_sz;
-      let seq_cap = self.cfg.seq_cap;
-      let num_head = self.cfg.num_head;
-      let head_dim = self.cfg.head_dim;
-      let x = x.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let v = x.cast(f32::dtype())
-               .square().inner_mean()
-               .new_shape([ubat_sz * seq_cap, 1]);
-      let t = x / (v + eps).sqrt();
-      let w = weight.new_shape([1, num_head * head_dim]);
-      let y = (w * t).cast(dtype)
-                     .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      y
-    };
-    /*let inner_symplectic_map = |x: CellPtr| {
-      let xty = x.type_();
-      let (lx, rx) = x.inner_split(xty.inner_len() / 2);
-      (-rx).inner_concat(lx)
-    };*/
-    let symplectic_embed = |q: CellPtr, k: CellPtr, | {
-      let seq_cap = self.cfg.seq_cap;
-      let head_dim = self.cfg.head_dim;
-      let cos = self.cos.as_ref().unwrap()
-               .new_shape([1, seq_cap, 1, head_dim])
-               .const_();
-      let sin = self.sin.as_ref().unwrap()
-               .new_shape([1, seq_cap, 1, head_dim])
-               .const_();
-      let q = (q * cos) + (inner_symplectic_map(q) * sin);
-      let k = (k * cos) + (inner_symplectic_map(k) * sin);
-      (q, k)
-    };
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
@@ -291,54 +243,78 @@ impl Llama {
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
     let in_tok = in_tok._deref().const_();
+    let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
+      let x = x.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      let v = x.cast(f32::dtype_())
+               .square().inner_mean()
+               .new_shape([ubat_sz * seq_cap, 1]);
+      let t = x / (v + eps).sqrt();
+      let w = weight.new_shape([1, num_head * head_dim]);
+      let y = (w * t).cast(dtype);
+      y
+    };
+    /*let inner_symplectic_map = |x: CellPtr| {
+      let xty = x.type_();
+      let (lx, rx) = x.inner_split(xty.inner_len() / 2);
+      (-rx).inner_concat(lx)
+    };*/
+    let cos = self.cos.as_ref().unwrap()
+             .new_shape([1, seq_cap, 1, head_dim])
+             .const_();
+    let sin = self.sin.as_ref().unwrap()
+             .new_shape([1, seq_cap, 1, head_dim])
+             .const_();
+    let symplectic_embed = |x: CellPtr| {
+      (x * cos) + (inner_symplectic_map(x) * sin)
+    };
+    let block_causal_attention_mask = |x: CellPtr| {
+      x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
+    };
     let mut stream = in_tok;
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-    for i in 0 .. num_layer as usize {
-      let pre_nrm = rms_norm(&stream, &self.layers[i].pre_norm, rms_norm_eps, f16::dtype());
-      let q_proj = pre_nrm
-                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                  .block_matmul(false, &self.layers[i].q, true)
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let k_proj = pre_nrm
-                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                  .block_matmul(false, &self.layers[i].k, true)
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+    for ell in 0 .. num_layer as usize {
+      let pre_nrm = rms_norm(&stream, &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype_());
+      let q_proj = symplectic_embed(
+                   pre_nrm
+                  .matmul(false, &self.layers[ell].q, true)
+                  .new_shape([ubat_sz, seq_cap, num_head, head_dim])
+                   );
+      let k_proj = symplectic_embed(
+                   pre_nrm
+                  .matmul(false, &self.layers[ell].k, true)
+                  .new_shape([ubat_sz, seq_cap, num_head, head_dim])
+                   );
       let v_proj = pre_nrm
-                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                  .block_matmul(false, &self.layers[i].v, true)
+                  .matmul(false, &self.layers[ell].v, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let (q_proj, k_proj) = symplectic_embed(q_proj, k_proj);
       let attn = q_proj.block_matmul_scale(false, k_proj, true, 1.0 / (head_dim as f32).sqrt())
-                .cast(f32::dtype());
+                .cast(f32::dtype_());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
-                .cast(f16::dtype());
+                .cast(f16::dtype_());
       let v_attn = attn.block_matmul(false, v_proj, false)
-                  .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim]);
-      let o_proj = v_attn.block_matmul(false, &self.layers[i].o, true)
+                  .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
-      let post_nrm = rms_norm(&stream, &self.layers[i].post_norm, rms_norm_eps, f16::dtype());
+      let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, f16::dtype_());
       let up_proj = post_nrm
-                   .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                   .block_matmul(false, &self.layers[i].up, true);
+                   .matmul(false, &self.layers[ell].up, true);
       let gate_proj = post_nrm
-                     .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                     .block_matmul(false, &self.layers[i].gate, true);
+                     .matmul(false, &self.layers[ell].gate, true);
       let gate_proj = gate_proj.standard_silu();
       let gate_up = gate_proj * up_proj;
-      let down_proj = gate_up.block_matmul(false, &self.layers[i].down, true)
+      let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }
-    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype());
+    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype_());
     let out_lm_logit = stream
-                      .new_shape([1, ubat_sz * seq_cap, 1, num_head * head_dim])
-                      .block_matmul(false, &self.lm_head, true)
+                      .matmul(false, &self.lm_head, true)
                       .new_shape([ubat_sz, seq_cap, tok_dim])
                       .keep();
-    let logit32 = out_lm_logit.cast(f32::dtype());
+    let logit32 = out_lm_logit.cast(f32::dtype_());
     let out_lm_prob = logit32.inner_softmax().keep();
     let in_lm_tok = in_lm_tok.const_();
     let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
@@ -346,15 +322,13 @@ impl Llama {
   }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LlamaCachedState {
-  // TODO
-  //pub q_cache: StableCell,
   pub k_cache: StableCell,
   pub v_cache: StableCell,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LlamaCached {
   pub cfg: LlamaConfig,
   pub cos: Option<StableCell>,
@@ -379,27 +353,27 @@ impl From<LlamaConfig> for LlamaCached {
     assert!(tok_dim <= u16::max_value() as i64 + 1);
     let cos = None;
     let sin = None;
-    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
     let mut layers = Vec::with_capacity(num_layers);
     let mut states = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let q = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let k = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let v = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let o = StableCell::array([inner_dim, inner_dim], f16::dtype());
-      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype());
-      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype());
-      let inv_freq = StableCell::array([head_dim / 2], f32::dtype());
-      let pre_norm = StableCell::array([inner_dim], f16::dtype());
-      let post_norm = StableCell::array([inner_dim], f16::dtype());
+      let q = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let k = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let v = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let o = StableCell::array([inner_dim, inner_dim], f16::dtype_());
+      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
+      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
+      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype_());
+      let inv_freq = StableCell::array([head_dim / 2], f32::dtype_());
+      let pre_norm = StableCell::array([inner_dim], f16::dtype_());
+      let post_norm = StableCell::array([inner_dim], f16::dtype_());
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
-      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype());
-      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype());
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
       states.push(LlamaCachedState{k_cache, v_cache});
     }
-    let head_norm = StableCell::array([inner_dim], f16::dtype());
-    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype());
+    let head_norm = StableCell::array([inner_dim], f16::dtype_());
+    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype_());
     LlamaCached{cfg, cos, sin, embed, layers, states, head_norm, lm_head}
   }
 }
@@ -448,10 +422,9 @@ impl LlamaCached {
   pub fn fresh_input(&self) -> Vec<LanguageModelDeployIn> {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
-    //let mut in_tok = Vec::with_capacity(ubat_sz as usize);
     let mut in_ = Vec::with_capacity(ubat_sz as usize);
     for _ in 0 .. ubat_sz {
-      let in_tok = StableCell::array([1, seq_cap], u16::dtype());
+      let in_tok = StableCell::array([1, seq_cap], u16::dtype_());
       in_.push(LanguageModelDeployIn{in_tok});
     }
     in_
@@ -461,7 +434,7 @@ impl LlamaCached {
     let init_embed = || {
       let seq_cap = self.cfg.seq_cap;
       let dtype = self.cfg.dtype;
-      let pos = iota(seq_cap).cast(f32::dtype());
+      let pos = iota(seq_cap).cast(f32::dtype_());
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
       let freq2 = freq.inner_concat(freq);
       let cos = freq2.cos().cast(dtype);
@@ -532,13 +505,11 @@ impl LlamaCached {
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
     let diff_seq_len = next_seq_len - prev_seq_len;
+    assert_eq!(ubat_sz as usize, in_.len());
     assert!(diff_seq_len > 0);
-    /*let block_causal_attention_mask = |x: CellPtr| {
-      x.block_tri_elem_affine(1.0_f32, 0.0_f32, 1.0_f32, 0.0_f32, 0.0_f32, -f32::inf())
-    };*/
     let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
       let x = x.new_shape([1 * diff_seq_len, num_head * head_dim]);
-      let v = x.cast(f32::dtype())
+      let v = x.cast(f32::dtype_())
                .square().inner_mean()
                .new_shape([1 * diff_seq_len, 1]);
       let t = x / (v + eps).sqrt();
@@ -552,18 +523,14 @@ impl LlamaCached {
       (-rx).inner_concat(lx)
     };*/
     let cos = self.cos.as_ref().unwrap().clone()
-             .new_shape([1, seq_cap, 1, head_dim]);
+             .new_shape([1, seq_cap, 1, head_dim])
+              [(.., prev_seq_len .. next_seq_len, .., ..)].const_();
     let sin = self.sin.as_ref().unwrap().clone()
-             .new_shape([1, seq_cap, 1, head_dim]);
+             .new_shape([1, seq_cap, 1, head_dim])
+              [(.., prev_seq_len .. next_seq_len, .., ..)].const_();
     let symplectic_embed = |x: CellPtr| {
-      let y = inner_symplectic_map(x);
-      let z = (x * cos[(.., prev_seq_len .. next_seq_len, .., ..)].const_())
-            + (y * sin[(.., prev_seq_len .. next_seq_len, .., ..)].const_());
-      z
+      (x * cos) + (inner_symplectic_map(x) * sin)
     };
-    assert_eq!(ubat_sz as usize, in_.len());
-    // FIXME
-    //let mut stream = in_tok;
     let mut stream = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
       let in_tok = &in_[i as usize].in_tok._deref()[(.., prev_seq_len .. next_seq_len)];
@@ -571,10 +538,10 @@ impl LlamaCached {
                  .new_shape([1, diff_seq_len, num_head, head_dim]));
     }
     for ell in 0 .. num_layer as usize {
-      // FIXME
       for i in 0 .. ubat_sz {
+        let idx = i as usize;
         let pre_nrm =
-               rms_norm(&stream[i as usize], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype())
+               rms_norm(&stream[idx], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype_())
               .new_shape([1, diff_seq_len, num_head, head_dim]);
         let q_proj =
                symplectic_embed(
@@ -603,22 +570,22 @@ impl LlamaCached {
                    true,
                    1.0 / (head_dim as f32).sqrt()
                )
-              .cast(f32::dtype());
+              .cast(f32::dtype_());
         let attn = row_causal_attention_mask(attn, prev_seq_len)
                   .inner_softmax()
-                  .cast(f16::dtype());
+                  .cast(f16::dtype_());
         let v_attn =
-                attn
-               .block_matmul(
-                    false,
-                    &self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
-                    false
-                )
-               .new_shape([diff_seq_len, num_head * head_dim]);
+               attn
+              .block_matmul(
+                   false,
+                   &self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
+                   false
+               )
+              .new_shape([diff_seq_len, num_head * head_dim]);
         let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
                     .new_shape([1, diff_seq_len, num_head, head_dim]);
-        stream[i as usize] = stream[i as usize] + o_proj;
-        let post_nrm = rms_norm(&stream[i as usize], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype());
+        stream[idx] = stream[idx] + o_proj;
+        let post_nrm = rms_norm(&stream[idx], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype_());
         let up_proj = post_nrm
                      .matmul(false, &self.layers[ell].up, true);
         let gate_proj = post_nrm
@@ -627,29 +594,26 @@ impl LlamaCached {
         let gate_up = gate_proj * up_proj;
         let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
                        .new_shape([1, diff_seq_len, num_head, head_dim]);
-        stream[i as usize] = stream[i as usize] + down_proj;
+        stream[idx] = stream[idx] + down_proj;
       }
     }
-    // TODO
-    /*let mut out_lm_logit = Vec::with_capacity(ubat_sz as usize);
-    let mut out_lm_prob = Vec::with_capacity(ubat_sz as usize);
-    let mut out_lm_tok = Vec::with_capacity(ubat_sz as usize);*/
     let mut out = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      stream[i as usize] = rms_norm(&stream[i as usize], &self.head_norm, rms_norm_eps, f16::dtype());
-      let out_lm_logit = stream[i as usize]
-                       .matmul(false, &self.lm_head, true)
-                       .new_shape([1, diff_seq_len, tok_dim])
-                       .keep();
+      let idx = i as usize;
+      stream[idx] = rms_norm(&stream[idx], &self.head_norm, rms_norm_eps, f16::dtype_());
+      let out_lm_logit = stream[idx]
+                        .matmul(false, &self.lm_head, true)
+                        .new_shape([1, diff_seq_len, tok_dim])
+                        .keep();
       let out_lm_prob = out_lm_logit
-                      .cast(f32::dtype())
-                      .inner_softmax()
-                      .keep();
+                       .cast(f32::dtype_())
+                       .inner_softmax()
+                       .keep();
       let out_lm_tok = out_lm_logit
-                     .inner_arg_max()
-                     .cast(u16::dtype())
-                     .keep();
-      in_[i as usize].in_tok._deref()[(.., next_seq_len .. next_seq_len + 1)]
+                      .inner_arg_max()
+                      .cast(u16::dtype_())
+                      .keep();
+      in_[idx].in_tok._deref()[(.., next_seq_len .. next_seq_len + 1)]
           += &out_lm_tok[(.., diff_seq_len - 1 .. diff_seq_len)];
       out.push(LanguageModelDeployOut{out_lm_logit, out_lm_prob, out_lm_tok});
     }
@@ -748,8 +712,8 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
 pub fn row_causal_attention_mask<X: CellDeref>(x: X, initial_row: i64) -> CellPtr {
   panick_wrap(|| {
     assert!(ctx_clean_arg());
-    ctx_push_cell_arg(x._deref());
     ctx_push_scalar_param(initial_row);
+    ctx_push_cell_arg(x._deref());
     ctx_pop_thunk(RowCausalAttentionMaskFutThunkSpec)
   })
 }

@@ -17,19 +17,6 @@ use std::iter::{repeat};
 use std::ops::{AddAssign, BitXor, Index, IndexMut, Add, Sub, Mul, Div, Neg};
 use std::rc::{Rc};
 
-/*impl AddAssign<f32> for CellPtr {
-  #[track_caller]
-  fn add_assign(&mut self, rhs: f32) {
-    // FIXME FIXME
-    unimplemented!();
-    /*panick_wrap(|| {
-      let op = AddScalarF32FutThunkSpec{val: rhs.try_into().unwrap()};
-      assert!(ctx_clean_arg());
-      ctx_pop_thunk_mux(op, self.into())
-    })*/
-  }
-}*/
-
 impl<R: CellDeref> AddAssign<R> for CellPtr {
   #[track_caller]
   fn add_assign(&mut self, rhs: R) {
@@ -167,56 +154,6 @@ impl<R: CellDeref> AddAssign<R> for CellPtr {
                     unimplemented!();
                   }
                 }
-                /*(1, SpineEntry::Intro(y, yclk)) |
-                (1, SpineEntry::Uninit(y, yclk)) => {
-                  let yroot = spine.cur_env.borrow()._deref(y);
-                  if yroot == rhs_root {
-                    if cfg_debug() { println!("DEBUG: AddAssign::add_assign: try:   e={:?} y == rhs", e_sp.name()); }
-                    //assert_eq!(yclk, rhs_clk);
-                    spine.log.borrow_mut()[sp as usize] = match (this_clk.up, e_sp.name()) {
-                      (0, SpineEntryName::Intro) => {
-                        SpineEntry::Intro(this, this_clk)
-                      }
-                      (0, SpineEntryName::Uninit) => {
-                        SpineEntry::Uninit(this, this_clk)
-                      }
-                      (_, SpineEntryName::Intro) |
-                      (_, SpineEntryName::Uninit) => {
-                        SpineEntry::_Top
-                      }
-                      _ => unreachable!()
-                    };
-                    let mut cur_env = spine.cur_env.borrow_mut();
-                    match cur_env._lookup_mut(rhs) {
-                      None => panic!("bug"),
-                      Some((_, state)) => {
-                        // FIXME: sealing here is kinda hacky.
-                        state.flag.set_seal();
-                        state.flag.unset_intro();
-                        state.clk = state.clk.uninit();
-                      }
-                    }
-                    match cur_env._lookup_mut(this) {
-                      None => {
-                        //let this_root = cur_env._deref(this);
-                        let mut state = CellState::default();
-                        state.flag.set_intro();
-                        state.clk = this_clk;
-                        assert!(cur_env.state.insert(this_root, state.into()).is_none());
-                      }
-                      Some((_, state)) => {
-                        state.flag.set_intro();
-                        //assert!(state.flag.intro());
-                        assert!(!state.flag.seal());
-                        state.clk = this_clk;
-                      }
-                    }
-                    drop(cur_env);
-                    // TODO
-                    state = 2;
-                    break;
-                  }
-                }*/
                 _ => {}
               }
             }
@@ -450,232 +387,6 @@ impl<'l> BitXor<T_> for &'l CellViewHandle {
     })
   }
 }
-
-/*impl BitXor<T> for CellViewHandleEx {
-  type Output = CellViewHandleEx;
-
-  #[track_caller]
-  fn bitxor(mut self, _: T) -> CellViewHandleEx {
-    panick_wrap(|| {
-      // FIXME FIXME
-      //self.1.push(CellVOp::Swap(-2, -1));
-      self
-    })
-  }
-}
-
-impl BitXor<T_> for CellViewHandleEx {
-  type Output = CellViewHandleEx;
-
-  #[track_caller]
-  fn bitxor(mut self, t: T_) -> CellViewHandleEx {
-    panick_wrap(|| {
-      // FIXME FIXME
-      //self.1.push(CellVOp::Swap(t.0, t.1));
-      self
-    })
-  }
-}*/
-
-/*impl Index<RangeFull> for CellPtr {
-  type Output = CellPtr;
-
-  #[track_caller]
-  fn index(&self, _: RangeFull) -> &CellPtr {
-    self
-  }
-}
-
-impl IndexMut<RangeFull> for CellPtr {
-  #[track_caller]
-  fn index_mut(&mut self, _: RangeFull) -> &mut CellPtr {
-    self
-  }
-}
-
-impl Index<IRange> for CellPtr {
-  type Output = CellViewHandle;
-
-  #[track_caller]
-  fn index(&self, idx: IRange) -> &CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &[idx] as &[_])
-    }));
-    CellViewHandle::_from2(self, view)
-  }
-}
-
-impl IndexMut<IRange> for CellPtr {
-  #[track_caller]
-  fn index_mut(&mut self, idx: IRange) -> &mut CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &[idx] as &[_])
-    }));
-    CellViewHandle::_from2_mut(self, view)
-  }
-}
-
-impl Index<[IRange; 2]> for CellPtr {
-  type Output = CellViewHandle;
-
-  #[track_caller]
-  fn index(&self, idx: [IRange; 2]) -> &CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2(self, view)
-  }
-}
-
-impl IndexMut<[IRange; 2]> for CellPtr {
-  #[track_caller]
-  fn index_mut(&mut self, idx: [IRange; 2]) -> &mut CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2_mut(self, view)
-  }
-}
-
-impl Index<[IRange; 3]> for CellPtr {
-  type Output = CellViewHandle;
-
-  #[track_caller]
-  fn index(&self, idx: [IRange; 3]) -> &CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2(self, view)
-  }
-}
-
-impl IndexMut<[IRange; 3]> for CellPtr {
-  #[track_caller]
-  fn index_mut(&mut self, idx: [IRange; 3]) -> &mut CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2_mut(self, view)
-  }
-}
-
-impl Index<[IRange; 4]> for CellPtr {
-  type Output = CellViewHandle;
-
-  #[track_caller]
-  fn index(&self, idx: [IRange; 4]) -> &CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2(self, view)
-  }
-}
-
-impl IndexMut<[IRange; 4]> for CellPtr {
-  #[track_caller]
-  fn index_mut(&mut self, idx: [IRange; 4]) -> &mut CellViewHandle {
-    let this = *self;
-    let view = panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.alias_view_slice(this, &idx as &[_])
-    }));
-    CellViewHandle::_from2_mut(self, view)
-  }
-}*/
-
-/*pub trait IntoCellViewOps: Into<CellView> {
-  fn inner_transpose(self) -> CellView {
-    panick_wrap(|| {
-      let mut this = self.into();
-      this.1.push(CellVOp::Swap(-2, -1));
-      this
-    })
-  }
-
-  fn transpose(self, ld: i8, rd: i8) -> CellView {
-    panick_wrap(|| {
-      let mut this = self.into();
-      this.1.push(CellVOp::Swap(ld, rd));
-      this
-    })
-  }
-}
-
-impl IntoCellViewOps for CellPtr {}
-impl<'l> IntoCellViewOps for &'l CellPtr {}
-impl IntoCellViewOps for StableCell {}
-impl<'l> IntoCellViewOps for &'l StableCell {}
-impl IntoCellViewOps for CellView {}
-
-pub trait BorrowCellViewOps: BorrowCellView {
-  fn materialize(self) -> CellPtr where Self: Sized {
-    panick_wrap(|| {
-      let view = self._borrow();
-      let x = *(view.0);
-      let vops = view.1.unwrap_or(&[]);
-      if vops.is_empty() {
-        return x;
-      }
-      let mut x = x;
-      let x_ty = x.type_();
-      let x_nd = x_ty.ndim();
-      let nop = CellVOp::Nop;
-      let mut state = CellViewState::new(x_nd);
-      for vop in vops.into_iter().chain(repeat(&nop)) {
-        loop {
-          match state._step(vop) {
-            CellViewStep::Break => {
-              break;
-            }
-            CellViewStep::Swap => {
-              if state.ndim >= 2 {
-                let mut try_inner = true;
-                for d in 0 .. state.ndim - 2 {
-                  if state.perm[d as usize] != d {
-                    try_inner = false;
-                    break;
-                  }
-                }
-                if try_inner &&
-                   state.perm[state.ndim as usize - 2] == state.ndim - 1 &&
-                   state.perm[state.ndim as usize - 1] == state.ndim - 2
-                {
-                  let op = InnerTransposeFutThunkSpec;
-                  assert!(ctx_clean_arg());
-                  ctx_push_cell_arg(x);
-                  x = ctx_pop_thunk(op);
-                  state._reset_swap();
-                  continue;
-                }
-              }
-              println!("ERROR: materialize: general transposition is currently unimplemented");
-              panic!("bug");
-            }
-            CellViewStep::Halt => {
-              return x;
-            }
-            _ => unimplemented!()
-          }
-        }
-      }
-      unreachable!();
-    })
-  }
-}
-
-impl BorrowCellViewOps for CellPtr {}
-impl<'l> BorrowCellViewOps for &'l CellPtr {}
-impl BorrowCellViewOps for StableCell {}
-impl<'l> BorrowCellViewOps for &'l StableCell {}
-impl BorrowCellViewOps for CellView {}
-impl<'l> BorrowCellViewOps for &'l CellView {}
-impl<'l> BorrowCellViewOps for CellViewRef<'l> {}*/
 
 impl<'l> Add<ScalarVal_> for &'l CellPtr {
   type Output = CellPtr;
@@ -1174,7 +885,7 @@ impl<'l> Neg for &'l CellPtr {
       let x = *self.borrow();
       let x_dtype = ctx_lookup_dtype(x);
       match x_dtype {
-        Dtype::Fp16 => {
+        Dtype::F16 => {
           let op = NegF16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
@@ -1298,7 +1009,7 @@ pub trait MathInitOps: CellDeref {
   }
 }
 
-impl<L: CellDeref> MathInitOps for L {}
+impl<L: CellDeref + ?Sized> MathInitOps for L {}
 
 pub trait MathSetOps: CellDeref {
   #[track_caller]
@@ -1335,9 +1046,20 @@ pub trait MathSetOps: CellDeref {
       ctx_pop_apply_thunk_(SetScalarFutThunkSpec{val}, this, ty)
     })
   }
+
+  #[track_caller]
+  fn set_ones(&self) {
+    panick_wrap(|| {
+      let this = self._deref();
+      let ty = ctx_lookup_type(this);
+      assert!(ctx_clean_arg());
+      let val = ScalarVal_::one(ty.dtype);
+      ctx_pop_apply_thunk_(SetScalarFutThunkSpec{val}, this, ty)
+    })
+  }
 }
 
-impl<L: CellDeref> MathSetOps for L {}
+impl<L: CellDeref + ?Sized> MathSetOps for L {}
 
 pub trait MathBinaryOps<R: CellDeref>: CellDeref {
   /*#[track_caller]
@@ -1427,23 +1149,6 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
       ctx_pop_thunk(op)
     })
   }
-
-  /*#[track_caller]
-  fn dot(self, rhs: Q) -> CellPtr {
-    let p = self.into();
-    let q = rhs.into();
-    let op = DotThunkOp::default();
-    assert!(ctx_clean_arg());
-    ctx_push_cell_arg(p);
-    ctx_push_cell_arg(q);
-    //ctx_push_cell_out(_);
-    ctx_pop_thunk(op)
-  }*/
-
-  /*#[track_caller]
-  fn mm(&self, lt: bool, rhs: R, rt: bool) -> CellPtr {
-    unimplemented!();
-  }*/
 
   #[track_caller]
   fn matmul(&self, l_t: bool, rhs: R, r_t: bool) -> CellPtr {
@@ -1568,7 +1273,7 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
       let o_scale = scale.into_scalar_val_();
       let o_scale_dty = o_scale.dtype();
       match o_scale_dty {
-        Dtype::Fp32 => {}
+        Dtype::F32 => {}
         _ => {
           println!("ERROR: matmul_scale: unsupported scale dtype: {:?}", o_scale_dty);
           panic!();
@@ -1740,7 +1445,7 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
       let o_scale = scale.into_scalar_val_();
       let o_scale_dty = o_scale.dtype();
       match o_scale_dty {
-        Dtype::Fp32 => {}
+        Dtype::F32 => {}
         _ => {
           println!("ERROR: block_matmul_scale: unsupported scale dtype: {:?}", o_scale_dty);
           panic!();
@@ -1881,7 +1586,7 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
       let o_scale = scale.into_scalar_val_();
       let o_scale_dty = o_scale.dtype();
       match o_scale_dty {
-        Dtype::Fp32 => {}
+        Dtype::F32 => {}
         _ => {
           println!("ERROR: block_mm_scale: unsupported scale dtype: {:?}", o_scale_dty);
           panic!();
@@ -1909,7 +1614,7 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
   }*/
 }
 
-impl<L: CellDeref, R: CellDeref> MathBinaryOps<R> for L {}
+impl<L: CellDeref + ?Sized, R: CellDeref> MathBinaryOps<R> for L {}
 
 pub trait MathUnaryOps: CellDeref {
   #[track_caller]
@@ -2065,7 +1770,7 @@ pub trait MathUnaryOps: CellDeref {
       ctx_push_cell_arg(p);
       match ctx_lookup_dtype(p) {
         // FIXME FIXME
-        Dtype::Fp32 => {
+        Dtype::F32 => {
           let op = PowiF32FutThunkSpec{exp};
           ctx_pop_thunk(op)
         }
@@ -2175,37 +1880,6 @@ pub trait MathUnaryOps: CellDeref {
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(self._deref());
       ctx_pop_thunk(op)
-      /*// FIXME FIXME
-      let p = self._deref();
-      let ty_ = ctx_lookup_type(p);
-      match ty_.ndim() {
-        0 => p,
-        1 => {
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(p);
-          let op = Sum1dFutThunkSpec;
-          ctx_pop_thunk(op)
-        }
-        2 => {
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(p);
-          let op = Sum2dFutThunkSpec;
-          ctx_pop_thunk(op)
-        }
-        3 => {
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(p);
-          let op = Sum3dFutThunkSpec;
-          ctx_pop_thunk(op)
-        }
-        4 => {
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(p);
-          let op = Sum4dFutThunkSpec;
-          ctx_pop_thunk(op)
-        }
-        _ => unimplemented!()
-      }*/
     })
   }
 
@@ -2277,7 +1951,7 @@ pub trait MathUnaryOps: CellDeref {
   }
 }
 
-impl<P: CellDeref> MathUnaryOps for P {}
+impl<P: CellDeref + ?Sized> MathUnaryOps for P {}
 
 #[track_caller]
 pub fn inner_softmax_post_adj<Y: CellDeref, Dy: CellDeref>(y: Y, dy: Dy) -> CellPtr {
@@ -2317,14 +1991,6 @@ pub fn iota(len: i64) -> CellPtr {
 }
 
 pub trait CastOps: CellDeref {
-  /*fn upcast_f32(self) -> CellPtr {
-    unimplemented!();
-  }
-
-  fn downcast_f16(self) -> CellPtr {
-    unimplemented!();
-  }*/
-
   #[track_caller]
   fn cast(&self, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
@@ -2334,33 +2000,26 @@ pub trait CastOps: CellDeref {
         return x;
       }
       match (org_dtype, new_dtype) {
-        /*(Dtype::Fp32, Dtype::Fp16) |
-        (Dtype::Fp16, Dtype::Fp32) => {
-          let op = CastFutThunkSpec{org_dtype, new_dtype};
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
-        }*/
-        (Dtype::Fp32, Dtype::Bfloat16) => {
+        (Dtype::F32, Dtype::Bf16) => {
           let op = CastF32Bf16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        (Dtype::Bfloat16, Dtype::Fp16) => {
+        (Dtype::Bf16, Dtype::F16) => {
           let op = CastBf16F16FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
-        (Dtype::Bfloat16, Dtype::Fp32) => {
+        (Dtype::Bf16, Dtype::F32) => {
           let op = CastBf16F32FutThunkSpec;
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
           ctx_pop_thunk(op)
         }
+        // FIXME: other bf16 special cases.
         _ => {
-          // FIXME: other bf16 special cases.
           let op = CastFutThunkSpec{new_dtype};
           assert!(ctx_clean_arg());
           ctx_push_cell_arg(x);
@@ -2378,41 +2037,11 @@ pub trait CastOps: CellDeref {
       unimplemented!();
     })
   }
-
-  /*#[track_caller]
-  fn set_cast<R: Borrow<CellPtr>>(&self, rhs: R) {
-    panick_wrap(|| {
-      let y = self._deref();
-      let x = *rhs.borrow();
-      unimplemented!();
-    })
-  }*/
 }
 
-impl<L: CellDeref> CastOps for L {}
+impl<L: CellDeref + ?Sized> CastOps for L {}
 
-/*pub trait GradOps<R: CellDeref>: CellDeref {
-  #[track_caller]
-  fn grad(&self, x: R) -> CellPtr { self.gradr(x) }
-
-  #[track_caller]
-  fn gradr(&self, x: R) -> CellPtr {
-    // FIXME FIXME
-    //ctx_lookup_or_insert_gradr(self.into(), x.into())
-    unimplemented!();
-  }
-
-  #[track_caller]
-  fn gradl(&self, y: R) -> CellPtr {
-    // FIXME FIXME
-    //ctx_lookup_or_insert_gradl(self.into(), tg.into())
-    unimplemented!();
-  }
-}
-
-impl<L: CellDeref, R: CellDeref> GradOps<R> for L {}*/
-
-pub trait ArrayOps: CellDeref + Sized {
+pub trait ArrayOps: CellDeref {
   #[track_caller]
   fn type_(&self) -> CellType {
     panick_wrap(|| {
@@ -2450,62 +2079,9 @@ pub trait ArrayOps: CellDeref + Sized {
 
   #[track_caller]
   fn reshape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
-
-  /*#[track_caller]
-  fn _unpack(&self) -> Option<(CellViewType, CellPtr)> {
-    // FIXME
-    unimplemented!();
-  }
-
-  #[track_caller]
-  fn _unview(&self) -> (CellViewType, CellPtr, /*Vec<CellVOp>*/) {
-    // FIXME
-    unimplemented!();
-  }*/
 }
 
-impl<L: CellDeref + Sized> ArrayOps for L {}
-
-/*pub trait Ops_: CellDeref + Sized {
-  /*
-  #[track_caller]
-  fn yield_(self) -> CellPtr {
-    unimplemented!();
-  }
-
-  #[track_caller]
-  fn break_(self) -> CellPtr {
-    unimplemented!();
-  }
-  */
-
-  /*#[track_caller]
-  fn trace(self) -> CellPtr {
-    // FIXME FIXME
-    ctx_trace_val(*self.as_ref())
-  }*/
-
-  /*#[track_caller]
-  fn profile(self) -> CellPtr {
-    // FIXME FIXME
-    ctx_profile_val(*self.as_ref())
-  }*/
-
-  /*#[track_caller]
-  fn opaque(self) -> CellPtr {
-    //panick_wrap(|| ctx_opaque(self._deref()))
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.opaque(self._deref())
-    }))
-  }*/
-
-  /*#[track_caller]
-  fn const_(self) -> CellPtr {
-    unimplemented!();
-  }*/
-}
-
-impl<L: CellDeref + Sized> Ops_ for L {}*/
+impl<L: CellDeref + ?Sized> ArrayOps for L {}
 
 pub trait Ops: CellDeref {
   /*fn bar(self) -> Self {
@@ -2680,15 +2256,35 @@ pub trait Ops: CellDeref {
 
 impl<L: CellDeref + ?Sized> Ops for L {}
 
-pub trait CtlOps: CellDeref + Sized {
+pub trait CtlOps: CellDeref {
   #[track_caller]
   fn resident(&self, loc: Locus) -> bool {
-    unimplemented!();
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let this = self._deref();
+      let env = ctx.env.borrow();
+      match env.plookup_view(this) {
+        Err(_) => {
+          println!("ERROR: CtlOps::resident: failed to dereference {:?} to a physical cell", this);
+          panic!("");
+        }
+        Ok(e) => {
+          match e.cel_ {
+            &Cell_::Phy(.., ref pcel) => {
+              pcel.lookup_loc(loc).is_some()
+            }
+            _ => panic!("bug")
+          }
+        }
+      }
+    }))
   }
 
   #[track_caller]
   fn spine_version(&self) -> Clock {
-    unimplemented!();
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      spine._version(self._deref()).unwrap_or_else(|| Clock::default())
+    }))
   }
 
   #[track_caller]
@@ -2702,6 +2298,7 @@ pub trait CtlOps: CellDeref + Sized {
       let x = self._deref();
       let xclk = ctx_lookup_clk(x);
       match ctx.env.borrow_mut().pread_ref_(x, xclk, Locus::Mem) {
+        Err(CellDerefErr::View) => panic!("bug"),
         Err(_) => panic!("bug"),
         Ok(e) => {
           match e.cel_ {
@@ -2725,29 +2322,7 @@ pub trait CtlOps: CellDeref + Sized {
   }
 }
 
-impl<L: CellDeref + Sized> CtlOps for L {}
-
-/*impl MSet {
-  #[track_caller]
-  pub fn add<'x, X: Into<MValueRef<'x>>>(&self, x: X) {
-    unimplemented!();
-  }
-}
-
-impl MMap {
-  #[track_caller]
-  pub fn add<'k, 'v, K: Into<MValueRef<'k>>, V: Into<MValueRef<'v>>>(&self, k: K, v: V) {
-    unimplemented!();
-  }
-}
-
-pub fn vjp(y_dy: &MMap, x: &MSet) -> MMap {
-  unimplemented!();
-}
-
-pub fn jvp(y: &MSet, x_dx: &MMap) -> MMap {
-  unimplemented!();
-}*/
+impl<L: CellDeref + ?Sized> CtlOps for L {}
 
 /*#[track_caller]
 pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
@@ -2803,9 +2378,9 @@ pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
 #[track_caller]
 pub fn apply2_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> (CellPtr, CellPtr) {
   unimplemented!();
-}*/
+}
 
-/*#[track_caller]
+#[track_caller]
 pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
   // FIXME FIXME
   unimplemented!();
