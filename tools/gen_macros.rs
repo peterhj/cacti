@@ -54,7 +54,7 @@ fn emit_iproj(nd: i8, curs: i8, buf: &mut Vec<&str>, prev_mat: bool) {
 }
 
 fn main() {
-  for nd in 3 ..= 4 {
+  for nd in 1 ..= 4 {
     emit_index(nd, 0, &mut Vec::new());
     emit_iproj(nd, 0, &mut Vec::new(), false);
   }

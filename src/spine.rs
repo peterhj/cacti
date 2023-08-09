@@ -33,6 +33,7 @@ pub enum SpineResume<'a> {
   _Top,
   PutMemV(CellPtr, &'a dyn Any),
   PutMemF(CellPtr, &'a dyn Fn(CellType, MemReg, )),
+  Put(CellPtr, &'a CellType, &'a dyn CellStoreTo),
 }
 
 impl<'a> SpineResume<'a> {
@@ -41,12 +42,16 @@ impl<'a> SpineResume<'a> {
       &SpineResume::_Top => {
         None
       }
-      &SpineResume::PutMemV(key, val) => {
+      &SpineResume::PutMemV(key, _) => {
         Some(key)
       }
-      &SpineResume::PutMemF(key, fun) => {
+      &SpineResume::PutMemF(key, _) => {
         Some(key)
       }
+      &SpineResume::Put(key, ..) => {
+        Some(key)
+      }
+      _ => unimplemented!()
     };
     ret
   }
@@ -62,6 +67,10 @@ impl<'a> SpineResume<'a> {
       &SpineResume::PutMemF(key, fun) => {
         SpineResume::PutMemF(key, fun)
       }
+      &SpineResume::Put(key, ty, val) => {
+        SpineResume::Put(key, ty, val)
+      }
+      _ => unimplemented!()
     };
     *self = SpineResume::_Top;
     ret
@@ -1437,23 +1446,27 @@ impl Spine {
               Dtype::F32 => {
                 //println!("DEBUG: Spine::_step: YieldSet:   expected dtype {:?}", e.ty.dtype);
                 match &item {
-                  SpineResume::_Top => {
+                  &SpineResume::_Top => {
                     println!("DEBUG: Spine::_step: YieldSet:   no value");
                   }
-                  SpineResume::PutMemV(k, v) => {
+                  &SpineResume::PutMemV(k, v) => {
                     match v.downcast_ref::<f32>() {
                       None => {
                         println!("DEBUG: Spine::_step: YieldSet:   wrong type");
                         panic!("bug");
                       }
                       Some(v) => {
-                        println!("DEBUG: Spine::_step: YieldSet:   key={:?} value={:?}", k, v);
+                        println!("DEBUG: Spine::_step: YieldSet:   PutMemV key={:?} value={:?}", k, v);
                       }
                     }
                   }
-                  SpineResume::PutMemF(k, _f) => {
-                    println!("DEBUG: Spine::_step: YieldSet:   key={:?} fun", k);
+                  &SpineResume::PutMemF(k, _f) => {
+                    println!("DEBUG: Spine::_step: YieldSet:   PutMemF key={:?}", k);
                   }
+                  &SpineResume::Put(k, ty, _v) => {
+                    println!("DEBUG: Spine::_step: YieldSet:   Put key={:?} ty={:?}", k, ty);
+                  }
+                  _ => unimplemented!()
                 }
               }
               _ => {
@@ -1486,13 +1499,19 @@ impl Spine {
               (prev_clk, next_clk)
             }
           };
+          match (loc, &item) {
+            (Locus::Mem, &SpineResume::PutMemF(..)) => {
           // FIXME: view.
           match env.pwrite_ref_(x, xclk, loc) {
+            Err(CellDerefErr::View) => panic!("bug"),
             Err(_) => panic!("bug"),
             Ok(e) => {
+              let root = e.root();
               match e.cel_ {
                 &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
-                  match (loc, &item) {
+                  let optr = pcel.optr;
+                  assert_eq!(root, optr);
+                  match (loc, item) {
                     /*(Locus::Mem, SpineResume::PutMemV(_, _val)) => {
                       unimplemented!();
                     }*/
@@ -1508,15 +1527,49 @@ impl Spine {
                         (fun)(e.ty.clone(), icel.as_mem_reg().unwrap());
                       });
                     }
-                    _ => {
-                      unimplemented!();
-                    }
+                    _ => unreachable!()
                   }
                   clo.borrow_mut().init_once(xclk, ThunkPtr::opaque());
                 }
                 _ => panic!("bug")
               }
             }
+          }
+            }
+            (_, &SpineResume::Put(key, ty, val)) => {
+              if key != x {
+                println!("ERROR:  Spine::_step: YieldSet: resume_put on mismatched keys: dst={:?} src={:?}",
+                    x, key);
+                panic!();
+              }
+              // FIXME: view.
+              let root = match env._lookup_ref_(x) {
+                Err(CellDerefErr::View) => panic!("bug"),
+                Err(_) => panic!("bug"),
+                Ok(e) => {
+                  if ty != e.ty {
+                    println!("ERROR:  Spine::_step: YieldSet: resume_put on mismatched types: dst={:?} src={:?}",
+                        e.ty, ty);
+                    panic!();
+                  }
+                  e.root()
+                }
+              };
+              val._store_to(root, xclk, env);
+              match env._lookup_ref_(x) {
+                Err(CellDerefErr::View) => panic!("bug"),
+                Err(_) => panic!("bug"),
+                Ok(e) => {
+                  match e.cel_ {
+                    &Cell_::Phy(_, ref clo, _) => {
+                      clo.borrow_mut().init_once(xclk, ThunkPtr::opaque());
+                    }
+                    _ => panic!("bug")
+                  }
+                }
+              }
+            }
+            _ => unimplemented!()
           }
         } else {
           if cfg_debug() { println!("DEBUG: Spine::_step: YieldSet:   yield..."); }

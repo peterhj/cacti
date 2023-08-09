@@ -162,24 +162,26 @@ impl Ctx {
           }
           Ok(e) => {
             let xroot = e.root();
-            if e.stablect.get() > 0 {
+            if e.stablect > 0 {
               next_celfront.push(x);
             } else {
-              match e.cel_ {
-                &Cell_::Phy(.., ref pcel) => {
-                  for (_, rep) in pcel.replicas.iter() {
-                    match pctx.release(rep.addr.get()) {
-                      None => {}
-                      Some(icel) => {
-                        //assert_eq!(icel.root(), Some(xroot));
-                        f = true;
+              if x == xroot {
+                match e.cel_ {
+                  &Cell_::Phy(.., ref pcel) => {
+                    for (_, rep) in pcel.replicas.iter() {
+                      match pctx.release(rep.addr.get()) {
+                        None => {}
+                        Some(icel) => {
+                          //assert_eq!(icel.root(), Some(xroot));
+                          f = true;
+                        }
                       }
                     }
                   }
+                  _ => {}
                 }
-                _ => {}
+                drop(e);
               }
-              drop(e);
               assert!(env.celtab.remove(&x).is_some());
             }
           }
@@ -322,13 +324,24 @@ pub fn resume_put_mem_val<K: Borrow<CellPtr>>(key: K, val: &dyn Any) -> SpineRet
 }*/
 
 #[track_caller]
-pub fn resume_put_mem_with<K: Borrow<CellPtr>, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
+pub fn resume_put_mem_with<K: CellDeref, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
     // FIXME FIXME
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(*key.borrow(), &fun as _))
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(key._deref(), &fun as _))
+  }))
+}
+
+#[track_caller]
+pub fn resume_put<K: CellDeref, V: CellStoreTo>(key: K, ty: &CellType, val: &V) -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    // FIXME FIXME
+    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::Put(key._deref(), ty, val as _))
   }))
 }
 
@@ -423,13 +436,13 @@ pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
 
 pub fn ctx_release(x: CellPtr) {
   TL_CTX.try_with(|ctx| {
-    ctx.env.borrow().release(x);
+    ctx.env.borrow()._release_probe(x);
   }).unwrap_or(())
 }
 
 pub fn ctx_retain(x: CellPtr) {
   TL_CTX.with(|ctx| {
-    ctx.env.borrow().retain(x);
+    ctx.env.borrow()._retain_probe(x);
   })
 }
 
@@ -1321,7 +1334,8 @@ pub struct CellRef_<'a, R> {
   pub ref_:     R,
   pub root_ty:  &'a CellType,
   pub ty:       &'a CellType,
-  pub stablect: &'a Cell<u32>,
+  //pub stablect: &'a Cell<u32>,
+  pub stablect: u32,
   pub cel_:     &'a Cell_,
 }
 
@@ -1395,7 +1409,8 @@ pub struct CellMutRef_<'a, R> {
   pub ref_:     R,
   pub root_ty:  &'a CellType,
   pub ty:       CellType,
-  pub stablect: &'a Cell<u32>,
+  //pub stablect: &'a Cell<u32>,
+  pub stablect: u32,
   pub cel_:     &'a mut Cell_,
 }
 
@@ -1478,6 +1493,72 @@ impl CtxEnv {
     //self.tag.clear();
   }
 
+  pub fn _retain_probe(&self, query: CellPtr) {
+    if query.is_nil() {
+      return;
+    }
+    let mut cursor = query;
+    loop {
+      match self.celtab.get(&cursor) {
+        None => {
+          panic!("bug");
+        }
+        Some(e) => {
+          let ref_ct = e.stablect.get();
+          assert!(ref_ct < u32::max_value() - 1);
+          e.stablect.set(ref_ct + 1);
+          match &e.cel_ {
+            &Cell_::Top(..) |
+            &Cell_::Phy(..) |
+            &Cell_::Cow(..) => {
+              return;
+            }
+            &Cell_::Alias(_, next) => {
+              cursor = next;
+            }
+            &Cell_::Bot => {
+              panic!("bug");
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+    }
+  }
+
+  pub fn _release_probe(&self, query: CellPtr) {
+    if query.is_nil() {
+      return;
+    }
+    let mut cursor = query;
+    loop {
+      match self.celtab.get(&cursor) {
+        None => {
+          panic!("bug");
+        }
+        Some(e) => {
+          let ref_ct = e.stablect.get();
+          assert!(ref_ct > 0);
+          e.stablect.set(ref_ct - 1);
+          match &e.cel_ {
+            &Cell_::Top(..) |
+            &Cell_::Phy(..) |
+            &Cell_::Cow(..) => {
+              return;
+            }
+            &Cell_::Alias(_, next) => {
+              cursor = next;
+            }
+            &Cell_::Bot => {
+              panic!("bug");
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+    }
+  }
+
   pub fn _probe_ref(&self, query: CellPtr) -> CellProbePtr {
     let mut cursor = query;
     loop {
@@ -1558,7 +1639,7 @@ impl CtxEnv {
   }
 
   pub fn _lookup_ref_(&self, query: CellPtr) -> CellDerefPtr {
-    let ty = match self.celtab.get(&query) {
+    let (ty, stablect) = match self.celtab.get(&query) {
       None => return Err(CellDerefErr::Missing),
       Some(e) => {
         match &e.cel_ {
@@ -1585,14 +1666,14 @@ impl CtxEnv {
               ref_: query,
               root_ty: &e.ty,
               ty: &e.ty,
-              stablect: &e.stablect,
+              stablect: e.stablect.get(),
               cel_: &e.cel_,
             });
           }
           &Cell_::Alias(..) => {}
           _ => unreachable!()
         }
-        &e.ty
+        (&e.ty, e.stablect.get())
       }
     };
     let root = self._probe_ref(query)?;
@@ -1626,7 +1707,7 @@ impl CtxEnv {
           ref_: root,
           root_ty: &e.ty,
           ty,
-          stablect: &e.stablect,
+          stablect,
           cel_: &e.cel_,
         })
       }
@@ -1634,7 +1715,7 @@ impl CtxEnv {
   }
 
   pub fn _lookup_view(&self, query: CellPtr) -> CellDerefView {
-    let ty = match self.celtab.get(&query) {
+    let (ty, stablect) = match self.celtab.get(&query) {
       None => return Err(CellDerefErr::Missing),
       Some(e) => {
         match &e.cel_ {
@@ -1662,14 +1743,14 @@ impl CtxEnv {
               //ref_: CellView::new(query, e.ty.clone()),
               root_ty: &e.ty,
               ty: &e.ty,
-              stablect: &e.stablect,
+              stablect: e.stablect.get(),
               cel_: &e.cel_,
             });
           }
           &Cell_::Alias(..) => {}
           _ => unreachable!()
         }
-        &e.ty
+        (&e.ty, e.stablect.get())
       }
     };
     let view = self._probe_view(query)?;
@@ -1698,7 +1779,7 @@ impl CtxEnv {
           ref_: view,
           root_ty: &e.ty,
           ty,
-          stablect: &e.stablect,
+          stablect,
           cel_: &e.cel_,
         })
       }
@@ -1707,7 +1788,7 @@ impl CtxEnv {
 
   pub fn plookup_view(&self, query: CellPtr) -> CellDerefView {
     let mut noalias = false;
-    let ty = match self.celtab.get(&query) {
+    let (ty, stablect) = match self.celtab.get(&query) {
       None => return Err(CellDerefErr::Missing),
       Some(e) => {
         match &e.cel_ {
@@ -1732,7 +1813,7 @@ impl CtxEnv {
               ref_: query.into(),
               root_ty: &e.ty,
               ty: &e.ty,
-              stablect: &e.stablect,
+              stablect: e.stablect.get(),
               cel_: &e.cel_,
             });
           }
@@ -1743,7 +1824,7 @@ impl CtxEnv {
           &Cell_::Alias(..) => {}
           _ => unreachable!()
         }
-        &e.ty
+        (&e.ty, e.stablect.get())
       }
     };
     let view = if !noalias { self._probe_view(query)? } else { query.into() };
@@ -1769,7 +1850,7 @@ impl CtxEnv {
                       ref_: view,
                       root_ty: &e.ty,
                       ty,
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &e.cel_,
                     });
                   }
@@ -1793,7 +1874,7 @@ impl CtxEnv {
                       root_ty: &e.ty,
                       ty,
                       // FIXME: probably should be the cow stablect.
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &e.cel_,
                     });
                   }
@@ -1818,9 +1899,9 @@ impl CtxEnv {
     }
   }
 
-  pub fn _pre_probe(&self, query: CellPtr) -> CellDerefResult<(CellType, bool)> {
+  pub fn _pre_probe(&self, query: CellPtr) -> CellDerefResult<(CellType, u32, bool)> {
     let mut noalias = false;
-    let ty = match self.celtab.get(&query) {
+    let (ty, stablect) = match self.celtab.get(&query) {
       None => return Err(CellDerefErr::Missing),
       Some(e) => {
         match &e.cel_ {
@@ -1848,14 +1929,14 @@ impl CtxEnv {
           &Cell_::Alias(..) => {}
           _ => unreachable!()
         }
-        e.ty.clone()
+        (e.ty.clone(), e.stablect.get())
       }
     };
-    Ok((ty, noalias))
+    Ok((ty, stablect, noalias))
   }
 
   pub fn _lookup_mut_ref_(&mut self, query: CellPtr) -> CellMutDerefPtr {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let root = if !noalias { self._probe_ref(query)? } else { query };
     match self.celtab.get_mut(&root) {
       None => return Err(CellDerefErr::MissingRoot),
@@ -1867,7 +1948,7 @@ impl CtxEnv {
               ref_: root,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1878,7 +1959,7 @@ impl CtxEnv {
               ref_: root,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1899,7 +1980,7 @@ impl CtxEnv {
   }
 
   pub fn _lookup_mut_view(&mut self, query: CellPtr) -> CellMutDerefView {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let view = if !noalias { self._probe_view(query)? } else { query.into() };
     let root = view.root();
     match self.celtab.get_mut(&root) {
@@ -1912,7 +1993,7 @@ impl CtxEnv {
               ref_: view,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1923,7 +2004,7 @@ impl CtxEnv {
               ref_: view,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -1944,7 +2025,7 @@ impl CtxEnv {
   }
 
   pub fn pread_ref_(&mut self, query: CellPtr, clk: Clock, loc: Locus) -> CellMutDerefPtr {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let root = if !noalias { self._probe_ref(query)? } else { query };
     match self.celtab.get(&root) {
       None => return Err(CellDerefErr::MissingRoot),
@@ -1973,7 +2054,7 @@ impl CtxEnv {
                       ref_: root,
                       root_ty: &e.ty,
                       ty,
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -1998,7 +2079,7 @@ impl CtxEnv {
                       root_ty: &e.ty,
                       ty,
                       // FIXME: probably should be the cow stablect.
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -2024,7 +2105,7 @@ impl CtxEnv {
   }
 
   pub fn pread_view(&mut self, query: CellPtr, clk: Clock, loc: Locus) -> CellMutDerefView {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let view = if !noalias { self._probe_view(query)? } else { query.into() };
     let root = view.root();
     match self.celtab.get(&root) {
@@ -2050,7 +2131,7 @@ impl CtxEnv {
                       ref_: view,
                       root_ty: &e.ty,
                       ty,
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -2075,7 +2156,7 @@ impl CtxEnv {
                       root_ty: &e.ty,
                       ty,
                       // FIXME: probably should be the cow stablect.
-                      stablect: &e.stablect,
+                      stablect,
                       cel_: &mut e.cel_,
                     });
                   }
@@ -2101,7 +2182,7 @@ impl CtxEnv {
   }
 
   pub fn pwrite_ref_(&mut self, query: CellPtr, next_clk: Clock, loc: Locus) -> CellMutDerefPtr {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let root = if !noalias { self._probe_ref(query)? } else { query };
     match self.celtab.get_mut(&root) {
       None => return Err(CellDerefErr::MissingRoot),
@@ -2119,7 +2200,7 @@ impl CtxEnv {
               ref_: root,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2132,7 +2213,7 @@ impl CtxEnv {
               ref_: root,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2153,7 +2234,7 @@ impl CtxEnv {
   }
 
   pub fn pwrite_view(&mut self, query: CellPtr, next_clk: Clock, loc: Locus) -> CellMutDerefView {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let view = if !noalias { self._probe_view(query)? } else { query.into() };
     let root = view.root();
     match self.celtab.get_mut(&root) {
@@ -2172,7 +2253,7 @@ impl CtxEnv {
               ref_: view,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2185,7 +2266,7 @@ impl CtxEnv {
               ref_: view,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2206,7 +2287,7 @@ impl CtxEnv {
   }
 
   pub fn prewrite_ref_(&mut self, query: CellPtr, prev_clk: Clock, next_clk: Clock, loc: Locus) -> CellMutDerefPtr {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let root = if !noalias { self._probe_ref(query)? } else { query };
     match self.celtab.get_mut(&root) {
       None => return Err(CellDerefErr::MissingRoot),
@@ -2226,7 +2307,7 @@ impl CtxEnv {
               ref_: root,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2247,7 +2328,7 @@ impl CtxEnv {
   }
 
   pub fn prewrite_view(&mut self, query: CellPtr, prev_clk: Clock, next_clk: Clock, loc: Locus) -> CellMutDerefView {
-    let (ty, noalias) = self._pre_probe(query)?;
+    let (ty, stablect, noalias) = self._pre_probe(query)?;
     let view = if !noalias { self._probe_view(query)? } else { query.into() };
     let root = view.root();
     match self.celtab.get_mut(&root) {
@@ -2268,7 +2349,7 @@ impl CtxEnv {
               ref_: view,
               root_ty: &e.ty,
               ty,
-              stablect: &e.stablect,
+              stablect,
               cel_: &mut e.cel_,
             });
           }
@@ -2365,7 +2446,8 @@ impl CtxEnv {
       Some(_) => panic!("bug")
     }
     let e = CellEnvEntry{
-      stablect: Cell::new(u32::max_value()),
+      //stablect: Cell::new(u32::max_value()),
+      stablect: Cell::new(0),
       ty,
       cel_:     Cell_::Alias(alias, og),
     };
@@ -2382,14 +2464,15 @@ impl CtxEnv {
       Ok(oe) => oe.ty.clone()
     };
     let e = CellEnvEntry{
-      stablect: Cell::new(u32::max_value()),
+      //stablect: Cell::new(u32::max_value()),
+      stablect: Cell::new(0),
       ty,
       cel_:     Cell_::Alias(CellAlias::Const_, og),
     };
     self.celtab.insert(x, e);
   }
 
-  pub fn retain(&self, x: CellPtr) {
+  /*pub fn retain(&self, x: CellPtr) {
     if x.is_nil() {
       return;
     }
@@ -2417,7 +2500,7 @@ impl CtxEnv {
         e.stablect.set(next);
       }
     }
-  }
+  }*/
 
   pub fn snapshot(&mut self, ctr: &CtxCtr, pcel: CellPtr) -> CellPtr {
     let (ty, pclk) = match self._lookup_ref_(pcel) {

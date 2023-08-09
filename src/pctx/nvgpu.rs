@@ -63,22 +63,7 @@ impl GpuSnapshot {
   }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum NvGpuInnerReg {
-  Mem{ptr: *mut c_void, size: usize},
-  VMem{dptr: u64, size: usize},
-}
-
-impl NvGpuInnerReg {
-  pub fn locus(&self) -> Locus {
-    match self {
-      &NvGpuInnerReg::Mem{..} => Locus::Mem,
-      &NvGpuInnerReg::VMem{..} => Locus::VMem,
-    }
-  }
-}
-
-//#[derive(Clone)]
+/*//#[derive(Clone)]
 pub struct GpuOuterCell {
   pub write:    Rc<GpuSnapshot>,
   pub lastuse:  Rc<GpuSnapshot>,
@@ -95,103 +80,7 @@ pub struct GpuOuterCell_ {
   pub mem:      MemReg,
   pub write:    Rc<GpuSnapshot>,
   pub lastuse:  Rc<GpuSnapshot>,
-}
-
-pub type GpuInnerCell = NvGpuInnerCell;
-
-pub struct NvGpuInnerCell {
-  pub addr: PAddr,
-  pub root: Cell<CellPtr>,
-  pub flag: Cell<u8>,
-  pub tag:  Cell<u32>,
-  pub dev:  i32,
-  pub dptr: Cell<u64>,
-  pub sz:   usize,
-  //pub write:    Rc<CudartEvent>,
-  //pub lastuse:  Rc<CudartEvent>,
-  //pub write:    Rc<GpuSnapshot>,
-  //pub lastuse:  Rc<GpuSnapshot>,
-  //pub lastcopy: Rc<GpuSnapshot>,
-  // FIXME
-  //pub smp_dep:  Option<Rc<SmpInnerCell>>,
-  // TODO
-}
-
-impl NvGpuInnerCell {
-  pub fn front(&self) -> bool {
-    (self.flag.get() & 1) != 0
-  }
-
-  pub fn set_front(&self, flag: bool) {
-    if flag {
-      self.flag.set(self.flag.get() | 1);
-    } else {
-      self.flag.set(self.flag.get() & !1);
-    }
-  }
-
-  pub fn back(&self) -> bool {
-    (self.flag.get() & 2) != 0
-  }
-
-  pub fn set_back(&self, flag: bool) {
-    if flag {
-      self.flag.set(self.flag.get() | 2);
-    } else {
-      self.flag.set(self.flag.get() & !2);
-    }
-  }
-}
-
-impl InnerCell for NvGpuInnerCell {
-  fn size(&self) -> usize {
-    self.sz
-  }
-
-  fn root(&self) -> Option<CellPtr> {
-    let x = self.root.get();
-    if x.is_nil() {
-      None
-    } else {
-      Some(x)
-    }
-  }
-
-  fn set_root(&self, x: Option<CellPtr>) {
-    let x = x.unwrap_or(CellPtr::nil());
-    self.root.set(x);
-  }
-
-  fn pin(&self) -> bool {
-    (self.flag.get() & 4) != 0
-  }
-
-  fn set_pin(&self, flag: bool) {
-    if flag {
-      self.flag.set(self.flag.get() | 4);
-    } else {
-      self.flag.set(self.flag.get() & !4);
-    }
-  }
-
-  fn tag(&self) -> Option<u32> {
-    if (self.flag.get() & 8) != 0 {
-      Some(self.tag.get())
-    } else {
-      None
-    }
-  }
-
-  fn set_tag(&self, tag: Option<u32>) {
-    if let Some(val) = tag {
-      self.flag.set(self.flag.get() | 8);
-      self.tag.set(val);
-    } else {
-      self.flag.set(self.flag.get() & !8);
-      self.tag.set(0);
-    }
-  }
-}
+}*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct NvGpuDeviceInfo {
@@ -313,7 +202,8 @@ impl PCtxImpl for NvGpuPCtx {
     pl.insert((PMach::NvGpu, Locus::Mem), ());
   }
 
-  fn try_alloc(&self, pctr: &PCtxCtr, /*pmset: PMachSet,*/ locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr> {
+  //fn try_alloc(&self, pctr: &PCtxCtr, /*pmset: PMachSet,*/ locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr> {}
+  fn try_alloc(&self, pctr: &PCtxCtr, ty: &CellType, locus: Locus) -> Result<PAddr, PMemErr> {
     let sz = ty.packed_span_bytes() as usize;
     match locus {
       Locus::Mem => {
@@ -682,10 +572,27 @@ impl NvGpuPCtx {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum NvGpuInnerReg {
+  Mem{ptr: *mut c_void, size: usize},
+  VMem{dptr: u64, size: usize},
+}
+
+impl NvGpuInnerReg {
+  pub fn locus(&self) -> Locus {
+    match self {
+      &NvGpuInnerReg::Mem{..} => Locus::Mem,
+      &NvGpuInnerReg::VMem{..} => Locus::VMem,
+    }
+  }
+}
+
 #[repr(C)]
 pub struct NvGpuMemCell {
   //pub addr: PAddr,
   pub root: Cell<CellPtr>,
+  // FIXME
+  //pub refc: Cell<u32>,
   pub flag: Cell<u8>,
   pub ptr:  *mut c_void,
   pub sz:   usize,
@@ -751,6 +658,18 @@ impl InnerCell for NvGpuMemCell {
     self.root.set(x);
   }
 
+  fn cow(&self) -> bool {
+    (self.flag.get() & 0x10) != 0
+  }
+
+  fn set_cow(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 0x10);
+    } else {
+      self.flag.set(self.flag.get() & !0x10);
+    }
+  }
+
   fn pin(&self) -> bool {
     (self.flag.get() & 4) != 0
   }
@@ -795,6 +714,9 @@ impl NvGpuPageMap {
   }
 
   pub fn try_alloc(&self, addr: PAddr, sz: usize) -> Result<Rc<NvGpuMemCell>, PMemErr> {
+    if cfg_debug() {
+      println!("DEBUG: NvGpuPageMap::try_alloc: addr={:?} sz={:?}", addr, sz);
+    }
     let cel = Rc::new(NvGpuMemCell::_try_alloc(sz)?);
     assert!(self.page_tab.borrow_mut().insert(addr, cel.clone()).is_none());
     assert!(self.page_idx.borrow_mut().insert(cel.ptr, addr).is_none());
@@ -835,6 +757,116 @@ impl GpuInnerMemCell {
     }
   }
 }*/
+
+pub type GpuInnerCell = NvGpuInnerCell;
+
+pub struct NvGpuInnerCell {
+  //pub addr: PAddr,
+  pub root: Cell<CellPtr>,
+  // FIXME
+  //pub refc: Cell<u32>,
+  pub flag: Cell<u8>,
+  pub tag:  Cell<u32>,
+  pub dev:  i32,
+  pub dptr: Cell<u64>,
+  pub sz:   usize,
+  //pub write:    Rc<CudartEvent>,
+  //pub lastuse:  Rc<CudartEvent>,
+  //pub write:    Rc<GpuSnapshot>,
+  //pub lastuse:  Rc<GpuSnapshot>,
+  //pub lastcopy: Rc<GpuSnapshot>,
+  // FIXME
+  //pub smp_dep:  Option<Rc<SmpInnerCell>>,
+  // TODO
+}
+
+impl NvGpuInnerCell {
+  pub fn front(&self) -> bool {
+    (self.flag.get() & 1) != 0
+  }
+
+  pub fn set_front(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 1);
+    } else {
+      self.flag.set(self.flag.get() & !1);
+    }
+  }
+
+  pub fn back(&self) -> bool {
+    (self.flag.get() & 2) != 0
+  }
+
+  pub fn set_back(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 2);
+    } else {
+      self.flag.set(self.flag.get() & !2);
+    }
+  }
+}
+
+impl InnerCell for NvGpuInnerCell {
+  fn size(&self) -> usize {
+    self.sz
+  }
+
+  fn root(&self) -> Option<CellPtr> {
+    let x = self.root.get();
+    if x.is_nil() {
+      None
+    } else {
+      Some(x)
+    }
+  }
+
+  fn set_root(&self, x: Option<CellPtr>) {
+    let x = x.unwrap_or(CellPtr::nil());
+    self.root.set(x);
+  }
+
+  fn cow(&self) -> bool {
+    (self.flag.get() & 0x10) != 0
+  }
+
+  fn set_cow(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 0x10);
+    } else {
+      self.flag.set(self.flag.get() & !0x10);
+    }
+  }
+
+  fn pin(&self) -> bool {
+    (self.flag.get() & 4) != 0
+  }
+
+  fn set_pin(&self, flag: bool) {
+    if flag {
+      self.flag.set(self.flag.get() | 4);
+    } else {
+      self.flag.set(self.flag.get() & !4);
+    }
+  }
+
+  fn tag(&self) -> Option<u32> {
+    if (self.flag.get() & 8) != 0 {
+      Some(self.tag.get())
+    } else {
+      None
+    }
+  }
+
+  fn set_tag(&self, tag: Option<u32>) {
+    if let Some(val) = tag {
+      self.flag.set(self.flag.get() | 8);
+      self.tag.set(val);
+    } else {
+      self.flag.set(self.flag.get() & !8);
+      self.tag.set(0);
+    }
+  }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum NvGpuMemPoolReq {
@@ -1136,7 +1168,7 @@ impl NvGpuMemPool {
     self.back_cursor.set(next_backoffset);
     let dptr = self.front_base + offset as u64;
     let cel = Rc::new(NvGpuInnerCell{
-      addr,
+      //addr,
       root: Cell::new(CellPtr::nil()),
       flag: Cell::new(0),
       tag:  Cell::new(0),
@@ -1199,7 +1231,7 @@ impl NvGpuMemPool {
     //let write = GpuSnapshot::fresh(self.dev());
     //let lastuse = GpuSnapshot::fresh(self.dev());
     let cel = Rc::new(NvGpuInnerCell{
-      addr,
+      //addr,
       root: Cell::new(CellPtr::nil()),
       flag: Cell::new(0),
       tag:  Cell::new(0),

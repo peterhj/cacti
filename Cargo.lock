@@ -23,7 +23,6 @@ dependencies = [
  "cacti_gpu_cu_ffi",
  "cacti_smp_c_ffi",
  "futhark_ffi",
- "futhark_syntax",
  "glob",
  "half",
  "home",
@@ -90,15 +89,6 @@ dependencies = [
  "libc",
  "libloading",
  "rustc_serialize",
- "ryu",
-]
-
-[[package]]
-name = "futhark_syntax"
-version = "0.1.0-devel"
-dependencies = [
- "regex_syntax",
- "smol_str",
 ]
 
 [[package]]
@@ -148,10 +138,6 @@ name = "once_cell"
 version = "1.17.1"
 
 [[package]]
-name = "regex_syntax"
-version = "0.7.2"
-
-[[package]]
 name = "repugnant_pickle"
 version = "0.0.1"
 dependencies = [
@@ -166,10 +152,6 @@ version = "0.4.0-devel"
 dependencies = [
  "smol_str",
 ]
-
-[[package]]
-name = "ryu"
-version = "1.0.13"
 
 [[package]]
 name = "safetensor_serialize"

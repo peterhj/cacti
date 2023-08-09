@@ -2918,7 +2918,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                 if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: try new phy..."); }
                 assert_eq!(root, optr);
                 assert_eq!(oclk, state.borrow().clk);
-                if e.root_ty.span_bytes() != v_ty.as_ref().span_bytes() {
+                if e.root_ty.span_bytes() != e.ty.span_bytes() {
                   // FIXME: view: need to do a raw zero-pad.
                   unimplemented!();
                 } else {
@@ -3693,7 +3693,7 @@ impl FutharkThunkImpl<CudaBackend> {
                     }
                     assert_eq!(root, optr);
                     assert_eq!(oclk, state.borrow().clk);
-                    if e.root_ty.span_bytes() != v_ty.as_ref().span_bytes() {
+                    if e.root_ty.span_bytes() != e.ty.span_bytes() {
                       println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out:   view ty={:?}", &v_ty);
                       // FIXME: view: need to do a raw zero-pad.
                       unimplemented!();

@@ -1,5 +1,6 @@
 use self::nvgpu::{NvGpuPCtx};
 use self::smp::{SmpPCtx};
+use self::swap::{SwapPCtx};
 use crate::algo::{HashMap, RevSortMap8};
 use crate::algo::fp::*;
 use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
@@ -70,6 +71,7 @@ impl Locus {
 pub enum PMach {
   // TODO TODO
   _Top = 0,
+  Swap,
   Smp,
   NvGpu,
   _Bot = 255,
@@ -88,10 +90,9 @@ impl FromStr for PMach {
 
   fn from_str(s: &str) -> Result<PMach, SmolStr> {
     Ok(match s {
+      "swap" => PMach::Swap,
       "smp" => PMach::Smp,
-      #[cfg(feature = "nvgpu")]
       "gpu" => PMach::NvGpu,
-      #[cfg(feature = "nvgpu")]
       "nvgpu" => PMach::NvGpu,
       _ => return Err(s.into())
     })
@@ -267,6 +268,7 @@ pub struct PCtx {
   pub plmatrix: RevSortMap8<(PMach, Locus), ()>,
   pub tagunify: RefCell<TagUnifier>,
   //pub addrtab:  RefCell<HashMap<PAddr, PAddrTabEntry>>,
+  pub swap:     SwapPCtx,
   pub smp:      SmpPCtx,
   #[cfg(feature = "nvgpu")]
   pub nvgpu_ct: i32,
@@ -284,6 +286,7 @@ impl PCtx {
       lpmatrix: RevSortMap8::default(),
       plmatrix: RevSortMap8::default(),
       tagunify: RefCell::new(TagUnifier::default()),
+      swap:     SwapPCtx::new(),
       smp:      SmpPCtx::new(),
       #[cfg(feature = "nvgpu")]
       nvgpu_ct: 0,
@@ -300,6 +303,7 @@ impl PCtx {
         break;
       }
     }
+    pctx.swap.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
     pctx.smp.append_matrix(&mut pctx.lpmatrix, &mut pctx.plmatrix);
     //pctx.pmset.insert(PMach::Smp);
     #[cfg(feature = "nvgpu")]
@@ -331,13 +335,25 @@ impl PCtx {
 
   pub fn alloc(&self, ty: &CellType, locus: Locus, pmach: PMach) -> PAddr {
     match pmach {
+      PMach::Swap => {
+        // FIXME
+        unimplemented!();
+        /*let addr = match self.swap.try_alloc(&self.ctr, ty, locus) {
+          Err(e) => {
+            println!("BUG:   PCtx::alloc: unimplemented error: {:?}", e);
+            panic!();
+          }
+          Ok(addr) => addr
+        };
+        addr*/
+      }
       #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         unimplemented!();
       }
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
-        let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, locus, ty) {
+        let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, ty, locus) {
           Err(e) => {
             println!("BUG:   PCtx::alloc: unimplemented error: {:?}", e);
             panic!();
@@ -370,6 +386,15 @@ impl PCtx {
   }
 
   pub fn release(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    {
+      let pm = PMach::Swap;
+      match self.swap.release(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
     #[cfg(feature = "nvgpu")]
     if let Some(gpu) = self.nvgpu.as_ref() {
       let pm = PMach::NvGpu;
@@ -385,6 +410,15 @@ impl PCtx {
   }
 
   pub fn lookup(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    {
+      let pm = PMach::Swap;
+      match self.swap.lookup(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
     #[cfg(feature = "nvgpu")]
     if let Some(gpu) = self.nvgpu.as_ref() {
       let pm = PMach::NvGpu;
@@ -401,6 +435,14 @@ impl PCtx {
 
   pub fn lookup_pm(&self, pmach: PMach, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
     match pmach {
+      PMach::Swap => {
+        match self.swap.lookup(addr) {
+          None => {}
+          Some((loc, icel)) => {
+            return Some((loc, icel));
+          }
+        }
+      }
       #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         unimplemented!();
@@ -425,13 +467,23 @@ impl PCtx {
   }
 
   pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr, sz: usize) {
-    match (dst_pm, src_pm) {
+    match (dst_loc, dst_pm, src_loc, src_pm) {
       #[cfg(feature = "nvgpu")]
-      (PMach::NvGpu, PMach::NvGpu) => {
+      (Locus::VMem, PMach::NvGpu, Locus::Mem, PMach::Swap) => {
+        let gpu = self.nvgpu.as_ref().unwrap();
+        let (dst_dptr, dst_sz) = gpu.lookup_dev(dst).unwrap();
+        assert!(sz <= dst_sz);
+        let src_reg = self.swap.lookup_mem_reg(src).unwrap();
+        assert!(sz <= src_reg.sz);
+        self.nvgpu.as_ref().unwrap().hard_copy_raw_mem_to_vmem(dst_dptr, src_reg.ptr, sz)
+      }
+      #[cfg(feature = "nvgpu")]
+      (_, PMach::NvGpu, _, PMach::NvGpu) => {
         self.nvgpu.as_ref().unwrap().hard_copy(dst_loc, dst, src_loc, src, sz)
       }
       _ => {
-        panic!("bug: PCtx::hard_copy: unimplemented: dst pm={:?} src pm={:?}", dst_pm, src_pm)
+        panic!("bug: PCtx::hard_copy: unimplemented: dst loc={:?} pm={:?} src loc={:?} pm={:?}",
+            dst_loc, dst_pm, src_loc, src_pm)
       }
     }
   }
@@ -470,6 +522,52 @@ impl PCtx {
     }
   }
 
+  pub fn lookup_cow(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let ocow = InnerCell_::cow(&*icel);
+        ocow
+      }
+    }
+  }
+
+  pub fn set_cow(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let ocow = InnerCell_::cow(&*icel);
+        InnerCell_::set_cow(&*icel, true);
+        ocow
+      }
+    }
+  }
+
+  pub fn unset_cow(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let ocow = InnerCell_::cow(&*icel);
+        InnerCell_::set_cow(&*icel, false);
+        ocow
+      }
+    }
+  }
+
+  pub fn lookup_pin(&self, addr: PAddr) -> bool {
+    // FIXME
+    match self.lookup(addr) {
+      None => panic!("bug"),
+      Some((_, _, icel)) => {
+        let opin = InnerCell_::pin(&*icel);
+        opin
+      }
+    }
+  }
+
   pub fn set_pin(&self, addr: PAddr) -> bool {
     // FIXME
     match self.lookup(addr) {
@@ -501,8 +599,8 @@ pub trait PCtxImpl {
   fn append_matrix(&self, lp: &mut RevSortMap8<(Locus, PMach), ()>, pl: &mut RevSortMap8<(PMach, Locus), ()>);
   //fn try_alloc(&self, x: CellPtr, sz: usize, pmset: PMachSet) -> Result<Rc<Self::ICel>, PMemErr>;
   //fn try_alloc(&self, x: CellPtr, sz: usize, locus: Locus) -> Result<Rc<dyn InnerCell_>, PMemErr>;
-  fn try_alloc(&self, pctr: &PCtxCtr, locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr>;
-  //fn try_alloc(&self, pctr: &PCtxCtr, ty: &CellType, locus: Locus) -> Result<PAddr, PMemErr>;
+  //fn try_alloc(&self, pctr: &PCtxCtr, locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr>;
+  fn try_alloc(&self, pctr: &PCtxCtr, ty: &CellType, locus: Locus) -> Result<PAddr, PMemErr>;
   //fn lookup(&self, addr: PAddr) -> Option<()>;
 }
 
@@ -540,7 +638,27 @@ impl MemReg {
     let dst_start = self.ptr as usize;
     let dst_end = dst_start + self.sz;
     if !(src_end <= dst_start || dst_end <= src_start) {
-      panic!("bug: MemReg::_copy_from: overlapping src and dst");
+      panic!("bug: MemReg::_copy_from_slice: overlapping src and dst");
+    }
+    unsafe {
+      std::intrinsics::copy_nonoverlapping(src_buf.as_ptr() as *const u8, self.ptr as *mut u8, self.sz);
+    }
+  }
+
+  #[track_caller]
+  pub fn copy_from_bytes(&self, src_buf: &[u8]) {
+    panick_wrap(|| self._copy_from_bytes(src_buf))
+  }
+
+  pub fn _copy_from_bytes(&self, src_buf: &[u8]) {
+    let src_sz = src_buf.len();
+    assert_eq!(self.sz, src_sz);
+    let src_start = src_buf.as_ptr() as usize;
+    let src_end = src_start + src_sz;
+    let dst_start = self.ptr as usize;
+    let dst_end = dst_start + self.sz;
+    if !(src_end <= dst_start || dst_end <= src_start) {
+      panic!("bug: MemReg::_copy_from_bytes: overlapping src and dst");
     }
     unsafe {
       std::intrinsics::copy_nonoverlapping(src_buf.as_ptr() as *const u8, self.ptr as *mut u8, self.sz);

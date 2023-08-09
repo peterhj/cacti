@@ -8,7 +8,7 @@ use crate::panick::*;
 use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
-use crate::util::mmap::{MmapBuf};
+use crate::util::mmap::{MmapFileSlice};
 use crate::util::pickle::{TorchDtype};
 use cacti_cfg_env::*;
 
@@ -61,6 +61,12 @@ impl CellDeref for CellPtr {
     *self
   }
 }
+
+/*impl<T: CellStoreTo + ?Sized> CellStore<T> for CellPtr {
+  fn _store(&self, src: &T) {
+    src._store_to(*self);
+  }
+}*/
 
 impl Debug for CellPtr {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
@@ -155,6 +161,18 @@ impl CellDeref for StableCell {
   }
 }
 
+/*impl<'a, T: CellStoreTo + ?Sized> CellStore<T> for &'a StableCell {
+  fn _store(&self, src: &T) {
+    src._store_to(*self.as_ptr_ref());
+  }
+}
+
+impl<T: CellStoreTo + ?Sized> CellStore<T> for StableCell {
+  fn _store(&self, src: &T) {
+    src._store_to(*self.as_ptr_ref());
+  }
+}*/
+
 impl Debug for StableCell {
   fn fmt(&self, f: &mut Formatter) -> FmtResult {
     write!(f, "StableCell({})", self.ptr_.raw_)
@@ -182,7 +200,7 @@ impl From<CellType> for StableCell {
 impl StableCell {
   pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
     assert!(!ptr.is_nil());
-    env.retain(ptr);
+    env._retain_probe(ptr);
     StableCell{ptr_: ptr}
   }
 
@@ -217,7 +235,7 @@ impl StableCell {
   pub fn release(mut self, env: &CtxEnv) -> CellPtr {
     let mut ptr = CellPtr::nil();
     swap(&mut ptr, &mut self.ptr_);
-    env.release(ptr);
+    env._release_probe(ptr);
     ptr
   }
 
@@ -463,10 +481,6 @@ impl CellMap {
   }
 }
 
-pub trait CellDeref {
-  fn _deref(&self) -> CellPtr;
-}
-
 enum _Void {}
 
 pub type CellViewHandle = CellViewHandle_;
@@ -517,6 +531,87 @@ impl<'a> CellDeref for &'a CellViewHandle_ {
 impl<'a> CellDeref for &'a mut CellViewHandle_ {
   fn _deref(&self) -> CellPtr {
     CellPtr::from_unchecked(self.0.len() as _)
+  }
+}
+
+pub trait CellDeref {
+  fn _deref(&self) -> CellPtr;
+}
+
+/*pub trait CellStore<T: ?Sized> {
+  fn _store(&self, src: &T);
+}*/
+
+pub trait CellStoreTo {
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv);
+}
+
+/*impl<'a> CellStoreTo for &'a [u8] {
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv) {
+    unimplemented!();
+  }
+}*/
+
+impl CellStoreTo for MmapFileSlice {
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv) {
+    assert!(!dst.is_nil());
+    match env._lookup_mut_view(dst) {
+      Err(_) => panic!("bug"),
+      Ok(e) => {
+        let root = e.root();
+        let v_ty = match e.view().eval_contiguous(e.root_ty) {
+          Err(_) => {
+            println!("ERROR:  CellStoreTo: dst={:?} is not a zero-copy (contiguous) view", dst);
+            panic!();
+          }
+          Ok(ty) => ty
+        };
+        assert_eq!(&e.ty, v_ty.as_ref());
+        TL_PCTX.with(|pctx| {
+          match e.cel_ {
+            &mut Cell_::Top(ref state, optr) => {
+              assert_eq!(root, optr);
+              let oclk = state.borrow().clk;
+              assert_eq!(clk, oclk);
+              if e.root_ty.span_bytes() != e.ty.span_bytes() {
+                // FIXME: view: need to do a raw zero-pad.
+                unimplemented!();
+              } else {
+                let addr = pctx.ctr.fresh_addr();
+                let icel = pctx.swap._try_alloc_cow(addr, &e.ty, self.clone()).unwrap();
+                let state = RefCell::new(state.borrow().clone());
+                let clo = RefCell::new(CellClosure::default());
+                let mut pcel = PCell::new(optr, e.root_ty.clone());
+                pcel.push(optr, oclk, Locus::Mem, PMach::Swap, addr);
+                *e.cel_ = Cell_::Phy(state, clo, pcel);
+              }
+            }
+            &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+              let optr = pcel.optr;
+              assert_eq!(root, optr);
+              let oclk = state.borrow().clk;
+              assert_eq!(clk, oclk);
+              if e.root_ty.span_bytes() != e.ty.span_bytes() {
+                // FIXME: view.
+                unimplemented!();
+              } else {
+                let addr = pctx.ctr.fresh_addr();
+                let icel = pctx.swap._try_alloc_cow(addr, &e.ty, self.clone()).unwrap();
+                match pcel.swap(optr, oclk, Locus::Mem, PMach::Swap, addr) {
+                  None => {}
+                  Some((_, prev_addr)) => {
+                    if prev_addr != addr {
+                      let _ = pctx.release(prev_addr);
+                    }
+                  }
+                }
+              }
+            }
+            _ => panic!("bug")
+          }
+        });
+      }
+    }
   }
 }
 
@@ -828,9 +923,132 @@ impl CellView {
     Ok(CellSliceType{offset, type_: CellType{shape, dtype}})
   }
 
-  pub fn eval_contiguous_transposed(&self, root_ty: &CellType) -> Result<CellSliceType, ()> {
+  pub fn eval_contiguous_transposed(&self, root_ty: &CellType) -> Result<(CellSliceType, CellIndexPerm), ()> {
     assert!(!root_ty.is_top());
-    unimplemented!();
+    assert!(root_ty.shape.len() <= 7);
+    let nd = root_ty.shape.len() as i8;
+    let mut offset = Vec::with_capacity(nd as usize);
+    offset.resize(nd as usize, 0);
+    let mut shape = root_ty.shape.clone();
+    let mut dtype = root_ty.dtype;
+    if self.vlog.is_empty() {
+      return Ok((CellSliceType{offset, type_: CellType{shape, dtype}}, CellIndexPerm::new(nd)));
+    }
+    let mut end_offset = root_ty.shape.clone();
+    let mut root_shape = root_ty.shape.clone();
+    let mut seal_slice = false;
+    /*let mut idx_perm = Vec::with_capacity(nd as usize);
+    for d in 0 .. nd {
+      idx_perm.push(d);
+    }*/
+    let mut perm_state = CellIndexPermState::new(nd);
+    // TODO
+    for vop in self.vlog.iter() {
+      match vop {
+        &CellViewOp::Nop => {}
+        &CellViewOp::Slice(ref idx) => {
+          assert!(!seal_slice);
+          let mut outer = None;
+          for d in 0 .. shape.len() {
+            if idx[d].start + 1 == idx[d].end {
+              continue;
+            } else if outer.is_none() && idx[d].start < idx[d].end {
+              outer = Some(d);
+              continue;
+            } else if outer.is_some() && idx[d].start == 0 && idx[d].end == shape[d] {
+              continue;
+            }
+            return Err(());
+          }
+          // FIXME: asserts below are kinda ad hoc.
+          let outer = outer.unwrap_or(shape.len());
+          for d in (0 .. shape.len()).rev() {
+            if !(idx[d].end <= shape[d] + idx[d].start) {
+              println!("DEBUG: CellView::eval_contiguous: Slice: root ty={:?}", root_ty);
+              println!("DEBUG: CellView::eval_contiguous: Slice: vlog   ={:?}", &self.vlog);
+              println!("DEBUG: CellView::eval_contiguous: Slice: offset ={:?}", &offset);
+              println!("DEBUG: CellView::eval_contiguous: Slice: shape  ={:?}", &shape);
+              println!("DEBUG: CellView::eval_contiguous: Slice: eoffset={:?}", &end_offset);
+              println!("DEBUG: CellView::eval_contiguous: Slice: rshape ={:?}", &root_shape);
+              println!("DEBUG: CellView::eval_contiguous: Slice: idx    ={:?}", idx);
+              println!("DEBUG: CellView::eval_contiguous: Slice: outer  ={:?}", outer);
+            }
+            assert!(idx[d].start <= idx[d].end);
+            assert!(idx[d].end <= shape[d] + idx[d].start);
+            assert!(offset[d] + idx[d].start <= idx[d].end);
+            if d <= outer {
+              shape[d] = idx[d].end - idx[d].start;
+              offset[d] += idx[d].start;
+              end_offset[d] = offset[d] + (idx[d].end - idx[d].start);
+            } else {
+              assert_eq!(offset[d], 0);
+            }
+          }
+        }
+        &CellViewOp::NewShape(ref new_shape) => {
+          assert!(!seal_slice);
+          for d in 0 .. shape.len() {
+            if offset[d] == 0 && end_offset[d] == shape[d] {
+              continue;
+            }
+            return Err(());
+          }
+          match (CellType::_shape_compat(&**new_shape, &root_shape),
+                 CellType::_shape_compat(&**new_shape, &shape)) {
+            (ShapeCompat::Equal, ShapeCompat::Equal) |
+            (ShapeCompat::Equal, ShapeCompat::NewShape) |
+            (ShapeCompat::NewShape, ShapeCompat::Equal) |
+            (ShapeCompat::NewShape, ShapeCompat::NewShape) => {
+              offset.clear();
+              offset.resize(new_shape.len(), 0);
+              shape.clear();
+              shape.extend_from_slice(new_shape);
+              end_offset.clear();
+              end_offset.extend_from_slice(new_shape);
+              root_shape.clear();
+              root_shape.extend_from_slice(new_shape);
+            }
+            _ => return Err(())
+          }
+        }
+        &CellViewOp::BitAlias(new_dtype) => {
+          //assert_eq!(dtype.size_bytes(), new_dtype.size_bytes());
+          if dtype.size_bits() != new_dtype.size_bits() {
+            return Err(());
+          }
+          dtype = new_dtype;
+        }
+        &CellViewOp::Swap(_ld, _rd) => {
+          seal_slice = true;
+          perm_state._step(vop);
+        }
+        _ => unimplemented!()
+      }
+    }
+    // NB: check contiguous wrt root.
+    let mut flat_len = 1;
+    let mut start = 0;
+    let mut fin = 0;
+    let mut stride = 1;
+    for d in (0 .. root_shape.len()).rev() {
+      let ds = shape[d];
+      let o = offset[d];
+      let o2 = end_offset[d];
+      let root_ds = root_shape[d];
+      assert!(ds >= 0);
+      assert!(o >= 0);
+      assert!(o2 >= 0);
+      assert!(root_ds >= 0);
+      assert!(o <= o2);
+      assert!(o2 <= root_ds);
+      assert!(ds <= root_ds);
+      flat_len *= ds as u64;
+      start += (o as u64) * stride;
+      fin += ((o2 - 1) as u64) * stride;
+      stride *= root_ds as u64;
+    }
+    assert_eq!(start + flat_len, fin + 1);
+    Ok((CellSliceType{offset, type_: CellType{shape, dtype}}, CellIndexPerm{perm: perm_state.perm, ndim: nd}))
   }
 
   pub fn eval_strided(&self, root_ty: &CellType) -> Result<CellStridedSliceType, ()> {
@@ -838,44 +1056,64 @@ impl CellView {
     unimplemented!();
   }
 
-  pub fn eval_strided_transposed(&self, root_ty: &CellType) -> Result<CellStridedSliceType, ()> {
+  pub fn eval_strided_transposed(&self, root_ty: &CellType) -> Result<(CellStridedSliceType, CellIndexPerm), ()> {
     assert!(!root_ty.is_top());
     unimplemented!();
   }
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct CellIndexPerm {
+  pub perm: [i8; 7],
+  pub ndim: i8,
+}
+
+impl CellIndexPerm {
+  pub fn new(ndim: i8) -> CellIndexPerm {
+    CellIndexPerm{
+      perm: [0, 1, 2, 3, 4, 5, 6],
+      ndim,
+    }
+  }
+}
+
+/*pub type CellViewStep = CellIndexPermStep;
+
+#[derive(Clone, Copy, Debug)]
 #[repr(u8)]
-pub enum CellViewStep {
+pub enum CellIndexPermStep {
   Break,
   Swap,
   // TODO
   Halt,
-}
+}*/
 
-pub struct CellViewPermState {
+pub type CellViewPermState = CellIndexPermState;
+
+#[derive(Clone, Copy, Debug)]
+pub struct CellIndexPermState {
+  pub perm: [i8; 7],
   pub ndim: i8,
-  pub swap: bool,
-  pub perm: [i8; 8],
+  //pub swap: bool,
 }
 
-impl CellViewPermState {
-  pub fn new(ndim: i8) -> CellViewPermState {
-    /*assert!(ndim <= i8::max_value() as u8);*/
+impl CellIndexPermState {
+  pub fn new(ndim: i8) -> CellIndexPermState {
     assert!(ndim >= 0);
-    CellViewPermState{
+    assert!(ndim <= 7);
+    CellIndexPermState{
+      perm: [0, 1, 2, 3, 4, 5, 6],
       ndim: ndim,
-      swap: false,
-      perm: [0, 1, 2, 3, 4, 5, 6, 7],
+      //swap: false,
     }
   }
 
-  pub fn _reset_swap(&mut self) {
+  /*pub fn _reset_swap(&mut self) {
     self.swap = false;
     self.perm = [0, 1, 2, 3, 4, 5, 6, 7];
-  }
+  }*/
 
-  pub fn _swap(&mut self) -> bool {
+  /*pub fn _swap(&mut self) -> bool {
     if self.swap {
       let mut noswap = true;
       for d in 0 .. self.ndim {
@@ -889,17 +1127,17 @@ impl CellViewPermState {
       }
     }
     self.swap
-  }
+  }*/
 
-  pub fn _step(&mut self, vop: &CellVOp) -> CellViewStep {
+  pub fn _step(&mut self, vop: &CellVOp) /*-> CellViewStep */{
     match vop {
-      &CellVOp::Nop => {
+      /*&CellVOp::Nop => {
         if self._swap() {
           return CellViewStep::Swap;
         }
         // TODO
         return CellViewStep::Halt;
-      }
+      }*/
       &CellVOp::Swap(ld, rd) => {
         assert!(ld < self.ndim);
         assert!(ld >= -self.ndim);
@@ -908,18 +1146,18 @@ impl CellViewPermState {
         let lidx = if ld < 0 { self.ndim + ld } else { ld } as usize;
         let ridx = if rd < 0 { self.ndim + rd } else { rd } as usize;
         self.perm.swap(lidx, ridx);
-        self.swap = true;
+        //self.swap = true;
       }
       _ => {
-        if self._swap() {
+        /*if self._swap() {
           return CellViewStep::Swap;
-        }
+        }*/
         // TODO
         println!("DEBUG: CellViewState::_step: unimplemented: vop={:?}", vop);
         panic!("bug");
       }
     }
-    CellViewStep::Break
+    //CellViewStep::Break
   }
 }
 
@@ -1470,6 +1708,21 @@ impl CellType {
     (span * self.dtype.size_bytes() as i64) as u64
   }
 
+  pub fn packed_stride_and_span_bytes(&self) -> (Vec<i64>, u64) {
+    let nd = self.ndim() as usize;
+    let mut stride = Vec::with_capacity(nd);
+    if nd > 0 {
+      stride.push(1);
+    }
+    let mut span = if nd == 0 { 1 } else { self.shape[(nd - 1)] };
+    for d in 1 .. nd {
+      stride.push(span);
+      span = self.shape[(nd - 1) - d] * span;
+    }
+    stride.reverse();
+    (stride, (span * self.dtype.size_bytes() as i64) as u64)
+  }
+
   pub fn shape_compat(&self, orig: &CellType) -> ShapeCompat {
     assert!(self.dtype != Dtype::_Top);
     assert!(orig.dtype != Dtype::_Top);
@@ -1779,6 +2032,21 @@ impl PCell {
     panic!("bug");
   }
 
+  pub fn _dump_replicas(&self) {
+    print!("DEBUG: PCell::_dump_replicas: optr={:?} ogty={:?} reps=[", self.optr, &self.ogty);
+    for (i, (key, rep)) in self.replicas.iter().enumerate() {
+      let &(loc, pm) = key.as_ref();
+      let addr = rep.addr.get();
+      let clk = rep.clk.get();
+      if i == 0 {
+        print!("({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
+      } else {
+        print!(", ({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
+      }
+    }
+    println!("]");
+  }
+
   pub fn lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
     match self.replicas.find((q_locus, q_pmach)) {
       None => None,
@@ -1801,7 +2069,7 @@ impl PCell {
     }
   }
 
-  pub fn find_any(&self, q_clk: Clock, /*ty: &CellType*/) -> Option<(Locus, PMach, PAddr)> {
+  pub fn find_any(&self, q_clk: Clock) -> Option<(Locus, PMach, PAddr)> {
     for (key, rep) in self.replicas.iter() {
       let &(loc, pm) = key.as_ref();
       if rep.clk.get() == q_clk {
@@ -1815,20 +2083,21 @@ impl PCell {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
       Some((pmach, rep)) => {
+        let addr = rep.addr.get();
         let prev_clk = rep.clk.get();
         if prev_clk > q_clk {
-          println!("DEBUG: PCell::read_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
-              root, prev_clk, q_clk, ty, q_locus, pmach);
+          println!("DEBUG: PCell::read_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+              root, prev_clk, q_clk, ty, q_locus, pmach, addr);
           println!("ERROR: PCell::read_loc: read failure");
           panic!("bug");
         } else if prev_clk == q_clk {
-          return (pmach, rep.addr.get());
+          return (pmach, addr);
         }
         Some(pmach)
       }
     };
     if cfg_debug() {
-    println!("DEBUG: PCell::get_loc: root={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
+    println!("DEBUG: PCell::read_loc: root={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
         root, q_clk, ty, q_locus, f_pmach);
     }
     if f_pmach.is_none() {
@@ -1842,6 +2111,7 @@ impl PCell {
     match self.lookup(q_locus, f_pmach) {
       None => panic!("bug"),
       Some(rep) => {
+        let addr = rep.addr.get();
         let prev_clk = rep.clk.get();
         if prev_clk >= q_clk {
           panic!("bug");
@@ -1850,27 +2120,27 @@ impl PCell {
             None => {
               println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
                   self.optr, &self.ogty,
-                  root, prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+                  root, prev_clk, q_clk, ty, q_locus, f_pmach, addr,
               );
               println!("ERROR: PCell::read_loc: no replica to copy from");
               panic!();
             }
             Some((o_loc, o_pm, o_addr)) => {
               if cfg_debug() {
-              println!("DEBUG: PCell::get_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
+              println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
                   self.optr, &self.ogty,
-                  root, prev_clk, q_clk, ty, q_locus, f_pmach, rep.addr.get(),
+                  root, prev_clk, q_clk, ty, q_locus, f_pmach, addr,
                   o_loc, o_pm, o_addr,
               );
               }
               TL_PCTX.with(|pctx| {
-                pctx.hard_copy(q_locus, f_pmach, rep.addr.get(), o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
+                pctx.hard_copy(q_locus, f_pmach, addr, o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
               });
             }
           }
           rep.clk.set(q_clk);
         }
-        (f_pmach, rep.addr.get())
+        (f_pmach, addr)
       }
     }
   }
@@ -1879,10 +2149,11 @@ impl PCell {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
       Some((pmach, rep)) => {
+        let addr = rep.addr.get();
         let prev_clk = rep.clk.get();
         if prev_clk >= q_clk {
-          println!("DEBUG: PCell::write_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
-              root, prev_clk, q_clk, ty, q_locus, pmach);
+          println!("DEBUG: PCell::write_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
+              root, prev_clk, q_clk, ty, q_locus, pmach, addr);
           println!("ERROR: PCell::write_loc: write failure");
           panic!("bug");
         }
@@ -1896,19 +2167,55 @@ impl PCell {
       self.push(root, Clock::default(), q_locus, pmach, addr);
       f_pmach = Some(pmach);
     }
-    let f_pmach = f_pmach.unwrap();
-    match self.lookup(q_locus, f_pmach) {
-      None => panic!("bug"),
-      Some(rep) => {
-        let prev_clk = rep.clk.get();
-        if prev_clk >= q_clk {
-          panic!("bug");
-        } else /*if prev_clk < q_clk */{
-          rep.clk.set(q_clk);
+    TL_PCTX.with(|pctx| {
+      let mut f_pmach = f_pmach.unwrap();
+      let mut retry = false;
+      'retry: loop {
+        match self.lookup(q_locus, f_pmach) {
+          None => panic!("bug"),
+          Some(rep) => {
+            let addr = rep.addr.get();
+            let prev_clk = rep.clk.get();
+            if pctx.lookup_cow(addr) {
+              drop(rep);
+              if cfg_debug() {
+                println!("DEBUG: PCell::write_loc: cow: old root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} retry?{:?}",
+                    root, prev_clk, q_clk, ty, q_locus, f_pmach, addr, retry);
+              }
+              if retry {
+                panic!("bug");
+              }
+              let o_pm = f_pmach;
+              let o_loc = q_locus;
+              let o_addr = addr;
+              let (pmach, addr) = pctx.alloc_loc(ty, q_locus);
+              f_pmach = pmach;
+              match self.swap(root, q_clk, q_locus, f_pmach, addr) {
+                None => {}
+                Some((_, prev_addr)) => {
+                  let _ = pctx.release(prev_addr);
+                }
+              }
+              pctx.hard_copy(q_locus, f_pmach, addr, o_loc, o_pm, o_addr, ty.packed_span_bytes() as usize);
+              // FIXME: release w/ paddr refct.
+              //let _ = pctx.release(o_addr);
+              if cfg_debug() {
+                println!("DEBUG: PCell::write_loc: cow: new root={:?} loc={:?} pm={:?} addr={:?}",
+                    root, q_locus, f_pmach, addr);
+              }
+              retry = true;
+              continue 'retry;
+            }
+            if prev_clk >= q_clk {
+              panic!("bug");
+            } else /*if prev_clk < q_clk */{
+              rep.clk.set(q_clk);
+            }
+            return (f_pmach, addr);
+          }
         }
-        (f_pmach, rep.addr.get())
       }
-    }
+    })
   }
 
   /*pub fn hardcopy(&self) -> PCell {
@@ -1926,6 +2233,8 @@ pub trait InnerCell {
   fn size(&self) -> usize { unimplemented!(); }
   fn root(&self) -> Option<CellPtr> { unimplemented!(); }
   fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
+  fn cow(&self) -> bool { unimplemented!(); }
+  fn set_cow(&self, _flag: bool) { unimplemented!(); }
   fn pin(&self) -> bool { unimplemented!(); }
   fn set_pin(&self, _flag: bool) { unimplemented!(); }
   fn tag(&self) -> Option<u32> { unimplemented!(); }
@@ -1940,6 +2249,8 @@ pub trait InnerCell_ {
   fn size(&self) -> usize;
   fn root(&self) -> Option<CellPtr>;
   fn set_root(&self, _root: Option<CellPtr>);
+  fn cow(&self) -> bool;
+  fn set_cow(&self, _flag: bool);
   fn pin(&self) -> bool;
   fn set_pin(&self, _flag: bool);
   fn tag(&self) -> Option<u32>;
@@ -1965,6 +2276,14 @@ impl<C: InnerCell + Any> InnerCell_ for C {
 
   fn set_root(&self, root: Option<CellPtr>) {
     InnerCell::set_root(self, root)
+  }
+
+  fn cow(&self) -> bool {
+    InnerCell::cow(self)
+  }
+
+  fn set_cow(&self, flag: bool) {
+    InnerCell::set_cow(self, flag)
   }
 
   fn pin(&self) -> bool {
