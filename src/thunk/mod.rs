@@ -5,7 +5,7 @@ use crate::algo::str::*;
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellDerefErr, CellClosure, CowCell, ctx_lookup_type, ctx_clean_arg, ctx_push_cell_arg, ctx_pop_thunk};
-use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier, MemReg};
+use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier, MemReg, InnerCell};
 #[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
 use crate::pctx::smp::*;
@@ -69,6 +69,7 @@ pub fn _cfg_debug_mode(mode: ThunkMode) -> bool {
         || match mode {
           ThunkMode::Apply => cfg.debug_apply >= 1,
           ThunkMode::Accumulate => cfg.debug_accumulate >= 1,
+          ThunkMode::Initialize => cfg.debug_initialize >= 1,
           _ => false
         }
     )
@@ -1935,11 +1936,11 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     (obj.ffi.base().ctx_cfg_set_mem_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_alloc_hook as *const c_void as _);
     (obj.ffi.base().ctx_cfg_set_mem_free.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_free_hook as *const c_void as _);
     (obj.ffi.base().ctx_cfg_set_mem_unify.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_mem_unify_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_alloc_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_free_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_unify.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_unify_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_global_failure_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_failarg_alloc_hook as *const c_void as _);
-    (obj.ffi.ctx_cfg_set_gpu_global_failure_free.as_ref().unwrap())(obj.cfg, tl_pctx_gpu_failarg_free_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_alloc_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_free.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_free_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_unify.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_unify_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_global_failure_alloc.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_failarg_alloc_hook as *const c_void as _);
+    (obj.ffi.ctx_cfg_set_gpu_global_failure_free.as_ref().unwrap())(obj.cfg, tl_pctx_nvgpu_failarg_free_hook as *const c_void as _);
     // TODO TODO
     (obj.ffi.ctx_cfg_set_cuGetErrorString.as_ref().unwrap())(obj.cfg, LIBCUDA.cuGetErrorString.as_ref().unwrap().as_ptr() as _);
     (obj.ffi.ctx_cfg_set_cuInit.as_ref().unwrap())(obj.cfg, LIBCUDA.cuInit.as_ref().unwrap().as_ptr() as _);
@@ -2338,7 +2339,7 @@ impl<B: FutBackend> Drop for FutharkThunkImpl<B> where FutharkThunkImpl<B>: Futh
 impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkImpl_<B> {
   pub fn _try_build(&self, ctr: &CtxCtr, env: &mut CtxEnv, mode: ThunkMode, rst: Counter) {
     let gencfg = FutharkThunkGenConfig::default();
-    if cfg_debug() { println!("DEBUG: FutharkThunkImpl::_try_build: name={:?}", self.name); }
+    if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::_try_build: name={:?}", self.name); }
     let (genabi, source) = self.code.gen_source(self.lar, self.rar, self.param_ct, &self.spec_dim, mode, gencfg, self.code.abi.clone()).unwrap();
     let mut config = FutConfig::default();
     // FIXME: os-specific paths.
@@ -2358,7 +2359,6 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
       }
     });
     if let Some((obj, consts)) = FutharkThunkImpl::<B>::_build_object(ctr, env, &config, self.name, &source, rst) {
-      // FIXME: or swap.
       let object = FutharkThunkObject{genabi, source, obj, consts, out0_tag: None};
       self.objects.borrow_mut().insert(mode, object);
     }
@@ -2465,7 +2465,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
           &mut Cell_::Phy(.., ref mut pcel) => {
             let addr = match pcel.lookup_loc(loc) {
               None => panic!("bug"),
-              Some((_, rep)) => rep.addr.get()
+              Some((_, _, addr)) => addr
             };
             /*let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();*/
             match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
@@ -2590,7 +2590,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
               &mut Cell_::Phy(.., ref mut pcel) => {
                 let addr = match pcel.lookup_loc(loc) {
                   None => panic!("bug"),
-                  Some((_, rep)) => rep.addr.get()
+                  Some((_, _, addr)) => addr
                 };
                 /*let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();*/
                 match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
@@ -3108,7 +3108,7 @@ impl FutharkThunkImpl<CudaBackend> {
           &mut Cell_::Phy(.., ref mut pcel) => {
             let addr = match pcel.lookup_loc(loc) {
               None => panic!("bug"),
-              Some((_, rep)) => rep.addr.get()
+              Some((_, _, addr)) => addr
             };
             let (base, base_sz) = gpu.lookup_dev(addr).unwrap();
             let dptr = base + v_ptroff;
@@ -3250,7 +3250,7 @@ impl FutharkThunkImpl<CudaBackend> {
               &mut Cell_::Phy(.., ref mut pcel) => {
                 let addr = match pcel.lookup_loc(loc) {
                   None => panic!("bug"),
-                  Some((_, rep)) => rep.addr.get()
+                  Some((_, _, addr)) => addr
                 };
                 /*let (dptr, size) = gpu.lookup_dev(addr).unwrap();*/
                 let (base, base_sz) = gpu.lookup_dev(addr).unwrap();
@@ -3722,8 +3722,8 @@ impl FutharkThunkImpl<CudaBackend> {
                         ThunkMode::Accumulate => {
                           match pcel.lookup(Locus::VMem, PMach::NvGpu) {
                             None => panic!("bug"),
-                            Some(rep) => {
-                              let prev_addr = rep.addr.get();
+                            Some((prev_clk, prev_addr)) => {
+                              assert_eq!(oclk, prev_clk);
                               let (dst_base, dst_base_sz) = gpu.lookup_dev(prev_addr).unwrap();
                               let v_ptroff = v_ty.pointer_offset();
                               let dst_dptr = dst_base + v_ptroff;
@@ -3750,6 +3750,8 @@ impl FutharkThunkImpl<CudaBackend> {
                                 } else {
                                   unimplemented!();
                                 }
+                                // FIXME: release addr.
+                                //let _ = pctx.release(addr);
                               } else {
                                 assert_eq!(dst_dptr, out_dptr);
                               }

@@ -3,12 +3,13 @@ use self::smp::{SmpPCtx};
 use self::swap::{SwapPCtx};
 use crate::algo::{HashMap, RevSortMap8};
 use crate::algo::fp::*;
-use crate::cell::{CellPtr, CellType, DtypeConstExt, InnerCell, InnerCell_};
+use crate::cell::{CellPtr, CellType, DtypeConstExt};
 use crate::panick::*;
 use cacti_cfg_env::*;
 
 use smol_str::{SmolStr};
 
+use std::any::{Any};
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
 use std::cmp::{max, min};
@@ -17,6 +18,7 @@ use std::ffi::{c_void};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::io::{Read};
 use std::mem::{align_of};
+use std::ops::{Deref, DerefMut};
 use std::rc::{Rc};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
@@ -409,6 +411,30 @@ impl PCtx {
     None
   }
 
+  pub fn yeet(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    {
+      let pm = PMach::Swap;
+      match self.swap.yeet(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      let pm = PMach::NvGpu;
+      match gpu.yeet(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    // TODO
+    None
+  }
+
   pub fn lookup(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
     {
       let pm = PMach::Swap;
@@ -557,7 +583,7 @@ impl PCtx {
     }
   }
 
-  pub fn lookup_pin(&self, addr: PAddr) -> bool {
+  /*pub fn lookup_pin(&self, addr: PAddr) -> bool {
     // FIXME
     match self.lookup(addr) {
       None => panic!("bug"),
@@ -590,7 +616,7 @@ impl PCtx {
         opin
       }
     }
-  }
+  }*/
 }
 
 pub trait PCtxImpl {
@@ -604,9 +630,11 @@ pub trait PCtxImpl {
   //fn lookup(&self, addr: PAddr) -> Option<()>;
 }
 
+pub type MemReg = UnsafeMemReg;
+
 #[derive(Clone, Copy)]
 #[repr(C)]
-pub struct MemReg {
+pub struct UnsafeMemReg {
   pub ptr:  *mut c_void,
   pub sz:   usize,
 }
@@ -745,5 +773,237 @@ impl MemReg {
       print!(" {:+e}", x);
     }
     println!();
+  }
+}
+
+pub trait InnerCell {
+  // TODO
+  //fn try_borrow(&self) -> () { unimplemented!(); }
+  //fn try_borrow_mut(&self) -> () { unimplemented!(); }
+  fn as_mem_reg(&self) -> Option<MemReg> { None }
+  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  fn size(&self) -> usize { unimplemented!(); }
+  fn root(&self) -> Option<CellPtr> { unimplemented!(); }
+  fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
+  fn cow(&self) -> bool { unimplemented!(); }
+  fn set_cow(&self, _flag: bool) { unimplemented!(); }
+  //fn pin(&self) -> bool { unimplemented!(); }
+  //fn set_pin(&self, _flag: bool) { unimplemented!(); }
+  fn tag(&self) -> Option<u32> { unimplemented!(); }
+  fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
+  fn retain(&self) { unimplemented!(); }
+  fn release(&self) -> bool { unimplemented!(); }
+  fn pinned(&self) -> bool { unimplemented!(); }
+  fn pin(&self) { unimplemented!(); }
+  fn unpin(&self) { unimplemented!(); }
+  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> { None }
+  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> { None }
+}
+
+pub trait InnerCell_ {
+  fn as_any(&self) -> &dyn Any;
+  // TODO
+  fn as_mem_reg(&self) -> Option<MemReg>;
+  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
+  fn size(&self) -> usize;
+  fn root(&self) -> Option<CellPtr>;
+  fn set_root(&self, _root: Option<CellPtr>);
+  fn cow(&self) -> bool;
+  fn set_cow(&self, _flag: bool);
+  //fn pin(&self) -> bool;
+  //fn set_pin(&self, _flag: bool);
+  fn tag(&self) -> Option<u32>;
+  fn set_tag(&self, _tag: Option<u32>);
+  fn retain(&self);
+  fn release(&self) -> bool;
+  fn pinned(&self) -> bool;
+  fn pin(&self);
+  fn unpin(&self);
+  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>>;
+  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>>;
+}
+
+impl<C: InnerCell + Any> InnerCell_ for C {
+  fn as_any(&self) -> &dyn Any {
+    self
+  }
+
+  fn as_mem_reg(&self) -> Option<MemReg> {
+    InnerCell::as_mem_reg(self)
+  }
+
+  fn size(&self) -> usize {
+    InnerCell::size(self)
+  }
+
+  fn root(&self) -> Option<CellPtr> {
+    InnerCell::root(self)
+  }
+
+  fn set_root(&self, root: Option<CellPtr>) {
+    InnerCell::set_root(self, root)
+  }
+
+  fn cow(&self) -> bool {
+    InnerCell::cow(self)
+  }
+
+  fn set_cow(&self, flag: bool) {
+    InnerCell::set_cow(self, flag)
+  }
+
+  /*fn pin(&self) -> bool {
+    InnerCell::pin(self)
+  }
+
+  fn set_pin(&self, flag: bool) {
+    InnerCell::set_pin(self, flag)
+  }*/
+
+  fn tag(&self) -> Option<u32> {
+    InnerCell::tag(self)
+  }
+
+  fn set_tag(&self, tag: Option<u32>) {
+    InnerCell::set_tag(self, tag)
+  }
+
+  fn retain(&self) {
+    InnerCell::retain(self)
+  }
+
+  fn release(&self) -> bool {
+    InnerCell::release(self)
+  }
+
+  fn pinned(&self) -> bool {
+    InnerCell::pinned(self)
+  }
+
+  fn pin(&self) {
+    InnerCell::pin(self)
+  }
+
+  fn unpin(&self) {
+    InnerCell::unpin(self)
+  }
+
+  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+    InnerCell::mem_borrow(self)
+  }
+
+  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
+    InnerCell::mem_borrow_mut(self)
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+pub enum BorrowErr {
+  AlreadyMutablyBorrowed = 1,
+  AlreadyBorrowed,
+  TooManyBorrows,
+}
+
+#[repr(transparent)]
+pub struct BorrowCell {
+  ctr:  Cell<i8>,
+}
+
+impl Drop for BorrowCell {
+  fn drop(&mut self) {
+    let c = self.ctr.get();
+    if c != 0 {
+      panic!("bug");
+    }
+  }
+}
+
+impl BorrowCell {
+  pub fn new() -> BorrowCell {
+    BorrowCell{ctr: Cell::new(0)}
+  }
+
+  pub fn _try_borrow(&self) -> Result<(), BorrowErr> {
+    let c = self.ctr.get();
+    if c < 0 {
+      return Err(BorrowErr::AlreadyMutablyBorrowed);
+    }
+    if c >= i8::max_value() {
+      return Err(BorrowErr::TooManyBorrows);
+    }
+    self.ctr.set(c + 1);
+    Ok(())
+  }
+
+  pub fn _unborrow(&self) {
+    let c = self.ctr.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.ctr.set(c - 1);
+  }
+
+  pub fn _try_borrow_mut(&self) -> Result<(), BorrowErr> {
+    let c = self.ctr.get();
+    if c < 0 {
+      return Err(BorrowErr::AlreadyMutablyBorrowed);
+    } else if c > 0 {
+      return Err(BorrowErr::AlreadyBorrowed);
+    }
+    self.ctr.set(-1);
+    Ok(())
+  }
+
+  pub fn _unborrow_mut(&self) {
+    let c = self.ctr.get();
+    if c != -1 {
+      panic!("bug");
+    }
+    self.ctr.set(0);
+  }
+}
+
+pub struct BorrowRef<'a, T: ?Sized> {
+  borc: &'a BorrowCell,
+  val:  &'a T,
+}
+
+impl<'a, T: ?Sized> Drop for BorrowRef<'a, T> {
+  fn drop(&mut self) {
+    self.borc._unborrow();
+  }
+}
+
+impl<'a, T: ?Sized> Deref for BorrowRef<'a, T> {
+  type Target = T;
+
+  fn deref(&self) -> &T {
+    self.val
+  }
+}
+
+pub struct BorrowRefMut<'a, T: ?Sized> {
+  borc: &'a BorrowCell,
+  val:  &'a mut T,
+}
+
+impl<'a, T: ?Sized> Drop for BorrowRefMut<'a, T> {
+  fn drop(&mut self) {
+    self.borc._unborrow_mut();
+  }
+}
+
+impl<'a, T: ?Sized> Deref for BorrowRefMut<'a, T> {
+  type Target = T;
+
+  fn deref(&self) -> &T {
+    self.val
+  }
+}
+
+impl<'a, T: ?Sized> DerefMut for BorrowRefMut<'a, T> {
+  fn deref_mut(&mut self) -> &mut T {
+    self.val
   }
 }

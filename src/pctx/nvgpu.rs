@@ -19,6 +19,7 @@ use std::io::{Write};
 use std::rc::{Rc, Weak};
 use std::path::{PathBuf};
 use std::ptr::{write};
+use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{from_utf8};
 
 pub const ALLOC_ALIGN: usize = 256;
@@ -202,35 +203,25 @@ impl PCtxImpl for NvGpuPCtx {
     pl.insert((PMach::NvGpu, Locus::Mem), ());
   }
 
-  //fn try_alloc(&self, pctr: &PCtxCtr, /*pmset: PMachSet,*/ locus: Locus, ty: &CellType) -> Result<PAddr, PMemErr> {}
   fn try_alloc(&self, pctr: &PCtxCtr, ty: &CellType, locus: Locus) -> Result<PAddr, PMemErr> {
     let sz = ty.packed_span_bytes() as usize;
     match locus {
       Locus::Mem => {
         let addr = pctr.fresh_addr();
-        //let mem = NvGpuMemCell::try_alloc(sz)?;
-        //assert!(self.page_map.page_tab.borrow_mut().insert(addr, Rc::new(mem)).is_none());
-        match self.page_map.try_alloc(addr, sz) {
-          Err(_) => {
-            // FIXME FIXME: oom.
-            unimplemented!();
-          }
-          Ok(_) => {}
-        }
-        Ok(addr)
+        let _ = self.page_map.try_alloc(addr, sz)?;
+        return Ok(addr);
       }
       Locus::VMem => {
         let query_sz = ty.packed_span_bytes() as usize;
         let req = match self.mem_pool.try_pre_alloc(query_sz) {
           NvGpuMemPoolReq::Oom => {
-            // FIXME FIXME: oom.
-            unimplemented!();
+            return Err(PMemErr::Oom);
           }
           req => req
         };
         let addr = pctr.fresh_addr();
         let _ = self.mem_pool.alloc(addr, req);
-        Ok(addr)
+        return Ok(addr);
       }
       _ => unimplemented!()
     }
@@ -405,8 +396,40 @@ impl NvGpuPCtx {
   }
 
   pub fn release(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
+    // FIXME: refcounted release.
     //let page_tab = self.page_map.page_tab.borrow();
     //let cel_map = self.mem_pool.cel_map.borrow();
+    if self.page_map.page_tab.borrow().len() <= self.mem_pool.cel_map.borrow().len() {
+      match self.page_map.release(addr) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::Mem, icel));
+        }
+      }
+      match self.mem_pool.try_free(addr) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::VMem, icel));
+        }
+      }
+    } else {
+      match self.mem_pool.try_free(addr) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::VMem, icel));
+        }
+      }
+      match self.page_map.release(addr) {
+        None => {}
+        Some(icel) => {
+          return Some((Locus::Mem, icel));
+        }
+      }
+    }
+    None
+  }
+
+  pub fn yeet(&self, addr: PAddr) -> Option<(Locus, Rc<dyn InnerCell_>)> {
     if self.page_map.page_tab.borrow().len() <= self.mem_pool.cel_map.borrow().len() {
       match self.page_map.release(addr) {
         None => {}
@@ -592,8 +615,10 @@ pub struct NvGpuMemCell {
   //pub addr: PAddr,
   pub root: Cell<CellPtr>,
   // FIXME
-  //pub refc: Cell<u32>,
+  pub refc: Cell<u32>,
+  pub pinc: Cell<u16>,
   pub flag: Cell<u8>,
+  pub borc: BorrowCell,
   pub ptr:  *mut c_void,
   pub sz:   usize,
 }
@@ -628,7 +653,10 @@ impl NvGpuMemCell {
     if cfg_debug() { println!("DEBUG: NvGpuMemCell::_try_alloc: ptr=0x{:016x} sz={}", ptr as usize, sz); }
     Ok(NvGpuMemCell{
       root: Cell::new(CellPtr::nil()),
+      refc: Cell::new(1),
+      pinc: Cell::new(0),
       flag: Cell::new(0),
+      borc: BorrowCell::new(),
       ptr,
       sz,
     })
@@ -670,7 +698,7 @@ impl InnerCell for NvGpuMemCell {
     }
   }
 
-  fn pin(&self) -> bool {
+  /*fn pin(&self) -> bool {
     (self.flag.get() & 4) != 0
   }
 
@@ -679,6 +707,70 @@ impl InnerCell for NvGpuMemCell {
       self.flag.set(self.flag.get() | 4);
     } else {
       self.flag.set(self.flag.get() & !4);
+    }
+  }*/
+
+  fn retain(&self) {
+    let c = self.refc.get();
+    if c >= u32::max_value() {
+      panic!("bug");
+    }
+    self.refc.set(c + 1);
+  }
+
+  fn release(&self) -> bool {
+    let c = self.refc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.refc.set(c - 1);
+    c <= 1
+  }
+
+  fn pinned(&self) -> bool {
+    let c = self.pinc.get();
+    c > 0
+  }
+
+  fn pin(&self) {
+    let c = self.pinc.get();
+    if c >= u16::max_value() {
+      panic!("bug");
+    }
+    self.pinc.set(c + 1);
+  }
+
+  fn unpin(&self) {
+    let c = self.pinc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.pinc.set(c - 1);
+  }
+
+  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+    match self.borc._try_borrow() {
+      Err(e) => {
+        println!("ERROR:  NvGpuMemCell::mem_borrow: borrow failure: {:?}", e);
+        panic!();
+      }
+      Ok(_) => unsafe {
+        let val = from_raw_parts(self.ptr as *const c_void as *const u8, self.sz);
+        Some(BorrowRef{borc: &self.borc, val})
+      }
+    }
+  }
+
+  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
+    match self.borc._try_borrow_mut() {
+      Err(e) => {
+        println!("ERROR:  NvGpuMemCell::mem_borrow_mut: borrow failure: {:?}", e);
+        panic!();
+      }
+      Ok(_) => unsafe {
+        let val = from_raw_parts_mut(self.ptr as *mut u8, self.sz);
+        Some(BorrowRefMut{borc: &self.borc, val})
+      }
     }
   }
 }
@@ -764,7 +856,8 @@ pub struct NvGpuInnerCell {
   //pub addr: PAddr,
   pub root: Cell<CellPtr>,
   // FIXME
-  //pub refc: Cell<u32>,
+  pub refc: Cell<u32>,
+  pub pinc: Cell<u16>,
   pub flag: Cell<u8>,
   pub tag:  Cell<u32>,
   pub dev:  i32,
@@ -837,7 +930,7 @@ impl InnerCell for NvGpuInnerCell {
     }
   }
 
-  fn pin(&self) -> bool {
+  /*fn pin(&self) -> bool {
     (self.flag.get() & 4) != 0
   }
 
@@ -847,7 +940,7 @@ impl InnerCell for NvGpuInnerCell {
     } else {
       self.flag.set(self.flag.get() & !4);
     }
-  }
+  }*/
 
   fn tag(&self) -> Option<u32> {
     if (self.flag.get() & 8) != 0 {
@@ -865,6 +958,44 @@ impl InnerCell for NvGpuInnerCell {
       self.flag.set(self.flag.get() & !8);
       self.tag.set(0);
     }
+  }
+
+  fn retain(&self) {
+    let c = self.refc.get();
+    if c >= u32::max_value() {
+      panic!("bug");
+    }
+    self.refc.set(c + 1);
+  }
+
+  fn release(&self) -> bool {
+    let c = self.refc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.refc.set(c - 1);
+    c <= 1
+  }
+
+  fn pinned(&self) -> bool {
+    let c = self.pinc.get();
+    c > 0
+  }
+
+  fn pin(&self) {
+    let c = self.pinc.get();
+    if c >= u16::max_value() {
+      panic!("bug");
+    }
+    self.pinc.set(c + 1);
+  }
+
+  fn unpin(&self) {
+    let c = self.pinc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.pinc.set(c - 1);
   }
 }
 
@@ -908,6 +1039,8 @@ pub struct NvGpuMemPool {
   pub back_cursor:  Cell<usize>,
   pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
+  pub yeet_reset:   Cell<Counter>,
+  pub yeet_scanner: Cell<usize>,
   pub front_tag:    RefCell<Option<u32>>,
   pub tmp_freelist: RefCell<Vec<PAddr>>,
   pub free_index:   RefCell<BTreeSet<Region>>,
@@ -916,6 +1049,7 @@ pub struct NvGpuMemPool {
   pub alloc_map:    RefCell<HashMap<PAddr, NvGpuAlloc>>,
   pub cel_map:      RefCell<HashMap<PAddr, Rc<NvGpuInnerCell>>>,
   // TODO
+  //pub yeet_cache:   RefCell<_>,
 }
 
 impl Drop for NvGpuMemPool {
@@ -946,8 +1080,9 @@ impl NvGpuMemPool {
     let reserve_sz = ((unrounded_reserve_sz + (1 << 16) - 1) >> 16) << 16;
     assert!(reserve_sz >= unrounded_reserve_sz);
     if reserve_sz > free_sz {
-      panic!("ERROR: NvGpuMemPool::new: gpu oom: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
+      println!("ERROR:  NvGpuMemPool::new: out-of-memory: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
           reserve_sz, dev, free_sz, total_sz);
+      panic!();
     }
     if cfg_info() { println!("INFO:   NvGpuMemPool::new: reserve sz={}", reserve_sz); }
     let reserve_base = cuda_mem_alloc(reserve_sz).unwrap();
@@ -984,6 +1119,8 @@ impl NvGpuMemPool {
       back_cursor:  Cell::new(0),
       back_alloc:   Cell::new(false),
       alloc_pin:    Cell::new(false),
+      yeet_reset:   Cell::new(Counter::default()),
+      yeet_scanner: Cell::new(0),
       front_tag:    RefCell::new(None),
       tmp_freelist: RefCell::new(Vec::new()),
       free_index:   RefCell::new(BTreeSet::new()),
@@ -1028,6 +1165,13 @@ impl NvGpuMemPool {
         // *self.front_tag.borrow_mut() = Some(buf.to_owned());
         *self.front_tag.borrow_mut() = Some(tag);
       }
+    }
+  }
+
+  pub fn lookup_(&self, addr: PAddr) -> Option<()> {
+    match self.cel_map.borrow().get(&addr) {
+      None => None,
+      Some(_) => Some(())
     }
   }
 
@@ -1170,6 +1314,8 @@ impl NvGpuMemPool {
     let cel = Rc::new(NvGpuInnerCell{
       //addr,
       root: Cell::new(CellPtr::nil()),
+      refc: Cell::new(1),
+      pinc: Cell::new(0),
       flag: Cell::new(0),
       tag:  Cell::new(0),
       dev:  self.dev,
@@ -1233,6 +1379,8 @@ impl NvGpuMemPool {
     let cel = Rc::new(NvGpuInnerCell{
       //addr,
       root: Cell::new(CellPtr::nil()),
+      refc: Cell::new(1),
+      pinc: Cell::new(0),
       flag: Cell::new(0),
       tag:  Cell::new(0),
       dev:  self.dev,
@@ -1436,10 +1584,92 @@ impl NvGpuMemPool {
     }
     Some(icel)
   }
+
+  pub fn yeet(&self, addr: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+    // TODO
+    unimplemented!();
+  }
+
+  pub fn try_yeet_some(&self, query_sz: usize) -> Option<()> {
+    TL_CTX.with(|ctx| {
+      let next_reset = ctx.ctr.reset.get();
+      if self.yeet_reset.get() > next_reset {
+        panic!("bug");
+      } else if self.yeet_reset.get() < next_reset {
+        self.yeet_reset.set(next_reset);
+        self.yeet_scanner.set(0);
+      }
+      let celfront = ctx.ctr.celfront.borrow();
+      let mut env = ctx.env.borrow_mut();
+      for p in self.yeet_scanner.get() .. celfront.len() {
+        let x = celfront[p];
+        // FIXME FIXME
+        match env._lookup_mut_ref_(x) {
+        //match env.plookup_mut_view(x) {}
+          Err(_) => {}
+          Ok(e) => {
+            let root = e.root();
+            let root_sz: usize = e.root_ty.packed_span_bytes().try_into().unwrap();
+            if root_sz < query_sz {
+              continue;
+            }
+            match e.cel_ {
+              &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+                let cur_clk = state.borrow().clk;
+                match pcel.lookup(Locus::VMem, PMach::NvGpu) {
+                  None => {
+                    continue;
+                  }
+                  Some((prev_clk, prev_addr)) => {
+                    if self.lookup_(prev_addr).is_none() {
+                      pcel.replicas.remove((Locus::VMem, PMach::NvGpu));
+                      continue;
+                    }
+                    if prev_clk > cur_clk {
+                      panic!("bug");
+                    }
+                    if prev_clk < cur_clk {
+                      // FIXME: self.yeet.
+                      TL_PCTX.with(|pctx| {
+                        let _ = pctx.yeet(prev_addr).unwrap();
+                      });
+                      return Some(());
+                    }
+                    match pcel.find_any_other(cur_clk, Locus::VMem, PMach::NvGpu) {
+                      Some((o_loc, _, _)) => {
+                        assert_eq!(o_loc, Locus::Mem);
+                      }
+                      None => {
+                        pcel.read_loc(root, cur_clk, e.root_ty, Locus::Mem);
+                      }
+                    }
+                    match pcel.yeet(Locus::VMem, PMach::NvGpu) {
+                      None => panic!("bug"),
+                      Some((prev_clk2, prev_addr2)) => {
+                        assert_eq!(prev_clk, prev_clk2);
+                        assert_eq!(prev_addr, prev_addr2);
+                        // FIXME: self.yeet.
+                        TL_PCTX.with(|pctx| {
+                          let _ = pctx.yeet(prev_addr).unwrap();
+                        });
+                        return Some(());
+                      }
+                    }
+                  }
+                }
+              }
+              _ => panic!("bug")
+            }
+          }
+        }
+      }
+      self.yeet_scanner.set(celfront.len());
+      None
+    })
+  }
 }
 
 pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize, raw_tag: *const c_char) -> c_int {
-  assert!(!ptr.is_null());
   let ctag = unsafe {
     if raw_tag.is_null() {
       None
@@ -1447,17 +1677,19 @@ pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize,
       Some(CStr::from_ptr(raw_tag))
     }
   };
-  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_alloc_hook: sz={} ctag={:?}",
+  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_mem_alloc_hook: sz={} raw tag=0x{:016x} ctag={:?}",
       sz,
+      raw_tag as usize,
       ctag.map(|ctag| safe_ascii(ctag.to_bytes())),
   ); }
+  assert!(!ptr.is_null());
   TL_PCTX.with(|pctx| {
     let gpu = pctx.nvgpu.as_ref().unwrap();
     let addr = pctx.ctr.fresh_addr();
     match gpu.page_map.try_alloc(addr, sz) {
       Err(PMemErr::Oom) => {
-        // FIXME FIXME: oom.
-        unimplemented!();
+        println!("ERROR:  tl_pctx_nvgpu_mem_alloc_hook: unrecoverable out-of-memory failure (page-locked memory)");
+        panic!();
       }
       Err(_) => panic!("bug"),
       Ok(cel) => {
@@ -1515,62 +1747,80 @@ pub extern "C" fn tl_pctx_nvgpu_mem_unify_hook(lhs_raw_tag: *mut c_char, rhs_raw
   ); }
 }
 
-pub extern "C" fn tl_pctx_gpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *const c_char) -> c_int {
+pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *const c_char) -> c_int {
+  let ctag = unsafe {
+    if raw_tag.is_null() {
+      None
+    } else {
+      Some(CStr::from_ptr(raw_tag))
+    }
+  };
+  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook: sz={} raw tag=0x{:016x} ctag={:?}",
+      sz,
+      raw_tag as usize,
+      ctag.map(|ctag| safe_ascii(ctag.to_bytes())),
+  ); }
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
-    /*println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} raw tag=0x{:016x}",
-        sz,
-        raw_tag as usize,
-    );*/
     let gpu = pctx.nvgpu.as_ref().unwrap();
-    let (req, tag) = if raw_tag.is_null() {
-      if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=(null)",
-          sz,
-      ); }
-      let req = gpu.mem_pool.try_pre_alloc(sz);
-      (req, None)
-    } else {
-      unsafe {
-        let ctag = CStr::from_ptr(raw_tag);
-        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook: sz={} ctag=\"{}\"",
+    let mut retry = false;
+    'retry: loop {
+      let (req, tag) = if raw_tag.is_null() {
+        if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook: sz={} ctag=(null)",
             sz,
-            safe_ascii(ctag.to_bytes()),
         ); }
-        //let tag = ctag.to_bytes();
-        let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
-        let mut unify = &mut *pctx.tagunify.borrow_mut();
-        unify.find(tag);
-        let req = gpu.mem_pool.try_pre_alloc_with_tag(sz, tag, unify);
-        (req, Some(tag))
-      }
-    };
-    match req {
-      NvGpuMemPoolReq::Oom => {
-        // FIXME FIXME: oom.
-        unimplemented!();
-      }
-      _ => {
-        let p = pctx.ctr.fresh_addr();
-        let cel = gpu.mem_pool.alloc(p, req);
-        if gpu.mem_pool.alloc_pin.get() {
-          InnerCell::set_pin(&*cel, true);
-        }
-        InnerCell::set_tag(&*cel, tag);
+        let req = gpu.mem_pool.try_pre_alloc(sz);
+        (req, None)
+      } else {
         unsafe {
-          write(dptr, cel.dptr.get());
+          let ctag = ctag.unwrap();
+          if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook: sz={} ctag=\"{}\"",
+              sz,
+              safe_ascii(ctag.to_bytes()),
+          ); }
+          let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
+          let mut unify = &mut *pctx.tagunify.borrow_mut();
+          unify.find(tag);
+          let req = gpu.mem_pool.try_pre_alloc_with_tag(sz, tag, unify);
+          (req, Some(tag))
         }
-        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
-            p, cel.dptr.get(), req.size(), tag,
-        ); }
+      };
+      match req {
+        NvGpuMemPoolReq::Oom => {
+          if retry {
+            println!("ERROR:  tl_pctx_nvgpu_alloc_hook: unrecoverable out-of-memory failure (device memory)");
+            panic!();
+          }
+          if gpu.mem_pool.try_yeet_some(sz).is_none() {
+            println!("ERROR:  tl_pctx_nvgpu_alloc_hook: out-of-memory, unyeeted (device memory)");
+            panic!();
+          }
+          retry = true;
+          continue 'retry;
+        }
+        _ => {
+          let p = pctx.ctr.fresh_addr();
+          let cel = gpu.mem_pool.alloc(p, req);
+          if gpu.mem_pool.alloc_pin.get() {
+            InnerCell::pin(&*cel);
+          }
+          InnerCell::set_tag(&*cel, tag);
+          unsafe {
+            write(dptr, cel.dptr.get());
+          }
+          if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
+              p, cel.dptr.get(), req.size(), tag,
+          ); }
+        }
       }
+      return 0;
     }
-    0
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
+pub extern "C" fn tl_pctx_nvgpu_free_hook(dptr: u64) -> c_int {
   TL_PCTX.try_with(|pctx| {
-    if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x}",
+    if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_free_hook: dptr=0x{:016x}",
         dptr,
     ); }
     let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -1582,21 +1832,21 @@ pub extern "C" fn tl_pctx_gpu_free_hook(dptr: u64) -> c_int {
     match gpu.mem_pool.cel_map.borrow().get(&p) {
       None => panic!("bug"),
       Some(cel) => {
-        if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
+        if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
             p, cel.dptr.get(), InnerCell::size(&**cel), InnerCell::tag(&**cel),
         ); }
       }
     }
     0
   }).unwrap_or_else(|_| {
-    if cfg_debug() { println!("DEBUG: tl_pctx_gpu_free_hook: dptr=0x{:016x} (pctx deinit)",
+    if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_free_hook: dptr=0x{:016x} (pctx deinit)",
         dptr,
     ); }
     0
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag: *const c_char) {
+pub extern "C" fn tl_pctx_nvgpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag: *const c_char) {
   let (lhs_ctag, rhs_ctag) = unsafe {
     let lhs_ctag = if lhs_raw_tag.is_null() {
       None
@@ -1610,12 +1860,12 @@ pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag
     };
     (lhs_ctag, rhs_ctag)
   };
-  if cfg_debug() { println!("DEBUG: tl_pctx_gpu_unify_hook: ltag={:?} rtag={:?}",
+  if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_unify_hook: ltag={:?} rtag={:?}",
       lhs_ctag.map(|c| safe_ascii(c.to_bytes())),
       rhs_ctag.map(|c| safe_ascii(c.to_bytes())),
   ); }
   TL_PCTX.try_with(|pctx| {
-    /*println!("DEBUG: tl_pctx_gpu_unify_hook: raw ltag=0x{:016x} raw rtag=0x{:016x}",
+    /*println!("DEBUG: tl_pctx_nvgpu_unify_hook: raw ltag=0x{:016x} raw rtag=0x{:016x}",
         lhs_raw_tag as usize,
         rhs_raw_tag as usize,
     );*/
@@ -1637,11 +1887,11 @@ pub extern "C" fn tl_pctx_gpu_unify_hook(lhs_raw_tag: *const c_char, rhs_raw_tag
   }).unwrap_or_else(|_| ())
 }
 
-pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> c_int {
+pub extern "C" fn tl_pctx_nvgpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> c_int {
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
     if sz > ALLOC_ALIGN {
-      println!("ERROR: tl_pctx_gpu_failarg_alloc_hook: requested size={} greater than max size={}", sz, ALLOC_ALIGN);
+      println!("ERROR: tl_pctx_nvgpu_failarg_alloc_hook: requested size={} greater than max size={}", sz, ALLOC_ALIGN);
       panic!();
     }
     let mem_pool = &pctx.nvgpu.as_ref().unwrap().mem_pool;
@@ -1653,7 +1903,7 @@ pub extern "C" fn tl_pctx_gpu_failarg_alloc_hook(dptr: *mut u64, sz: usize) -> c
   })
 }
 
-pub extern "C" fn tl_pctx_gpu_failarg_free_hook(_dptr: u64) -> c_int {
+pub extern "C" fn tl_pctx_nvgpu_failarg_free_hook(_dptr: u64) -> c_int {
   TL_PCTX.try_with(|_pctx| {
     // FIXME FIXME
     0

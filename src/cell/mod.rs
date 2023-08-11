@@ -15,12 +15,11 @@ use cacti_cfg_env::*;
 use futhark_ffi::{AbiScalar as FutAbiScalar};
 use smol_str::{SmolStr};
 
-use std::any::{Any};
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::mem::{forget, size_of, swap};
+use std::mem::{align_of, size_of, swap};
 use std::ops::{Deref, Neg};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
@@ -28,7 +27,7 @@ use std::str::{FromStr};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
-pub struct CellPtr{
+pub struct CellPtr {
   pub raw_: i64,
 }
 
@@ -1792,6 +1791,46 @@ impl CellType {
     }
     CellType{shape, dtype: self.dtype}
   }
+
+  pub fn prepare_bytes<'this, 'b, T: DtypeConstExt + Copy>(&'this self, buf: &'b [u8]) -> Option<&'b [T]> {
+    if self.dtype != T::dtype_() {
+      return None;
+    }
+    if buf.as_ptr().align_offset(align_of::<T>()) != 0 {
+      return None;
+    }
+    if buf.len() % size_of::<T>() != 0 {
+      return None;
+    }
+    let dlen = buf.len() / size_of::<T>();
+    let idlen: i64 = dlen.try_into().unwrap();
+    if idlen != self.flat_len() {
+      return None;
+    }
+    unsafe {
+      Some(from_raw_parts(buf.as_ptr() as *const T, dlen))
+    }
+  }
+
+  pub fn prepare_bytes_mut<'this, 'b, T: DtypeConstExt + Copy>(&'this self, buf: &'b mut [u8]) -> Option<&'b mut [T]> {
+    if self.dtype != T::dtype_() {
+      return None;
+    }
+    if buf.as_ptr().align_offset(align_of::<T>()) != 0 {
+      return None;
+    }
+    if buf.len() % size_of::<T>() != 0 {
+      return None;
+    }
+    let dlen = buf.len() / size_of::<T>();
+    let idlen: i64 = dlen.try_into().unwrap();
+    if idlen != self.flat_len() {
+      return None;
+    }
+    unsafe {
+      Some(from_raw_parts_mut(buf.as_mut_ptr() as *mut T, dlen))
+    }
+  }
 }
 
 #[derive(Clone, Debug)]
@@ -1952,7 +1991,7 @@ pub struct PCell {
   pub optr: CellPtr,
   pub ogty: CellType,
   //pub olay: CellLayout,
-  pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
+  //pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
   pub replicas: RevSortMap8<(Locus, PMach), PCellReplica>,
 }
 
@@ -1960,22 +1999,37 @@ impl PCell {
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     if cfg_debug() { println!("DEBUG: PCell::new: optr={:?} ogty={:?}", ptr, &ty); }
     //let lay = CellLayout::new_packed(&ty);
-    let pm_index = RevSortMap8::new();
+    //let pm_index = RevSortMap8::new();
     let replicas = RevSortMap8::new();
     PCell{
       optr: ptr,
       //optr: Cell::new(ptr),
       ogty: ty,
       //olay: lay,
-      pm_index,
+      //pm_index,
       replicas,
     }
+  }
+
+  pub fn _dump_replicas(&self) {
+    print!("DEBUG: PCell::_dump_replicas: optr={:?} ogty={:?} reps=[", self.optr, &self.ogty);
+    for (i, (key, rep)) in self.replicas.iter().enumerate() {
+      let &(loc, pm) = key.as_ref();
+      let addr = rep.addr.get();
+      let clk = rep.clk.get();
+      if i == 0 {
+        print!("({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
+      } else {
+        print!(", ({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
+      }
+    }
+    println!("]");
   }
 
   pub fn _push(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
     let rep = PCellReplica{clk: Cell::new(clk), addr: Cell::new(addr)};
     let key = self.replicas.insert((locus, pmach), rep);
-    self.pm_index.insert((pmach, locus), key);
+    //self.pm_index.insert((pmach, locus), key);
   }
 
   pub fn push(&mut self, root: CellPtr, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
@@ -2017,7 +2071,7 @@ impl PCell {
     }
   }
 
-  pub fn _pop(&self, x: CellPtr, /*xclk: Clock,*/ q_addr: PAddr) {
+  /*pub fn _pop(&self, x: CellPtr, /*xclk: Clock,*/ q_addr: PAddr) {
     for (key, rep) in self.replicas.iter() {
       if rep.addr.get() == q_addr {
         TL_PCTX.with(|pctx| {
@@ -2030,61 +2084,163 @@ impl PCell {
       }
     }
     panic!("bug");
+  }*/
+
+  pub fn yeet(&mut self, /*root: CellPtr, q_clk: Clock,*/ q_locus: Locus, q_pmach: PMach) -> Option<(Clock, PAddr)> {
+    // FIXME
+    unimplemented!();
   }
 
-  pub fn _dump_replicas(&self) {
-    print!("DEBUG: PCell::_dump_replicas: optr={:?} ogty={:?} reps=[", self.optr, &self.ogty);
-    for (i, (key, rep)) in self.replicas.iter().enumerate() {
-      let &(loc, pm) = key.as_ref();
-      let addr = rep.addr.get();
-      let clk = rep.clk.get();
-      if i == 0 {
-        print!("({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
-      } else {
-        print!(", ({:?} {:?} {:?} {:?})", loc, pm, addr, clk);
-      }
-    }
-    println!("]");
-  }
-
-  pub fn lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
-    match self.replicas.find((q_locus, q_pmach)) {
-      None => None,
-      Some((_, rep)) => Some(rep)
-    }
-  }
-
-  pub fn lookup_loc(&self, q_locus: Locus) -> Option<(PMach, &PCellReplica)> {
-    match self.replicas.find_lub((q_locus, PMach::_Bot)) {
-      None => None,
-      Some((key, rep)) => {
-        let &(loc, pm) = key.key.as_ref();
-        if loc != q_locus {
-          None
-        } else {
-          //Some((key.1, rep.clk, &mut rep.icel))
-          Some((pm, rep))
+  pub fn _lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
+    'retry: loop {
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if loc == q_locus && pm == q_pmach {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            return Some(rep);
+          }
         }
       }
+      return None;
     }
   }
 
-  pub fn find_any(&self, q_clk: Clock) -> Option<(Locus, PMach, PAddr)> {
-    for (key, rep) in self.replicas.iter() {
-      let &(loc, pm) = key.as_ref();
-      if rep.clk.get() == q_clk {
-        return Some((loc, pm, rep.addr.get()));
+  pub fn lookup(&mut self, q_locus: Locus, q_pmach: PMach) -> Option<(Clock, PAddr)> {
+    'retry: loop {
+      let mut unkey: Option<(Locus, PMach)> = None;
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if loc == q_locus && pm == q_pmach {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            return Some((rep.clk.get(), addr));
+          } else {
+            unkey = Some(*key.as_ref());
+            break;
+          }
+        }
       }
+      if let Some(key) = unkey {
+        self.replicas.remove(key);
+        continue 'retry;
+      }
+      return None;
     }
-    None
+  }
+
+  pub fn lookup_loc(&mut self, q_locus: Locus) -> Option<(Clock, PMach, PAddr)> {
+    'retry: loop {
+      let mut unkey: Option<(Locus, PMach)> = None;
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if loc == q_locus {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            return Some((rep.clk.get(), pm, addr));
+          } else {
+            unkey = Some(*key.as_ref());
+            break;
+          }
+        }
+      }
+      if let Some(key) = unkey {
+        self.replicas.remove(key);
+        continue 'retry;
+      }
+      return None;
+    }
+  }
+
+  pub fn find_any(&mut self, q_clk: Clock) -> Option<(Locus, PMach, PAddr)> {
+    'retry: loop {
+      let mut unkey: Option<(Locus, PMach)> = None;
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if rep.clk.get() == q_clk {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            return Some((loc, pm, addr));
+          } else {
+            unkey = Some(*key.as_ref());
+            break;
+          }
+        }
+      }
+      if let Some(key) = unkey {
+        self.replicas.remove(key);
+        continue 'retry;
+      }
+      return None;
+    }
+  }
+
+  pub fn find_any_other(&mut self, q_clk: Clock, neq_locus: Locus, neq_pmach: PMach) -> Option<(Locus, PMach, PAddr)> {
+    'retry: loop {
+      let mut unkey: Option<(Locus, PMach)> = None;
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if rep.clk.get() == q_clk && loc != neq_locus && pm != neq_pmach {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            return Some((loc, pm, addr));
+          } else {
+            unkey = Some(*key.as_ref());
+            break;
+          }
+        }
+      }
+      if let Some(key) = unkey {
+        self.replicas.remove(key);
+        continue 'retry;
+      }
+      return None;
+    }
+  }
+
+  pub fn find_loc_nocow(&mut self, q_clk: Clock, q_locus: Locus) -> Option<(PMach, PAddr)> {
+    'retry: loop {
+      let mut unkey: Option<(Locus, PMach)> = None;
+      for (key, rep) in self.replicas.iter() {
+        let &(loc, pm) = key.as_ref();
+        if rep.clk.get() == q_clk && loc == q_locus {
+          let addr = rep.addr.get();
+          if TL_PCTX.with(|pctx| {
+            pctx.lookup_pm(pm, addr).is_some()
+          }) {
+            if TL_PCTX.with(|pctx| {
+              !pctx.lookup_cow(addr)
+            }) {
+              return Some((pm, addr));
+            }
+          } else {
+            unkey = Some(*key.as_ref());
+            break;
+          }
+        }
+      }
+      if let Some(key) = unkey {
+        self.replicas.remove(key);
+        continue 'retry;
+      }
+      return None;
+    }
   }
 
   pub fn read_loc(&mut self, root: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
-      Some((pmach, rep)) => {
-        let addr = rep.addr.get();
-        let prev_clk = rep.clk.get();
+      Some((prev_clk, pmach, addr)) => {
         if prev_clk > q_clk {
           println!("DEBUG: PCell::read_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
               root, prev_clk, q_clk, ty, q_locus, pmach, addr);
@@ -2100,6 +2256,17 @@ impl PCell {
     println!("DEBUG: PCell::read_loc: root={:?} clk={:?} ty={:?} loc={:?} found pm? {:?}",
         root, q_clk, ty, q_locus, f_pmach);
     }
+    match self.find_any(q_clk) {
+      None => {
+        println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} clk={:?} ty={:?} loc={:?} pm={:?}",
+            self.optr, &self.ogty,
+            root, q_clk, ty, q_locus, f_pmach,
+        );
+        println!("ERROR: PCell::read_loc: no replica to copy from");
+        panic!();
+      }
+      Some(_) => {}
+    }
     if f_pmach.is_none() {
       let (pmach, addr) = TL_PCTX.with(|pctx| {
         pctx.alloc_loc(ty, q_locus)
@@ -2110,21 +2277,14 @@ impl PCell {
     let f_pmach = f_pmach.unwrap();
     match self.lookup(q_locus, f_pmach) {
       None => panic!("bug"),
-      Some(rep) => {
-        let addr = rep.addr.get();
-        let prev_clk = rep.clk.get();
+      Some((prev_clk, addr)) => {
+        //let addr = rep.addr.get();
+        //let prev_clk = rep.clk.get();
         if prev_clk >= q_clk {
           panic!("bug");
         } else /*if prev_clk < q_clk */{
           match self.find_any(q_clk) {
-            None => {
-              println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
-                  self.optr, &self.ogty,
-                  root, prev_clk, q_clk, ty, q_locus, f_pmach, addr,
-              );
-              println!("ERROR: PCell::read_loc: no replica to copy from");
-              panic!();
-            }
+            None => panic!("bug"),
             Some((o_loc, o_pm, o_addr)) => {
               if cfg_debug() {
               println!("DEBUG: PCell::read_loc: optr={:?} ogty={:?} root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?} found o_loc={:?} o_pm={:?} o_addr={:?}",
@@ -2138,7 +2298,12 @@ impl PCell {
               });
             }
           }
-          rep.clk.set(q_clk);
+          match self._lookup(q_locus, f_pmach) {
+            None => panic!("bug"),
+            Some(rep) => {
+              rep.clk.set(q_clk);
+            }
+          }
         }
         (f_pmach, addr)
       }
@@ -2148,9 +2313,7 @@ impl PCell {
   pub fn write_loc(&mut self, root: CellPtr, q_clk: Clock, ty: &CellType, q_locus: Locus) -> (PMach, PAddr) {
     let mut f_pmach = match self.lookup_loc(q_locus) {
       None => None,
-      Some((pmach, rep)) => {
-        let addr = rep.addr.get();
-        let prev_clk = rep.clk.get();
+      Some((prev_clk, pmach, addr)) => {
         if prev_clk >= q_clk {
           println!("DEBUG: PCell::write_loc: root={:?} prev clk={:?} clk={:?} ty={:?} loc={:?} pm={:?} addr={:?}",
               root, prev_clk, q_clk, ty, q_locus, pmach, addr);
@@ -2171,7 +2334,7 @@ impl PCell {
       let mut f_pmach = f_pmach.unwrap();
       let mut retry = false;
       'retry: loop {
-        match self.lookup(q_locus, f_pmach) {
+        match self._lookup(q_locus, f_pmach) {
           None => panic!("bug"),
           Some(rep) => {
             let addr = rep.addr.get();
@@ -2222,85 +2385,6 @@ impl PCell {
     // FIXME FIXME
     unimplemented!();
   }*/
-}
-
-pub trait InnerCell {
-  // TODO
-  //fn try_borrow(&self) -> () { unimplemented!(); }
-  //fn try_borrow_mut(&self) -> () { unimplemented!(); }
-  fn as_mem_reg(&self) -> Option<MemReg> { None }
-  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
-  fn size(&self) -> usize { unimplemented!(); }
-  fn root(&self) -> Option<CellPtr> { unimplemented!(); }
-  fn set_root(&self, _root: Option<CellPtr>) { unimplemented!(); }
-  fn cow(&self) -> bool { unimplemented!(); }
-  fn set_cow(&self, _flag: bool) { unimplemented!(); }
-  fn pin(&self) -> bool { unimplemented!(); }
-  fn set_pin(&self, _flag: bool) { unimplemented!(); }
-  fn tag(&self) -> Option<u32> { unimplemented!(); }
-  fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
-}
-
-pub trait InnerCell_ {
-  fn as_any(&self) -> &dyn Any;
-  // TODO
-  fn as_mem_reg(&self) -> Option<MemReg>;
-  //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
-  fn size(&self) -> usize;
-  fn root(&self) -> Option<CellPtr>;
-  fn set_root(&self, _root: Option<CellPtr>);
-  fn cow(&self) -> bool;
-  fn set_cow(&self, _flag: bool);
-  fn pin(&self) -> bool;
-  fn set_pin(&self, _flag: bool);
-  fn tag(&self) -> Option<u32>;
-  fn set_tag(&self, _tag: Option<u32>);
-}
-
-impl<C: InnerCell + Any> InnerCell_ for C {
-  fn as_any(&self) -> &dyn Any {
-    self
-  }
-
-  fn as_mem_reg(&self) -> Option<MemReg> {
-    InnerCell::as_mem_reg(self)
-  }
-
-  fn size(&self) -> usize {
-    InnerCell::size(self)
-  }
-
-  fn root(&self) -> Option<CellPtr> {
-    InnerCell::root(self)
-  }
-
-  fn set_root(&self, root: Option<CellPtr>) {
-    InnerCell::set_root(self, root)
-  }
-
-  fn cow(&self) -> bool {
-    InnerCell::cow(self)
-  }
-
-  fn set_cow(&self, flag: bool) {
-    InnerCell::set_cow(self, flag)
-  }
-
-  fn pin(&self) -> bool {
-    InnerCell::pin(self)
-  }
-
-  fn set_pin(&self, flag: bool) {
-    InnerCell::set_pin(self, flag)
-  }
-
-  fn tag(&self) -> Option<u32> {
-    InnerCell::tag(self)
-  }
-
-  fn set_tag(&self, tag: Option<u32>) {
-    InnerCell::set_tag(self, tag)
-  }
 }
 
 /*pub struct MSet {

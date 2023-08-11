@@ -312,6 +312,12 @@ impl Region {
 #[repr(transparent)]
 pub struct RevOrd<T>(pub T);
 
+impl<'a, T: Copy> From<&'a RevOrd<T>> for RevOrd<T> {
+  fn from(this: &'a RevOrd<T>) -> RevOrd<T> {
+    *this
+  }
+}
+
 impl<T> From<T> for RevOrd<T> {
   fn from(inner: T) -> RevOrd<T> {
     RevOrd(inner)
@@ -483,6 +489,34 @@ impl<K: Copy + Ord + Debug, V> SortMap8<K, V> {
   pub fn swap<Q: AsRef<SortKey8<K>>>(&mut self, query: Q, val: &mut V) {
     let p = self.probe(query.as_ref());
     swap(&mut (self.buf[p as usize].1), val);
+  }
+
+  /*pub fn remove<Q: AsRef<SortKey8<K>>>(&mut self, query: Q) -> (K, V) {
+    let p = self.probe(query.as_ref()) as usize;
+    for i in p + 1 .. self.buf.len() {
+      self.buf.swap(i - 1, i);
+    }
+    self.buf.pop().unwrap()
+  }*/
+
+  pub fn remove<K2: Into<K>>(&mut self, query: K2) -> (K, V) {
+    let key = query.into();
+    //let p = self.probe(query.as_ref()) as usize;
+    let mut p = None;
+    for i in 0 .. self.buf.len() {
+      if &key == &self.buf[i].0 {
+        p = Some(i);
+        break;
+      }
+    }
+    if p.is_none() {
+      panic!("bug: SortMap8::remove: not found: key={:?}", &key);
+    }
+    let p = p.unwrap();
+    for i in p + 1 .. self.buf.len() {
+      self.buf.swap(i - 1, i);
+    }
+    self.buf.pop().unwrap()
   }
 
   pub fn insert<K2: Into<K>>(&mut self, key: K2, val: V) -> SortKey8<K> {

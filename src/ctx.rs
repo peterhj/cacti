@@ -200,7 +200,9 @@ impl Ctx {
     // FIXME FIXME: reset all.
     //ctx.env.borrow_mut().reset();
     //ctx.thunkenv.borrow_mut().reset();
-    self.spine.borrow_mut()._reset()
+    let rst = self.spine.borrow_mut()._reset();
+    self.ctr.reset.set(rst);
+    rst
   }
 }
 
@@ -306,10 +308,10 @@ pub fn compile() {
 #[track_caller]
 pub fn resume() -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut env = ctx.env.borrow_mut();
+    //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::_Top)
+    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::_Top)
   }))
 }
 
@@ -324,24 +326,33 @@ pub fn resume_put_mem_val<K: Borrow<CellPtr>>(key: K, val: &dyn Any) -> SpineRet
 }*/
 
 #[track_caller]
-pub fn resume_put_mem_with<K: CellDeref, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
+pub fn _resume_put_mem_with<K: CellDeref, F: Fn(CellType, MemReg)>(key: K, fun: F) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut env = ctx.env.borrow_mut();
+    //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
     // FIXME FIXME
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(key._deref(), &fun as _))
+    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(key._deref(), &fun as _))
+  }))
+}
+
+#[track_caller]
+pub fn resume_put_mem_with<K: CellDeref, F: Fn(&CellType, &mut [u8])>(key: K, fun: F) -> SpineRet {
+  panick_wrap(|| TL_CTX.with(|ctx| {
+    //let mut env = ctx.env.borrow_mut();
+    let mut thunkenv = ctx.thunkenv.borrow_mut();
+    let mut spine = ctx.spine.borrow_mut();
+    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::PutMemMutFun(key._deref(), &fun as _))
   }))
 }
 
 #[track_caller]
 pub fn resume_put<K: CellDeref, V: CellStoreTo>(key: K, ty: &CellType, val: &V) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
-    let mut env = ctx.env.borrow_mut();
+    //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     let mut spine = ctx.spine.borrow_mut();
-    // FIXME FIXME
-    spine._resume(&ctx.ctr, &mut *env, &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::Put(key._deref(), ty, val as _))
+    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::Put(key._deref(), ty, val as _))
   }))
 }
 
@@ -399,6 +410,16 @@ impl Drop for PMachScope {
   }
 }
 
+impl Default for PMachScope {
+  #[track_caller]
+  fn default() -> PMachScope {
+    TL_CTX.with(|ctx| {
+      let prev = ctx.ctlstate._unset_primary();
+      PMachScope{prev}
+    })
+  }
+}
+
 impl PMachScope {
   #[track_caller]
   pub fn new(pmach: PMach) -> PMachScope {
@@ -414,6 +435,16 @@ impl PMachScope {
 }
 
 #[track_caller]
+pub fn default_scope() -> PMachScope {
+  panick_wrap(|| PMachScope::default())
+}
+
+#[track_caller]
+pub fn no_scope() -> PMachScope {
+  panick_wrap(|| PMachScope::default())
+}
+
+#[track_caller]
 pub fn smp_scope() -> PMachScope {
   panick_wrap(|| PMachScope::new(PMach::Smp))
 }
@@ -421,7 +452,7 @@ pub fn smp_scope() -> PMachScope {
 #[cfg(feature = "nvgpu")]
 #[track_caller]
 pub fn gpu_scope() -> PMachScope {
-  nvgpu_scope()
+  panick_wrap(|| PMachScope::new(PMach::NvGpu))
 }
 
 #[cfg(feature = "nvgpu")]
@@ -430,9 +461,9 @@ pub fn nvgpu_scope() -> PMachScope {
   panick_wrap(|| PMachScope::new(PMach::NvGpu))
 }
 
-pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
+/*pub fn ctx_unwrap<F: FnMut(&Ctx) -> X, X>(f: &mut F) -> X {
   TL_CTX.with(f)
-}
+}*/
 
 pub fn ctx_release(x: CellPtr) {
   TL_CTX.try_with(|ctx| {
@@ -985,6 +1016,7 @@ pub fn ctx_pop_accumulate_thunk<Th: ThunkSpec_ + 'static>(th: Th, out: CellPtr) 
 }*/
 
 pub struct CtxCtr {
+  pub reset:    Cell<Counter>,
   pub ptr_ctr:  Cell<i64>,
   pub celfront: RefCell<Vec<CellPtr>>,
 }
@@ -992,6 +1024,7 @@ pub struct CtxCtr {
 impl CtxCtr {
   pub fn new() -> CtxCtr {
     CtxCtr{
+      reset:    Cell::new(Counter::default()),
       ptr_ctr:  Cell::new(0),
       celfront: RefCell::new(Vec::new()),
     }

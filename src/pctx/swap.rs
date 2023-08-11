@@ -14,8 +14,10 @@ use std::cell::{Cell};
 pub struct SwapCowMemCell {
   pub root: Cell<CellPtr>,
   // FIXME
-  //pub refc: Cell<u32>,
+  pub refc: Cell<u32>,
+  pub pinc: Cell<u16>,
   pub flag: Cell<u8>,
+  pub borc: BorrowCell,
   pub mem:  MmapFileSlice,
 }
 
@@ -67,7 +69,7 @@ impl InnerCell for SwapCowMemCell {
     }
   }
 
-  fn pin(&self) -> bool {
+  /*fn pin(&self) -> bool {
     (self.flag.get() & 4) != 0
   }
 
@@ -77,9 +79,62 @@ impl InnerCell for SwapCowMemCell {
     } else {
       self.flag.set(self.flag.get() & !4);
     }
+  }*/
+
+  fn retain(&self) {
+    let c = self.refc.get();
+    if c >= u32::max_value() {
+      panic!("bug");
+    }
+    self.refc.set(c + 1);
   }
 
-  // TODO
+  fn release(&self) -> bool {
+    let c = self.refc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.refc.set(c - 1);
+    c <= 1
+  }
+
+  fn pinned(&self) -> bool {
+    let c = self.pinc.get();
+    c > 0
+  }
+
+  fn pin(&self) {
+    let c = self.pinc.get();
+    if c >= u16::max_value() {
+      panic!("bug");
+    }
+    self.pinc.set(c + 1);
+  }
+
+  fn unpin(&self) {
+    let c = self.pinc.get();
+    if c <= 0 {
+      panic!("bug");
+    }
+    self.pinc.set(c - 1);
+  }
+
+  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+    match self.borc._try_borrow() {
+      Err(e) => {
+        println!("ERROR:  SwapCowMemCell::mem_borrow: borrow failure: {:?}", e);
+        panic!();
+      }
+      Ok(_) => {
+        let val = self.mem.as_bytes();
+        Some(BorrowRef{borc: &self.borc, val})
+      }
+    }
+  }
+
+  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
+    None
+  }
 }
 
 pub struct SwapPCtx {
@@ -138,8 +193,10 @@ impl SwapPCtx {
     }
     let cel = Rc::new(SwapCowMemCell{
       root: Cell::new(CellPtr::nil()),
-      //refc: Cell::new(1),
+      refc: Cell::new(1),
+      pinc: Cell::new(0),
       flag: Cell::new(0),
+      borc: BorrowCell::new(),
       mem,
     });
     InnerCell_::set_cow(&*cel, true);
@@ -149,8 +206,19 @@ impl SwapPCtx {
   }
 
   pub fn release(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
+    // FIXME: refcounted release.
     if cfg_debug() {
       println!("DEBUG: SwapPCtx::release: addr={:?}", addr);
+    }
+    match self.page_tab.borrow_mut().remove(&addr) {
+      None => None,
+      Some(icel) => Some((Locus::Mem, icel))
+    }
+  }
+
+  pub fn yeet(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
+    if cfg_debug() {
+      println!("DEBUG: SwapPCtx::yeet: addr={:?}", addr);
     }
     match self.page_tab.borrow_mut().remove(&addr) {
       None => None,

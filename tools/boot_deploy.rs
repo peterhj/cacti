@@ -96,7 +96,7 @@ fn main() {
         let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
         resume_put(cel, &pickty, pickfile.mmap());
       }
-      resume_put_mem_with(&in_[0].in_tok, |_, mem| {
+      /*resume_put_mem_with(&in_[0].in_tok, |_, mem| {
         println!("boot: set in_tok...");
         let mut tok_buf = Vec::with_capacity(seq_cap as _);
         tok_buf.push(1_u16);
@@ -104,6 +104,16 @@ fn main() {
         // FIXME: put end-of-sentence token.
         tok_buf.resize(seq_cap as _, 0_u16);
         mem.copy_from_slice(&tok_buf);
+      });*/
+      resume_put_mem_with(&in_[0].in_tok, |ty, mem| {
+        println!("boot: set in_tok...");
+        let tok_buf = ty.prepare_bytes_mut::<u16>(mem).unwrap();
+        tok_buf[0] = 1_u16;
+        tok_buf[1 ..= text_tok.len()].copy_from_slice(text_tok.as_ref());
+        // FIXME: put end-of-sentence token.
+        for j in text_tok.len() + 1 .. tok_buf.len() {
+          tok_buf[j] = 0;
+        }
       });
     }
     let in_tok_mem = in_[0].in_tok._get_mem();

@@ -211,29 +211,32 @@ fn main() {
         resume_put(cel, &pickty, pickfile.mmap());
       }
     }
-    resume_put_mem_with(&in_tok, |_, mem| {
+    resume_put_mem_with(&in_tok, |ty, mem| {
       println!("boot: set in_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.push(1_u16);
       tok_buf.extend_from_slice(text_tok.as_ref());
       // FIXME: put end-of-sentence token.
       tok_buf.resize(seq_cap as _, 0_u16);
+      let mem = ty.prepare_bytes_mut::<u16>(mem).unwrap();
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_with(&in_.in_lm_tok, |_, mem| {
+    resume_put_mem_with(&in_.in_lm_tok, |ty, mem| {
       println!("boot: set in_lm_tok...");
       let mut tok_buf = Vec::with_capacity(seq_cap as _);
       tok_buf.extend_from_slice(text_tok.as_ref());
       // FIXME: put end-of-sentence token.
       tok_buf.resize(seq_cap as _, 0_u16);
+      let mem = ty.prepare_bytes_mut::<u16>(mem).unwrap();
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_with(&in_.in_lm_loss_scale, |_, mem| {
+    resume_put_mem_with(&in_.in_lm_loss_scale, |ty, mem| {
       println!("boot: set in_lm_loss_scale...");
       let mut scale_buf = Vec::with_capacity(seq_cap as _);
       scale_buf.push(0.0_f32);
       scale_buf.resize(text_tok.len(), loss_scale);
       scale_buf.resize(seq_cap as _, 0.0_f32);
+      let mem = ty.prepare_bytes_mut::<f32>(mem).unwrap();
       mem.copy_from_slice(&scale_buf);
     });
     for (idx, ((((g, g_), g2), p_), p)) in

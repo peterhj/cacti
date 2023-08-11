@@ -994,8 +994,9 @@ pub trait MathInitOps: CellDeref {
       let this = self._deref();
       let grad1_avg = grad1_avg._deref();
       let grad2_avg = grad2_avg._deref();
-      let signed_lr = (-lr * (unbias2 / unbias1)).into_scalar_val_();
-      let lamda = (lr * wd).into_scalar_val_();
+      let signed_lr = (-lr).into_scalar_val_();
+      let lr_unbias = (unbias2 / unbias1).into_scalar_val_();
+      let lamda = (wd).into_scalar_val_();
       let eps = (eps * unbias2).into_scalar_val_();
       if cfg_debug() {
       println!("DEBUG: init_online_adamw_update32: signed lr={:?} lamda={:?} eps={:?}",
@@ -1004,7 +1005,7 @@ pub trait MathInitOps: CellDeref {
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(grad1_avg);
       ctx_push_cell_arg(grad2_avg);
-      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lamda, eps}, this)
+      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)
     })
   }
 }
@@ -2113,6 +2114,11 @@ pub trait Ops: CellDeref {
 
   //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
 
+  /*#[track_caller]
+  fn unset(&self) {
+    unimplemented!();
+  }*/
+
   #[track_caller]
   fn cache(&self) /*-> Self */{
     panick_wrap(|| TL_CTX.with(|ctx| {
@@ -2257,19 +2263,19 @@ pub trait Ops: CellDeref {
 impl<L: CellDeref + ?Sized> Ops for L {}
 
 pub trait CtlOps: CellDeref {
-  #[track_caller]
+  /*#[track_caller]
   fn resident(&self, loc: Locus) -> bool {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let this = self._deref();
       let env = ctx.env.borrow();
-      match env.plookup_view(this) {
+      match env.plookup_mut_view(this) {
         Err(_) => {
           println!("ERROR: CtlOps::resident: failed to dereference {:?} to a physical cell", this);
           panic!("");
         }
         Ok(e) => {
           match e.cel_ {
-            &Cell_::Phy(.., ref pcel) => {
+            &mut Cell_::Phy(.., ref mut pcel) => {
               pcel.lookup_loc(loc).is_some()
             }
             _ => panic!("bug")
@@ -2277,7 +2283,7 @@ pub trait CtlOps: CellDeref {
         }
       }
     }))
-  }
+  }*/
 
   #[track_caller]
   fn spine_version(&self) -> Clock {
@@ -2303,11 +2309,9 @@ pub trait CtlOps: CellDeref {
         Ok(e) => {
           match e.cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
-              // FIXME: use of get_loc here is kind of kludgy.
-              //let (pm, addr) = pcel.get_loc(x, xclk, &e.ty, Locus::Mem);
               let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
                 None => panic!("bug"),
-                Some((pm, rep)) => (pm, rep.addr.get())
+                Some((_, pm, addr)) => (pm, addr)
               };
               TL_PCTX.with(|pctx| {
                 let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();

@@ -3757,6 +3757,7 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct OnlineAdamWUpdateInitFutThunkSpec {
   pub signed_lr: ScalarVal_,
+  pub lr_unbias: ScalarVal_,
   pub lamda: ScalarVal_,
   pub eps: ScalarVal_,
 }
@@ -3782,18 +3783,15 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
     Ok(arg[0].clone())
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
-    //abi.set_out_arr(0, AbiOutput::Pure, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_out_arr(0, AbiOutput::ImplicitInPlace, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_arg_arr(0, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
-    //abi.set_arg_arr(1, AbiInput::Shared, AbiArrayRepr::Nd, AbiScalarType::Unspec);
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: params.
     FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
-        format!(r"\u v w -> (1 - {}) * w + {} * (u / (({}.sqrt v) + {}))",
-            self.lamda.format_futhark(),
+        format!(r"\u v w -> w + {} * ({} * (u / (({}.sqrt v) + {})) + {} * w)",
             self.signed_lr.format_futhark(),
+            self.lr_unbias.format_futhark(),
             arg[1].dtype.format_futhark(),
             self.eps.format_futhark(),
+            self.lamda.format_futhark(),
         )
     )
   }
@@ -4249,6 +4247,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[0]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy (contiguous) view");
             panic!();
@@ -4260,7 +4259,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -4278,6 +4277,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[1]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: right arg is not a zero-copy (contiguous) view");
             panic!();
@@ -4289,7 +4289,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -4311,6 +4311,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &out_ty_);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: MatrixMulF16F32GpuThunkImpl::_enter: output is not a zero-copy (contiguous) view");
             panic!();
@@ -4322,7 +4323,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -4869,6 +4870,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[0]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: left arg is not a zero-copy (contiguous) view");
             panic!();
@@ -4882,7 +4884,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
             //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -4920,6 +4922,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &arg_ty_[1]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: right arg is not a zero-copy (contiguous) view");
             panic!();
@@ -4933,7 +4936,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
             //let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -4979,6 +4982,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       Ok(e) => {
         assert_eq!(&e.ty, &out_ty_);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+        //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
             println!("ERROR: BlockMatrixMulF16F32GpuThunkImpl::_enter: output is not a zero-copy (contiguous) view");
             panic!();
@@ -4992,7 +4996,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
             //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
-              Some(rep) => rep.addr.get()
+              Some((_, addr)) => addr
             };
             let base0 = TL_PCTX.with(|pctx| {
               let (dptr, _) = pctx.nvgpu.as_ref().unwrap().lookup_dev(pcel_addr).unwrap();
@@ -5263,16 +5267,16 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       let loc = gpu.device_locus();
+      // FIXME: view.
       let src_dptr = match env.pread_ref_(arg[0].0, arg[0].1, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(&e.ty, &arg_ty_[0]);
           match e.cel_ {
-            &mut Cell_::Phy(.., ref pcel) => {
-              //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
+            &mut Cell_::Phy(.., ref mut pcel) => {
               let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
                 None => panic!("bug"),
-                Some(rep) => rep.addr.get()
+                Some((_, addr)) => addr
               };
               //let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
               let dptr = match gpu.lookup_dev(pcel_addr) {
@@ -5289,16 +5293,16 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
           }
         }
       };
+      // FIXME: view.
       let dst_dptr = match env.pwrite_ref_(out, oclk, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(&e.ty, &out_ty_);
           match e.cel_ {
-            &mut Cell_::Phy(.., ref pcel) => {
-              //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
+            &mut Cell_::Phy(.., ref mut pcel) => {
               let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
                 None => panic!("bug"),
-                Some(rep) => rep.addr.get()
+                Some((_, addr)) => addr
               };
               let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
               dptr
