@@ -1366,15 +1366,6 @@ impl Spine {
             let base_clk: Clock = self.ctr.get().into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.init_once();
-            // FIXME: want to put this logic after clock_sync_rec,
-            // but fails the borrowchecker.
-            match e.cel_ {
-              &Cell_::Phy(_, ref clo, _) => {
-              //&Cell_::Cow(_, ref clo, _) => {}
-                clo.borrow_mut().init_once(next_clk, ThunkPtr::opaque());
-              }
-              _ => panic!("bug")
-            }
             if prev_clk >= next_clk {
               panic!("bug");
             } else if prev_clk < next_clk {
@@ -1383,6 +1374,13 @@ impl Spine {
               //e.state().clk = next_clk;
               // NB: clock_sync is _probably_ the right thing here.
               e.clock_sync_rec(prev_clk, next_clk, &*env);
+            }
+            let cel_ = e.cel_.borrow();
+            match &*cel_ {
+              &Cell_::Phy(_, ref clo, _) => {
+                clo.borrow_mut().init_once(next_clk, ThunkPtr::opaque());
+              }
+              _ => panic!("bug")
             }
           }
         }
@@ -1471,7 +1469,8 @@ impl Spine {
             Err(_) => panic!("bug"),
             Ok(e) => {
               let root = e.root();
-              match e.cel_ {
+              let mut cel_ = e.cel_.borrow_mut();
+              match &mut *cel_ {
                 &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
                   let optr = pcel.optr;
                   assert_eq!(root, optr);
@@ -1509,7 +1508,8 @@ impl Spine {
                 Err(_) => panic!("bug"),
                 Ok(e) => {
                   let root = e.root();
-                  match e.cel_ {
+                  let mut cel_ = e.cel_.borrow_mut();
+                  match &mut *cel_ {
                     &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
                       let optr = pcel.optr;
                       assert_eq!(root, optr);
@@ -1559,7 +1559,8 @@ impl Spine {
                 Err(CellDerefErr::View) => panic!("bug"),
                 Err(_) => panic!("bug"),
                 Ok(e) => {
-                  match e.cel_ {
+                  let cel_ = e.cel_.borrow();
+                  match &*cel_ {
                     &Cell_::Phy(_, ref clo, _) => {
                       clo.borrow_mut().init_once(xclk, ThunkPtr::opaque());
                     }
@@ -1652,9 +1653,9 @@ impl Spine {
           match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              match e.cel_ {
+              let cel_ = e.cel_.borrow();
+              match &*cel_ {
                 &Cell_::Phy(_, ref clo, _) => {
-                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().init_once(xclk, th);
                 }
                 _ => panic!("bug")
@@ -1716,12 +1717,12 @@ impl Spine {
           match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              match e.cel_ {
+              let cel_ = e.cel_.borrow();
+              match &*cel_ {
                 &Cell_::Phy(_, ref clo, _) => {
-                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().init_once(xclk, th);
                 }
-                _ => panic!("bug: Spine::_step: Apply: cel={:?}", e.cel_.name())
+                _ => panic!("bug: Spine::_step: Apply: cel={:?}", cel_.name())
               }
             }
           }
@@ -1775,9 +1776,9 @@ impl Spine {
           match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              match e.cel_ {
+              let cel_ = e.cel_.borrow();
+              match &*cel_ {
                 &Cell_::Phy(_, ref clo, _) => {
-                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().update(xclk, th);
                 }
                 _ => panic!("bug")

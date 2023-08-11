@@ -4255,7 +4255,8 @@ impl MatrixMulF16F32GpuThunkImpl {
           Ok(ty) => ty
         };
         assert_eq!(&e.ty, v_ty.as_ref());
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
@@ -4285,7 +4286,8 @@ impl MatrixMulF16F32GpuThunkImpl {
           Ok(ty) => ty
         };
         assert_eq!(&e.ty, v_ty.as_ref());
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
@@ -4319,7 +4321,8 @@ impl MatrixMulF16F32GpuThunkImpl {
           Ok(ty) => ty
         };
         assert_eq!(&e.ty, v_ty.as_ref());
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
               None => panic!("bug"),
@@ -4879,7 +4882,8 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         };
         assert_eq!(&e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &arg_ty_[0]);
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[0].0, arg[0].1, &arg_ty_[0], loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
@@ -4931,7 +4935,8 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         };
         assert_eq!(&e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &arg_ty_[1]);
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.get(arg[1].0, arg[1].1, &arg_ty_[1], loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
@@ -4991,7 +4996,8 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         };
         assert_eq!(&e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &out_ty_);
-        match e.cel_ {
+        let mut cel_ = e.cel_.borrow_mut();
+        match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
             //let pcel_addr = pcel.fresh(out, oclk, &out_ty_, loc, PMach::NvGpu);
             let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
@@ -5272,7 +5278,8 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(&e.ty, &arg_ty_[0]);
-          match e.cel_ {
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
               let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
                 None => panic!("bug"),
@@ -5298,7 +5305,8 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(&e.ty, &out_ty_);
-          match e.cel_ {
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
               let pcel_addr = match pcel.lookup(loc, PMach::NvGpu) {
                 None => panic!("bug"),

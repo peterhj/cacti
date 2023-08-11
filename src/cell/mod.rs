@@ -567,10 +567,11 @@ impl CellStoreTo for MmapFileSlice {
         };
         assert_eq!(&e.ty, v_ty.as_ref());
         TL_PCTX.with(|pctx| {
-          match e.cel_ {
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
             &mut Cell_::Top(ref state, optr) => {
               assert_eq!(root, optr);
-              let oclk = state.borrow().clk;
+              let oclk = state.clk;
               assert_eq!(clk, oclk);
               if e.root_ty.span_bytes() != e.ty.span_bytes() {
                 // FIXME: view: need to do a raw zero-pad.
@@ -578,17 +579,17 @@ impl CellStoreTo for MmapFileSlice {
               } else {
                 let addr = pctx.ctr.fresh_addr();
                 let icel = pctx.swap._try_alloc_cow(addr, &e.ty, self.clone()).unwrap();
-                let state = RefCell::new(state.borrow().clone());
+                let state = state.clone();
                 let clo = RefCell::new(CellClosure::default());
                 let mut pcel = PCell::new(optr, e.root_ty.clone());
                 pcel.push(optr, oclk, Locus::Mem, PMach::Swap, addr);
-                *e.cel_ = Cell_::Phy(state, clo, pcel);
+                *cel_ = Cell_::Phy(state, clo, pcel);
               }
             }
             &mut Cell_::Phy(ref state, .., ref mut pcel) => {
               let optr = pcel.optr;
               assert_eq!(root, optr);
-              let oclk = state.borrow().clk;
+              let oclk = state.clk;
               assert_eq!(clk, oclk);
               if e.root_ty.span_bytes() != e.ty.span_bytes() {
                 // FIXME: view.

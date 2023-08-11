@@ -2307,7 +2307,8 @@ pub trait CtlOps: CellDeref {
         Err(CellDerefErr::View) => panic!("bug"),
         Err(_) => panic!("bug"),
         Ok(e) => {
-          match e.cel_ {
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
               let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
                 None => panic!("bug"),

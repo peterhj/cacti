@@ -1826,7 +1826,8 @@ impl NvGpuMemPool {
             if root_sz < query_sz {
               continue;
             }
-            match e.cel_ {
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
               &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                 let cur_clk = state.borrow().clk;
                 // FIXME: need reentrant pcel here (i.e. pcel.try_borrow_mut()).
