@@ -585,3 +585,19 @@ impl StdCellExt<usize> for Cell<usize> {
     old_val
   }
 }
+
+impl StdCellExt<u32> for Cell<u32> {
+  fn fetch_add(&self, val: u32) -> u32 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: u32) -> u32 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}

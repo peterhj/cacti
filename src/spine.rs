@@ -1,4 +1,4 @@
-use crate::algo::{HashMap, HashSet, BTreeMap, BTreeSet};
+use crate::algo::{HashMap, HashSet, BTreeMap, BTreeSet, StdCellExt};
 use crate::cell::*;
 use crate::clock::{Counter, Clock, TotalClock};
 use crate::ctx::*;
@@ -1018,64 +1018,46 @@ impl SpineEnv {
 }
 
 pub struct Spine {
-  pub ctr:  Counter,
-  pub ctlp: u32,
-  pub hltp: u32,
-  //pub curp: u32,
+  pub ctr:  Cell<Counter>,
+  pub ctlp: Cell<u32>,
+  pub hltp: Cell<u32>,
   pub curp: Cell<u32>,
-  pub retp: u32,
-  //pub log:  Vec<SpineEntry>,
+  pub retp: Cell<u32>,
   pub log:  RefCell<Vec<SpineEntry>>,
-  //pub cur_env:  SpineEnv,
   pub cur_env:  RefCell<SpineEnv>,
 }
 
 impl Default for Spine {
   fn default() -> Spine {
     Spine{
-      ctr:  Counter::default(),
-      ctlp: 0,
-      hltp: 0,
-      //curp: 0,
+      ctr:  Cell::new(Counter::default()),
+      ctlp: Cell::new(0),
+      hltp: Cell::new(0),
       curp: Cell::new(0),
-      retp: u32::max_value(),
-      //log:  Vec::new(),
+      retp: Cell::new(u32::max_value()),
       log:  RefCell::new(Vec::new()),
-      //cur_env:  SpineEnv::default(),
       cur_env:  RefCell::new(SpineEnv::default()),
     }
   }
 }
 
 impl Spine {
-  pub fn _reset(&mut self) -> Counter {
+  pub fn _reset(&self) -> Counter {
     if cfg_debug() {
     println!("DEBUG: Spine::_reset: ctr={:?} ctlp={} hltp={} curp={}",
-        self.ctr, self.ctlp, self.hltp, self.curp.get());
+        self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get());
     }
-    self.ctr = self.ctr.advance();
-    self.ctlp = 0;
-    self.hltp = 0;
+    self.ctr.set(self.ctr.get().advance());
+    self.ctlp.set(0);
+    self.hltp.set(0);
     self.curp.set(0);
-    self.retp = u32::max_value();
+    self.retp.set(u32::max_value());
     self.log.borrow_mut().clear();
-    self.cur_env.borrow_mut().reset(self.ctr);
-    self.ctr
+    self.cur_env.borrow_mut().reset(self.ctr.get());
+    self.ctr.get()
   }
 
-  /*pub fn _fastfwd(&mut self, sp: u32) {
-    // FIXME: for adj, dual.
-    let start_sp = sp + 1;
-    let end_sp = self.log.len() as _;
-    self.curp = end_sp;
-    for sp in start_sp .. end_sp {
-      self.cur_env.step(sp, &self.log);
-    }
-  }*/
-
   pub fn adj_map(&self, allsrc: MCellPtr, sink: MCellPtr, ctr: &CtxCtr, thunkenv: &RefCell<CtxThunkEnv>) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::AdjMap(allsrc, sink);
@@ -1085,8 +1067,6 @@ impl Spine {
   }
 
   pub fn dual_map(&self, allsink: MCellPtr, src: MCellPtr, ctr: &CtxCtr, thunkenv: &RefCell<CtxThunkEnv>) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::DualMap(allsink, src);
@@ -1096,8 +1076,6 @@ impl Spine {
   }
 
   pub fn add(&self, mx: MCellPtr, x: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Add(mx, x, Clock::default());
@@ -1107,8 +1085,6 @@ impl Spine {
   }
 
   pub fn add2(&self, mx: MCellPtr, k: CellPtr, v: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Add2(mx, k, Clock::default(), v, Clock::default());
@@ -1122,8 +1098,6 @@ impl Spine {
   }
 
   pub fn cache(&self, x: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Cache(x, Clock::default());
@@ -1133,8 +1107,6 @@ impl Spine {
   }
 
   /*pub fn opaque(&self, x: CellPtr, og: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::OIntro(x, og);
@@ -1144,8 +1116,6 @@ impl Spine {
   }*/
 
   pub fn yield_set(&self, x: CellPtr, loc: Locus) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::YieldSet(x, Clock::default(), loc);
@@ -1155,8 +1125,6 @@ impl Spine {
   }
 
   pub fn yield_init(&self, x: CellPtr, loc: Locus) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::YieldInit(x, Clock::default(), loc);
@@ -1166,8 +1134,6 @@ impl Spine {
   }
 
   pub fn alias(&self, x: CellPtr, og: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Alias(x, og);
@@ -1185,20 +1151,16 @@ impl Spine {
     assert_eq!(self.curp.get(), self.log.borrow().len() as _);
   }
 
-  pub fn snapshot(&self, x: CellPtr, og: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
+  /*pub fn snapshot(&self, x: CellPtr, og: CellPtr) {
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Snapshot(x, og);
     self.log.borrow_mut().push(e);
     SpineEnv::step(&self.cur_env, sp, &self.curp, &self.log, None, None);
     assert_eq!(self.curp.get(), self.log.borrow().len() as _);
-  }
+  }*/
 
   pub fn push_seal(&self, x: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::PushSeal(x, Clock::default());
@@ -1208,8 +1170,6 @@ impl Spine {
   }
 
   pub fn initialize(&self, y: CellPtr, ith: ThunkPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Initialize(y, Clock::default(), ith);
@@ -1219,8 +1179,6 @@ impl Spine {
   }
 
   pub fn apply(&self, y: CellPtr, th: ThunkPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Apply(y, Clock::default(), th);
@@ -1230,8 +1188,6 @@ impl Spine {
   }
 
   pub fn accumulate(&self, y: CellPtr, th: ThunkPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Accumulate(y, Clock::default(), th);
@@ -1241,8 +1197,6 @@ impl Spine {
   }
 
   pub fn seal(&self, x: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Seal(x);
@@ -1252,8 +1206,6 @@ impl Spine {
   }
 
   pub fn unseal_mux(&self, x: CellPtr) {
-    //let sp = self.curp;
-    //self.curp += 1;
     let sp = self.curp.get();
     self.curp.set(sp + 1);
     let e = SpineEntry::Unseal(x);
@@ -1318,42 +1270,33 @@ impl Spine {
     }
   }
 
-  pub fn _compile(&mut self, ) {
-    // FIXME FIXME
-    //unimplemented!();
-    /*
-    let mut dry = DrySpine::new(self);
-    dry._interp();
-    dry._reorder();
-    dry._fuse();
-    dry._reduce();
-    */
+  pub fn _compile(&self, ) {
   }
 
   /*pub fn _start(&mut self) {
     self.hltp = self.curp;
   }*/
 
-  pub fn _resume(&mut self, ctr: &CtxCtr, /*env: &mut CtxEnv,*/ thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock,*/ mut item: SpineResume) -> SpineRet {
+  pub fn _resume(&self, ctr: &CtxCtr, /*env: &mut CtxEnv,*/ thunkenv: &mut CtxThunkEnv, /*target: CellPtr, tg_clk: Clock,*/ mut item: SpineResume) -> SpineRet {
     //self._start();
-    let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+    let retp = if self.retp.get() == u32::max_value() { None } else { Some(self.retp.get()) };
     if cfg_debug() {
     println!("DEBUG: Spine::_resume: ctr={:?} ctlp={} hltp={} curp={} retp={:?} item={:?}",
-        self.ctr, self.ctlp, self.hltp, self.curp.get(), retp, item.key());
+        self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get(), retp, item.key());
     }
-    self.hltp = self.curp.get();
+    self.hltp.set(self.curp.get());
     loop {
       let state = self._step(ctr, /*env,*/ thunkenv, item.take());
       match state {
         SpineRet::Yield_(_) |
         SpineRet::Bot => {
-          self.retp = self.ctlp;
+          self.retp.set(self.ctlp.get());
           return state;
         }
         _ => {}
       }
-      self.ctlp += 1;
-      self.retp = u32::max_value();
+      self.ctlp.fetch_add(1);
+      self.retp.set(u32::max_value());
       match state {
         SpineRet::Halt   |
         SpineRet::Pause  |
@@ -1366,19 +1309,19 @@ impl Spine {
   }
 
   pub fn _step(&self, ctr: &CtxCtr, /*env: &mut CtxEnv,*/ thunkenv: &mut CtxThunkEnv, item: SpineResume) -> SpineRet {
-    let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
-    if self.ctlp >= self.hltp {
+    let retp = if self.retp.get() == u32::max_value() { None } else { Some(self.retp.get()) };
+    if self.ctlp.get() >= self.hltp.get() {
       if cfg_debug() {
       println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} halt",
-          self.ctr, self.ctlp, self.hltp, self.curp.get(), retp);
+          self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get(), retp);
       }
       return SpineRet::Halt;
     }
     let mut ret = SpineRet::_Top;
-    let entry = self.log.borrow()[self.ctlp as usize];
+    let entry = self.log.borrow()[self.ctlp.get() as usize];
     if cfg_debug() {
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
-        self.ctr, self.ctlp, self.hltp, self.curp.get(), retp, entry.name());
+        self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get(), retp, entry.name());
     }
     let t0 = Stopwatch::tl_stamp();
     match entry {
@@ -1420,7 +1363,7 @@ impl Spine {
         match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
-            let base_clk: Clock = self.ctr.into();
+            let base_clk: Clock = self.ctr.get().into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.init_once();
             // FIXME: want to put this logic after clock_sync_rec,
@@ -1448,8 +1391,8 @@ impl Spine {
       SpineEntry::YieldSet(x, _xclk, loc) => {
         TL_CTX.with(|ctx| {
           let mut env = ctx.env.borrow_mut();
-        let ctlp = self.ctlp;
-        let retp = if self.retp == u32::max_value() { None } else { Some(self.retp) };
+        let ctlp = self.ctlp.get();
+        let retp = if self.retp.get() == u32::max_value() { None } else { Some(self.retp.get()) };
         if cfg_debug() {
         println!("DEBUG: Spine::_step: YieldSet: ctlp={:?} retp={:?} x={:?} loc={:?} key={:?}",
             ctlp, retp, x, loc, item.key());
@@ -1501,7 +1444,7 @@ impl Spine {
           let (prev_xclk, xclk) = match env._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              let base_clk: Clock = self.ctr.into();
+              let base_clk: Clock = self.ctr.get().into();
               let prev_clk = e.state().clk;
               let next_clk = base_clk.init_once();
               if cfg_debug() {
@@ -1674,7 +1617,7 @@ impl Spine {
             //assert!(!e.state().flag.seal());
             //e.state().flag.unset_seal();
             // FIXME FIXME
-            let base_clk: Clock = self.ctr.into();
+            let base_clk: Clock = self.ctr.get().into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).init_once();
             assert!(prev_clk < next_clk);
@@ -1734,7 +1677,7 @@ impl Spine {
             //assert!(!e.state().flag.seal());
             //e.state().flag.unset_seal();
             // FIXME
-            let base_clk: Clock = self.ctr.into();
+            let base_clk: Clock = self.ctr.get().into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).init_once();
             assert!(prev_clk < next_clk);
@@ -1797,7 +1740,7 @@ impl Spine {
             //assert!(!e.state().flag.seal());
             //e.state().flag.unset_seal();
             // FIXME
-            let base_clk: Clock = self.ctr.into();
+            let base_clk: Clock = self.ctr.get().into();
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).update();
             assert!(prev_clk < next_clk);
@@ -1853,7 +1796,7 @@ impl Spine {
         match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
-            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert_eq!(e.state().clk.ctr(), self.ctr.get());
             assert!(!e.state().clk.is_uninit());
             //assert!(!e.state().flag.seal());
             //e.state().flag.set_seal();
@@ -1870,7 +1813,7 @@ impl Spine {
         match env._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
-            assert_eq!(e.state().clk.ctr(), self.ctr);
+            assert_eq!(e.state().clk.ctr(), self.ctr.get());
             //assert!(e.state().flag.seal());
             // FIXME FIXME
             unimplemented!()
@@ -1893,7 +1836,7 @@ impl Spine {
 
   pub fn _debug_dump(&self) {
     println!("DEBUG: Spine::_debug_dump: ctr={:?} ctlp={} hltp={} curp={}",
-        self.ctr, self.ctlp, self.hltp, self.curp.get());
+        self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get());
     for (i, e) in self.log.borrow().iter().enumerate() {
       println!("DEBUG: Spine::_debug_dump: log[{}]={:?}", i, e);
     }

@@ -105,7 +105,7 @@ pub struct Ctx {
   pub ctlstate: CtxCtlState,
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
-  pub spine:    RefCell<Spine>,
+  pub spine:    Spine,
   pub futhark:  RefCell<FutharkCtx>,
   pub timing:   TimingCtx,
   pub debugctr: DebugCtrs,
@@ -140,7 +140,7 @@ impl Ctx {
       ctlstate: CtxCtlState::default(),
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
-      spine:    RefCell::new(Spine::default()),
+      spine:    Spine::default(),
       futhark:  RefCell::new(FutharkCtx::default()),
       timing:   TimingCtx::default(),
       debugctr: DebugCtrs::default(),
@@ -150,6 +150,7 @@ impl Ctx {
   pub fn reset(&self) -> Counter {
     if cfg_info() { println!("INFO:   Ctx::reset: gc: scan {} cells", self.ctr.celfront.borrow().len()); }
     let mut env = self.env.borrow_mut();
+    let mut spine_env = self.spine.cur_env.borrow_mut();
     let mut next_celfront = Vec::new();
     let mut free_ct = 0;
     TL_PCTX.with(|pctx| {
@@ -188,6 +189,7 @@ impl Ctx {
                 drop(e);
               }
               assert!(env.celtab.remove(&x).is_some());
+              let _ = spine_env.state.remove(&x);
             }
           }
         }
@@ -199,13 +201,14 @@ impl Ctx {
         gpu._dump_info();
       }
     });
+    drop(spine_env);
     if cfg_info() { println!("INFO:   Ctx::reset: gc:   free {} cells", free_ct); }
     if cfg_info() { println!("INFO:   Ctx::reset: gc:   next {} cells", next_celfront.len()); }
     swap(&mut *self.ctr.celfront.borrow_mut(), &mut next_celfront);
     // FIXME FIXME: reset all.
     //ctx.env.borrow_mut().reset();
     //ctx.thunkenv.borrow_mut().reset();
-    let rst = self.spine.borrow_mut()._reset();
+    let rst = self.spine._reset();
     self.ctr.reset.set(rst);
     rst
   }
@@ -305,9 +308,7 @@ pub fn reset() -> Counter {
 
 #[track_caller]
 pub fn compile() {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    ctx.spine.borrow_mut()._compile();
-  }))
+  panick_wrap(|| TL_CTX.with(|ctx| ctx.spine._compile()))
 }
 
 #[track_caller]
@@ -315,8 +316,7 @@ pub fn resume() -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::_Top)
+    ctx.spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::_Top)
   }))
 }
 
@@ -335,9 +335,8 @@ pub fn _resume_put_mem_with<K: CellDeref, F: Fn(CellType, MemReg)>(key: K, fun: 
   panick_wrap(|| TL_CTX.with(|ctx| {
     //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
     // FIXME FIXME
-    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(key._deref(), &fun as _))
+    ctx.spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, /*CellPtr::nil(), Clock::default(),*/ SpineResume::PutMemF(key._deref(), &fun as _))
   }))
 }
 
@@ -346,8 +345,7 @@ pub fn resume_put_mem_with<K: CellDeref, F: Fn(&CellType, &mut [u8])>(key: K, fu
   panick_wrap(|| TL_CTX.with(|ctx| {
     //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::PutMemMutFun(key._deref(), &fun as _))
+    ctx.spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::PutMemMutFun(key._deref(), &fun as _))
   }))
 }
 
@@ -356,8 +354,7 @@ pub fn resume_put<K: CellDeref, V: CellStoreTo>(key: K, ty: &CellType, val: &V) 
   panick_wrap(|| TL_CTX.with(|ctx| {
     //let mut env = ctx.env.borrow_mut();
     let mut thunkenv = ctx.thunkenv.borrow_mut();
-    let mut spine = ctx.spine.borrow_mut();
-    spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::Put(key._deref(), ty, val as _))
+    ctx.spine._resume(&ctx.ctr, /*&mut *env,*/ &mut *thunkenv, SpineResume::Put(key._deref(), ty, val as _))
   }))
 }
 
