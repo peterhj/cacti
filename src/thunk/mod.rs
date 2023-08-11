@@ -2448,7 +2448,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
         Ok(ty) => ty
       };
       let v_ptroff = v_ty.pointer_offset();
-      assert_eq!(&e.ty, v_ty.as_ref());
+      assert_eq!(e.ty, v_ty.as_ref());
       assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
       let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
         (FutharkArrayRepr::Nd, 0) |
@@ -2495,7 +2495,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
           _ => unimplemented!()
         }
       }
-      arg_ty_.push(e.ty);
+      arg_ty_.push(e.ty.clone());
       arg_arr.push(a.into());
     }
     //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: arg_arr={:?}", &arg_arr);
@@ -2858,10 +2858,10 @@ impl FutharkThunkImpl<MulticoreBackend> {
           if k.0 == addr {
             if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   is const"); }
             // FIXME: view.
-            let root_ty = match env._lookup_mut_ref_(out) {
+            let root_ty = match env._lookup_ref_(out) {
               Err(_) => panic!("bug"),
               Ok(e) => {
-                assert_eq!(&e.ty, e.root_ty);
+                assert_eq!(e.ty, e.root_ty);
                 let mut cel_ = e.cel_.borrow_mut();
                 match &mut *cel_ {
                   &mut Cell_::Top(ref state, optr) => {
@@ -2898,7 +2898,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
         }
       }
       if !f {
-        match env._lookup_mut_view(out) {
+        match env._lookup_view(out) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -2909,7 +2909,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
               }
               Ok(ty) => ty
             };
-            assert_eq!(&e.ty, v_ty.as_ref());
+            assert_eq!(e.ty, v_ty.as_ref());
             let mut cel_ = e.cel_.borrow_mut();
             match &mut *cel_ {
               &mut Cell_::Top(ref state, optr) => {
@@ -3088,7 +3088,7 @@ impl FutharkThunkImpl<CudaBackend> {
           Ok(ty) => ty
         };
         let v_ptroff = v_ty.pointer_offset();
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         assert_eq!(self.spec_dim[k as usize], e.ty.to_dim());
         let a = match (genabi.get_arg(k), self.spec_dim[k as usize].ndim) {
           (FutharkArrayRepr::Nd, 0) |
@@ -3127,7 +3127,7 @@ impl FutharkThunkImpl<CudaBackend> {
             _ => unimplemented!()
           }
         }
-        arg_ty_.push(e.ty);
+        arg_ty_.push(e.ty.clone());
         arg_arr.push(a.into());
       });
     }
@@ -3219,7 +3219,7 @@ impl FutharkThunkImpl<CudaBackend> {
               Ok(ty) => ty
             };
             let v_ptroff = v_ty.pointer_offset();
-            assert_eq!(&e.ty, v_ty.as_ref());
+            assert_eq!(e.ty, v_ty.as_ref());
             if !(self.spec_dim[(lar + k) as usize] == e.ty.to_dim()) {
               println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: lar={} rar={} k={}", lar, rar, k);
               println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: {:?}", &self.spec_dim);
@@ -3633,10 +3633,10 @@ impl FutharkThunkImpl<CudaBackend> {
                 //let reg_dptr = gpu.mem_pool.front_base + region.off as u64;
                 let (reg_dptr, reg_sz) = gpu.lookup_dev(addr).unwrap();
                 assert_eq!(reg_dptr, out_dptr);
-                let root_ty = match env._lookup_mut_ref_(out) {
+                let root_ty = match env._lookup_ref_(out) {
                   Err(_) => panic!("bug"),
                   Ok(e) => {
-                    assert_eq!(&e.ty, e.root_ty);
+                    assert_eq!(e.ty, e.root_ty);
                     let mut cel_ = e.cel_.borrow_mut();
                     match &mut *cel_ {
                       &mut Cell_::Top(ref state, optr) => {
@@ -3673,7 +3673,7 @@ impl FutharkThunkImpl<CudaBackend> {
             }
           }
           if !f {
-            match env._lookup_mut_view(out) {
+            match env._lookup_view(out) {
               Err(_) => panic!("bug"),
               Ok(e) => {
                 let root = e.root();
@@ -3684,7 +3684,7 @@ impl FutharkThunkImpl<CudaBackend> {
                   }
                   Ok(ty) => ty
                 };
-                assert_eq!(&e.ty, v_ty.as_ref());
+                assert_eq!(e.ty, v_ty.as_ref());
                 let mut cel_ = e.cel_.borrow_mut();
                 match &mut *cel_ {
                   &mut Cell_::Top(ref state, optr) => {

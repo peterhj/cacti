@@ -131,7 +131,7 @@ impl InnerCell for SwapCowMemCell {
       }
       Ok(_) => {
         let val = self.mem.as_bytes();
-        Some(BorrowRef{borc: &self.borc, val})
+        Some(BorrowRef{borc: &self.borc, val: Some(val)})
       }
     }
   }

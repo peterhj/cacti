@@ -3,7 +3,7 @@ use crate::cell::*;
 use crate::clock::{Counter, Clock, TotalClock};
 use crate::ctx::*;
 use crate::panick::{panick_wrap};
-use crate::pctx::{TL_PCTX, Locus, MemReg};
+use crate::pctx::{TL_PCTX, Locus, MemReg, BorrowRefMut};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::time::{Stopwatch};
@@ -12,6 +12,7 @@ use cacti_cfg_env::*;
 use std::any::{Any};
 use std::cell::{Cell, RefCell};
 use std::cmp::{Ordering};
+use std::convert::{TryInto};
 use std::mem::{swap};
 
 pub const ADD_CODE:             u8 = b'A';
@@ -1462,7 +1463,7 @@ impl Spine {
             }
           };
           match (loc, &item) {
-            (Locus::Mem, &SpineResume::PutMemF(..)) => {
+            /*(Locus::Mem, &SpineResume::PutMemF(..)) => {
           // FIXME: view.
           match env.pwrite_ref_(x, xclk, loc) {
             Err(CellDerefErr::View) => panic!("bug"),
@@ -1496,18 +1497,25 @@ impl Spine {
               }
             }
           }
-            }
+            }*/
             (Locus::Mem, &SpineResume::PutMemMutFun(key, fun)) => {
               if key != x {
                 println!("ERROR:  Spine::_step: YieldSet: resume_put_mem_mut_with on mismatched keys: dst={:?} src={:?}", x, key);
                 panic!();
               }
-              // FIXME: view.
-              match env.pwrite_ref_(x, xclk, loc) {
-                Err(CellDerefErr::View) => panic!("bug"),
+              match env.pwrite_view(x, xclk, loc) {
                 Err(_) => panic!("bug"),
                 Ok(e) => {
                   let root = e.root();
+                  let v_ty = match e.view().eval_contiguous(e.root_ty) {
+                    Err(_) => {
+                      println!("ERROR:  Spine::_step: YieldSet: destination is not a zero-copy (contiguous) view");
+                      panic!();
+                    }
+                    Ok(ty) => ty
+                  };
+                  let v_ptroff = v_ty.pointer_offset();
+                  assert_eq!(e.ty, v_ty.as_ref());
                   let mut cel_ = e.cel_.borrow_mut();
                   match &mut *cel_ {
                     &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
@@ -1525,6 +1533,18 @@ impl Spine {
                             panic!();
                           }
                           Some(mut mem) => {
+                            let offset: usize = v_ptroff.try_into().unwrap();
+                            let sz: usize = e.ty.packed_span_bytes().try_into().unwrap();
+                            if e.ty != e.root_ty {
+                              let start = offset;
+                              let end = offset + sz;
+                              BorrowRefMut::map_mut(&mut mem, |mem: &mut [u8]| {
+                                &mut mem[start .. end]
+                              });
+                            } else {
+                              assert_eq!(offset, 0);
+                              assert_eq!(sz, mem.len());
+                            }
                             (fun)(&e.ty, &mut *mem);
                           }
                         };

@@ -554,7 +554,7 @@ pub trait CellStoreTo {
 impl CellStoreTo for MmapFileSlice {
   fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv) {
     assert!(!dst.is_nil());
-    match env._lookup_mut_view(dst) {
+    match env._lookup_view(dst) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         let root = e.root();
@@ -565,7 +565,7 @@ impl CellStoreTo for MmapFileSlice {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         TL_PCTX.with(|pctx| {
           let mut cel_ = e.cel_.borrow_mut();
           match &mut *cel_ {

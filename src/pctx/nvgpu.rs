@@ -808,7 +808,7 @@ impl InnerCell for NvGpuMemCell {
       }
       Ok(_) => unsafe {
         let val = from_raw_parts(self.ptr as *const c_void as *const u8, self.sz);
-        Some(BorrowRef{borc: &self.borc, val})
+        Some(BorrowRef{borc: &self.borc, val: Some(val)})
       }
     }
   }
@@ -821,7 +821,7 @@ impl InnerCell for NvGpuMemCell {
       }
       Ok(_) => unsafe {
         let val = from_raw_parts_mut(self.ptr as *mut u8, self.sz);
-        Some(BorrowRefMut{borc: &self.borc, val})
+        Some(BorrowRefMut{borc: &self.borc, val: Some(val)})
       }
     }
   }
@@ -1818,7 +1818,7 @@ impl NvGpuMemPool {
       let mut env = ctx.env.borrow_mut();
       for p in self.yeet_scanner.get() .. celfront.len() {
         let x = celfront[p];
-        match env._lookup_mut_ref_(x) {
+        match env._lookup_ref_(x) {
           Err(_) => {}
           Ok(e) => {
             let root = e.root();

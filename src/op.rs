@@ -2303,10 +2303,18 @@ pub trait CtlOps: CellDeref {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let x = self._deref();
       let xclk = ctx_lookup_clk(x);
-      match ctx.env.borrow_mut().pread_ref_(x, xclk, Locus::Mem) {
-        Err(CellDerefErr::View) => panic!("bug"),
+      match ctx.env.borrow_mut().pread_view(x, xclk, Locus::Mem) {
+        //Err(CellDerefErr::View) => panic!("bug"),
         Err(_) => panic!("bug"),
         Ok(e) => {
+          let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+            Err(_) => {
+              println!("ERROR:  CtlOps::_get_mem: arg ({:?}) is not a zero-copy (contiguous) view", x);
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
           let mut cel_ = e.cel_.borrow_mut();
           match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
@@ -2316,7 +2324,14 @@ pub trait CtlOps: CellDeref {
               };
               TL_PCTX.with(|pctx| {
                 let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
-                icel.as_mem_reg().unwrap()
+                let base_reg = icel.as_mem_reg().unwrap();
+                let ptr = unsafe {
+                  (base_reg.ptr as *mut u8).offset(v_ty.pointer_offset().try_into().unwrap()) as *mut _
+                };
+                let sz = e.ty.packed_span_bytes().try_into().unwrap();
+                let reg = MemReg{ptr, sz};
+                assert!(reg.is_subregion(&base_reg));
+                reg
               })
             }
             _ => panic!("bug")

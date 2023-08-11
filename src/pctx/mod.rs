@@ -1049,11 +1049,12 @@ impl BorrowCell {
 
 pub struct BorrowRef<'a, T: ?Sized> {
   borc: &'a BorrowCell,
-  val:  &'a T,
+  val:  Option<&'a T>,
 }
 
 impl<'a, T: ?Sized> Drop for BorrowRef<'a, T> {
   fn drop(&mut self) {
+    self.val = None;
     self.borc._unborrow();
   }
 }
@@ -1062,17 +1063,18 @@ impl<'a, T: ?Sized> Deref for BorrowRef<'a, T> {
   type Target = T;
 
   fn deref(&self) -> &T {
-    self.val
+    self.val.as_ref().unwrap()
   }
 }
 
 pub struct BorrowRefMut<'a, T: ?Sized> {
   borc: &'a BorrowCell,
-  val:  &'a mut T,
+  val:  Option<&'a mut T>,
 }
 
 impl<'a, T: ?Sized> Drop for BorrowRefMut<'a, T> {
   fn drop(&mut self) {
+    self.val = None;
     self.borc._unborrow_mut();
   }
 }
@@ -1081,12 +1083,26 @@ impl<'a, T: ?Sized> Deref for BorrowRefMut<'a, T> {
   type Target = T;
 
   fn deref(&self) -> &T {
-    self.val
+    self.val.as_ref().unwrap()
   }
 }
 
 impl<'a, T: ?Sized> DerefMut for BorrowRefMut<'a, T> {
   fn deref_mut(&mut self) -> &mut T {
-    self.val
+    self.val.as_mut().unwrap()
+  }
+}
+
+impl<'a, T: ?Sized> BorrowRefMut<'a, T> {
+  /*pub fn map_mut<V: ?Sized, F: FnOnce(&mut T) -> &mut V>(this: BorrowRefMut<'a, T>, f: F) -> BorrowRefMut<'a, V> {
+    let BorrowRefMut{borc, val} = this;
+    BorrowRefMut{
+      borc: this.borc,
+      val:  (f)(val),
+    }
+  }*/
+
+  pub fn map_mut<F: FnOnce(&mut T) -> &mut T>(this: &mut BorrowRefMut<'a, T>, f: F) {
+    this.val = Some((f)(this.val.take().unwrap()));
   }
 }

@@ -4245,7 +4245,7 @@ impl MatrixMulF16F32GpuThunkImpl {
     let b_dptr = match env.pread_view(arg[0].0, arg[0].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &arg_ty_[0]);
+        assert_eq!(e.ty, &arg_ty_[0]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4254,7 +4254,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
@@ -4276,7 +4276,7 @@ impl MatrixMulF16F32GpuThunkImpl {
     let a_dptr = match env.pread_view(arg[1].0, arg[1].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &arg_ty_[1]);
+        assert_eq!(e.ty, &arg_ty_[1]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4285,7 +4285,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
@@ -4311,7 +4311,7 @@ impl MatrixMulF16F32GpuThunkImpl {
     } {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &out_ty_);
+        assert_eq!(e.ty, &out_ty_);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4320,7 +4320,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
           &mut Cell_::Phy(ref _state, ref _clo, ref mut pcel) => {
@@ -4867,11 +4867,10 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    //match env.pread_ref_(arg[0].0, arg[0].1, loc) {}
     match env.pread_view(arg[0].0, arg[0].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &arg_ty_[0]);
+        assert_eq!(e.ty, &arg_ty_[0]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4880,7 +4879,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &arg_ty_[0]);
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
@@ -4920,11 +4919,10 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    //match env.pread_ref_(arg[1].0, arg[1].1, loc) {}
     match env.pread_view(arg[1].0, arg[1].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &arg_ty_[1]);
+        assert_eq!(e.ty, &arg_ty_[1]);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4933,7 +4931,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &arg_ty_[1]);
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
@@ -4973,11 +4971,6 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
-    /*match match mode {
-      ThunkMode::Apply => env.pwrite_ref_(out, oclk, loc),
-      ThunkMode::Accumulate |
-      ThunkMode::Initialize => env.prewrite_ref_(out, prev_oclk, oclk, loc)
-    } {*/
     match match mode {
       ThunkMode::Apply => env.pwrite_view(out, oclk, loc),
       ThunkMode::Accumulate |
@@ -4985,7 +4978,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     } {
       Err(_) => panic!("bug"),
       Ok(e) => {
-        assert_eq!(&e.ty, &out_ty_);
+        assert_eq!(e.ty, &out_ty_);
         let v_ty = match e.view().eval_contiguous(&e.root_ty) {
         //let (v_ty, v_perm) = match e.view().eval_contiguous_transposed(&e.root_ty) {}
           Err(_) => {
@@ -4994,7 +4987,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
           }
           Ok(ty) => ty
         };
-        assert_eq!(&e.ty, v_ty.as_ref());
+        assert_eq!(e.ty, v_ty.as_ref());
         //assert_eq!(v_ty.as_ref(), &out_ty_);
         let mut cel_ = e.cel_.borrow_mut();
         match &mut *cel_ {
@@ -5228,7 +5221,7 @@ impl ThunkSpec for MemcpyThunkSpec {
     match pmach {
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
-        Some(Rc::new(MemcpyNvgpuThunkImpl::default()))
+        Some(Rc::new(MemcpyNvGpuThunkImpl::default()))
       }
       _ => {
         println!("WARNING:MemcpyThunkSpec::gen_impl_: no impl for pmach={:?}", pmach);
@@ -5240,13 +5233,13 @@ impl ThunkSpec for MemcpyThunkSpec {
 
 #[cfg(feature = "nvgpu")]
 #[derive(Default)]
-pub struct MemcpyNvgpuThunkImpl;
+pub struct MemcpyNvGpuThunkImpl;
 
 #[cfg(feature = "nvgpu")]
-impl ThunkImpl for MemcpyNvgpuThunkImpl {
+impl ThunkImpl for MemcpyNvGpuThunkImpl {
   fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
-    //if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply"); }
-    if cfg_debug() { println!("DEBUG: MemcpyNvgpuThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
+    //if cfg_debug() { println!("DEBUG: MemcpyNvGpuThunkImpl::apply"); }
+    if cfg_debug() { println!("DEBUG: MemcpyNvGpuThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
@@ -5267,17 +5260,24 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: MemcpyNvgpuThunkImpl::apply: pre sync error: {:?}", e);
+          println!("DEBUG: MemcpyNvGpuThunkImpl::apply: pre sync error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
       }?;
       let loc = gpu.device_locus();
-      // FIXME: view.
-      let src_dptr = match env.pread_ref_(arg[0].0, arg[0].1, loc) {
+      let src_dptr = match env.pread_view(arg[0].0, arg[0].1, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
-          assert_eq!(&e.ty, &arg_ty_[0]);
+          assert_eq!(e.ty, &arg_ty_[0]);
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: MemcpyNvGpuThunkImpl::_enter: arg is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
           let mut cel_ = e.cel_.borrow_mut();
           match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
@@ -5285,14 +5285,8 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
                 None => panic!("bug"),
                 Some((_, addr)) => addr
               };
-              //let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
-              let dptr = match gpu.lookup_dev(pcel_addr) {
-                None => {
-                  println!("DEBUG: MemcpyNvgpuThunkImpl::apply: no dptr for addr={:?}", pcel_addr);
-                  panic!("bug");
-                }
-                Some((dptr, _)) => dptr
-              };
+              let (base, _) = gpu.lookup_dev(pcel_addr).unwrap();
+              let dptr = base + v_ty.pointer_offset();
               dptr
               // FIXME
             }
@@ -5300,11 +5294,18 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
           }
         }
       };
-      // FIXME: view.
-      let dst_dptr = match env.pwrite_ref_(out, oclk, loc) {
+      let dst_dptr = match env.pwrite_view(out, oclk, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
-          assert_eq!(&e.ty, &out_ty_);
+          assert_eq!(e.ty, &out_ty_);
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: MemcpyNvGpuThunkImpl::_enter: output is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
           let mut cel_ = e.cel_.borrow_mut();
           match &mut *cel_ {
             &mut Cell_::Phy(.., ref mut pcel) => {
@@ -5312,7 +5313,8 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
                 None => panic!("bug"),
                 Some((_, addr)) => addr
               };
-              let (dptr, _) = gpu.lookup_dev(pcel_addr).unwrap();
+              let (base, _) = gpu.lookup_dev(pcel_addr).unwrap();
+              let dptr = base + v_ty.pointer_offset();
               dptr
               // FIXME
             }
@@ -5328,7 +5330,7 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
       );
       match ret {
         Err(e) => {
-          println!("DEBUG: MemcpyNvgpuThunkImpl::apply: error: {:?}", e);
+          println!("DEBUG: MemcpyNvGpuThunkImpl::apply: error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
@@ -5336,7 +5338,7 @@ impl ThunkImpl for MemcpyNvgpuThunkImpl {
       let ret = gpu.compute.sync();
       match ret {
         Err(e) => {
-          println!("DEBUG: MemcpyNvgpuThunkImpl::apply: sync error: {:?}", e);
+          println!("DEBUG: MemcpyNvGpuThunkImpl::apply: sync error: {:?}", e);
           Err(ThunkErr::Failure)
         }
         Ok(_) => Ok(())
