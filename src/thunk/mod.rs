@@ -1876,9 +1876,9 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
         for p in (pstart.to_unchecked() ..= pfin.to_unchecked()) {
           let p = PAddr::from_unchecked(p);
           let x = ctr.fresh_cel();
-          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object: const: {:?} {:?}", p, x); }
-          // FIXME: futhark consts should be marked pin.
+          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object: const: {:?} -> {:?}", x, p); }
           TL_PCTX.with(|pctx| {
+            pctx.pin(p);
             // FIXME: the type of the constant could probably be inferred,
             // but easier to defer it until unification.
             let ty = CellType::top();
@@ -2048,9 +2048,9 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         for p in (pstart.to_unchecked() ..= pfin.to_unchecked()) {
           let p = PAddr::from_unchecked(p);
           let x = ctr.fresh_cel();
-          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: const: {:?} {:?}", p, x); }
-          // FIXME: futhark consts should be marked pin.
+          if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: const: {:?} -> {:?}", x, p); }
           TL_PCTX.with(|pctx| {
+            pctx.pin(p);
             // FIXME: the type of the constant could probably be inferred,
             // but easier to defer it until unification.
             let ty = CellType::top();
@@ -2962,10 +2962,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                           prev_addr, addr);
                       }
                       if prev_addr != addr {
-                        match gpu.page_map.release(prev_addr) {
-                          None => unimplemented!(),
-                          Some(_) => {}
-                        }
+                        let _ = gpu.page_map.release(prev_addr);
                       }
                     }
                   }
@@ -3750,8 +3747,8 @@ impl FutharkThunkImpl<CudaBackend> {
                                 } else {
                                   unimplemented!();
                                 }
-                                // FIXME: release addr.
-                                //let _ = pctx.release(addr);
+                                gpu.compute.sync().unwrap();
+                                pctx.release(addr);
                               } else {
                                 assert_eq!(dst_dptr, out_dptr);
                               }
@@ -3768,7 +3765,7 @@ impl FutharkThunkImpl<CudaBackend> {
                               prev_addr, addr);
                           }
                           if prev_addr != addr {
-                            match gpu.mem_pool.try_free(prev_addr) {
+                            match gpu.mem_pool.release(prev_addr) {
                               None => unimplemented!(),
                               Some(_) => {}
                             }
@@ -3810,6 +3807,12 @@ impl FutharkThunkImpl<CudaBackend> {
                   out_dptr, new_dptr);
               }
             }
+            let mut tmp_pin_list = gpu.mem_pool.tmp_pin_list.borrow_mut();
+            for &p in tmp_pin_list.iter() {
+              gpu.mem_pool.unpin(p);
+            }
+            tmp_pin_list.clear();
+            drop(tmp_pin_list);
             let mut tmp_freelist = gpu.mem_pool.tmp_freelist.borrow_mut();
             tmp_freelist.sort();
             loop {
@@ -3818,7 +3821,7 @@ impl FutharkThunkImpl<CudaBackend> {
                 Some(p) => p
               };
               assert!(p != p_out);
-              let icel = gpu.mem_pool.try_free(p).unwrap();
+              let icel = gpu.mem_pool.release(p).unwrap();
               assert!(InnerCell::root(&*icel).is_none());
               assert!(icel.back());
             }

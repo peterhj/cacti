@@ -5,7 +5,7 @@ use crate::clock::*;
 use crate::ctx::*;
 use crate::nd::{IRange};
 use crate::panick::*;
-use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg};
+use crate::pctx::{TL_PCTX, Locus, PMach, PAddr, MemReg, InnerCell_};
 use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::mmap::{MmapFileSlice};
@@ -2086,9 +2086,25 @@ impl PCell {
     panic!("bug");
   }*/
 
-  pub fn yeet(&mut self, /*root: CellPtr, q_clk: Clock,*/ q_locus: Locus, q_pmach: PMach) -> Option<(Clock, PAddr)> {
-    // FIXME
-    unimplemented!();
+  pub fn yeet(&mut self, /*root: CellPtr, q_clk: Clock,*/ q_locus: Locus, q_pmach: PMach) -> Option<(Clock, PAddr, Rc<dyn InnerCell_>)> {
+    let mut ret: Option<(Clock, PAddr, Rc<dyn InnerCell_>)> = None;
+    for (key, rep) in self.replicas.iter() {
+      let &(loc, pm) = key.as_ref();
+      if loc == q_locus && pm == q_pmach {
+        let addr = rep.addr.get();
+        if let Some((loc2, pm2, icel)) = TL_PCTX.with(|pctx| pctx.yeet(addr)) {
+          assert_eq!(loc, loc2);
+          assert_eq!(pm, pm2);
+          ret = Some((rep.clk.get(), addr, icel));
+          break;
+        }
+      }
+    }
+    if let Some(ret) = ret {
+      self.replicas.remove((q_locus, q_pmach));
+      return Some(ret);
+    }
+    return None;
   }
 
   pub fn _lookup(&self, q_locus: Locus, q_pmach: PMach) -> Option<&PCellReplica> {
@@ -2218,9 +2234,7 @@ impl PCell {
           if TL_PCTX.with(|pctx| {
             pctx.lookup_pm(pm, addr).is_some()
           }) {
-            if TL_PCTX.with(|pctx| {
-              !pctx.lookup_cow(addr)
-            }) {
+            if TL_PCTX.with(|pctx| !pctx.lookup_cow(addr)) {
               return Some((pm, addr));
             }
           } else {

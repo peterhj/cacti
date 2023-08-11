@@ -42,6 +42,8 @@ impl Default for CtxCfg {
       swapfile_cap:     Cell::new(0),
       gpu_reserve:      Cell::new(9001),
       gpu_workspace:    Cell::new(111),
+      //gpu_reserve:      Cell::new(901),
+      //gpu_workspace:    Cell::new(11),
       _seal:            Cell::new(false),
     }
   }
@@ -169,11 +171,14 @@ impl Ctx {
                 match e.cel_ {
                   &Cell_::Phy(.., ref pcel) => {
                     for (_, rep) in pcel.replicas.iter() {
-                      match pctx.release(rep.addr.get()) {
-                        None => {}
-                        Some(icel) => {
-                          //assert_eq!(icel.root(), Some(xroot));
-                          f = true;
+                      let addr = rep.addr.get();
+                      if !pctx.pinned(addr) {
+                        match pctx.yeet(addr) {
+                          None => {}
+                          Some(icel) => {
+                            //assert_eq!(icel.root(), Some(xroot));
+                            f = true;
+                          }
                         }
                       }
                     }
@@ -1211,6 +1216,7 @@ pub enum CellName {
 pub enum Cell_ {
   Top(RefCell<CellState>, CellPtr),
   Phy(RefCell<CellState>, RefCell<CellClosure>, PCell),
+  //Phy(RefCell<CellState>, RefCell<CellClosure>, RefCell<PCell>),
   Cow(RefCell<CellState>, RefCell<CellClosure>, CowCell),
   Alias(CellAlias, CellPtr),
   Bot,
@@ -1223,7 +1229,6 @@ impl Cell_ {
       &Cell_::Phy(..) => CellName::Phy,
       &Cell_::Cow(..) => CellName::Cow,
       &Cell_::Alias(..) => CellName::Alias,
-      //&Cell_::VAlias(..) => CellName::VAlias,
       &Cell_::Bot => CellName::Bot,
     }
   }
@@ -1245,24 +1250,6 @@ impl Cell_ {
       _ => panic!("bug")
     }
   }
-
-  /*pub fn swap_in(&mut self, state: RefCell<CellState>, p: PCell) {
-    let mut ret = Cell_::Phy(state, p);
-    swap(self, &mut ret);
-    match ret {
-      Cell_::Bot => {}
-      _ => panic!("bug")
-    }
-  }
-
-  pub fn swap_out(&mut self) -> (RefCell<CellState>, PCell) {
-    let mut ret = Cell_::Bot;
-    swap(self, &mut ret);
-    match ret {
-      Cell_::Phy(state, p) => (state, p),
-      _ => panic!("bug")
-    }
-  }*/
 }
 
 /*pub enum MCell_ {
@@ -1273,74 +1260,6 @@ impl Cell_ {
   //Tup(RefCell<CellState>, MCellTup),
   //Set(RefCell<CellState>, MCellSet),
   //Map(RefCell<CellState>, MCellMap),
-}*/
-
-/*#[derive(Clone, Copy, Default)]
-#[repr(transparent)]
-pub struct CellEFlag {
-  bits: u8,
-}
-
-impl CellEFlag {
-  /*pub fn reset(&mut self) {
-    self.bits = 0;
-  }*/
-
-  pub fn mutex(&self) -> bool {
-    (self.bits & 1) != 0
-  }
-
-  pub fn set_mutex(&mut self) {
-    self.bits |= 1;
-  }
-
-  pub fn rwlock(&self) -> bool {
-    (self.bits & 2) != 0
-  }
-
-  pub fn set_rwlock(&mut self) {
-    self.bits |= 2;
-  }
-
-  pub fn read(&self) -> bool {
-    (self.bits & 4) != 0
-  }
-
-  pub fn set_read(&mut self) {
-    self.bits |= 4;
-  }
-
-  /*pub fn opaque(&self) -> bool {
-    (self.bits & 0x10) != 0
-  }
-
-  pub fn set_opaque(&mut self) {
-    self.bits |= 0x10;
-  }
-
-  pub fn profile(&self) -> bool {
-    (self.bits & 0x20) != 0
-  }
-
-  pub fn set_profile(&mut self) {
-    self.bits |= 0x20;
-  }
-
-  pub fn trace(&self) -> bool {
-    (self.bits & 0x40) != 0
-  }
-
-  pub fn set_trace(&mut self) {
-    self.bits |= 0x40;
-  }
-
-  pub fn break_(&self) -> bool {
-    (self.bits & 0x80) != 0
-  }
-
-  pub fn set_break(&mut self) {
-    self.bits |= 0x80;
-  }*/
 }*/
 
 pub struct CellEnvEntry {

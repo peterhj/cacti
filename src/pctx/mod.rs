@@ -13,7 +13,7 @@ use std::any::{Any};
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
 use std::cmp::{max, min};
-use std::convert::{TryFrom};
+use std::convert::{TryFrom, TryInto};
 use std::ffi::{c_void};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 use std::io::{Read};
@@ -338,7 +338,7 @@ impl PCtx {
   pub fn alloc(&self, ty: &CellType, locus: Locus, pmach: PMach) -> PAddr {
     match pmach {
       PMach::Swap => {
-        // FIXME
+        // FIXME: this can only alloc cow.
         unimplemented!();
         /*let addr = match self.swap.try_alloc(&self.ctr, ty, locus) {
           Err(e) => {
@@ -349,20 +349,41 @@ impl PCtx {
         };
         addr*/
       }
+      PMach::Smp => {
+        // FIXME
+        unimplemented!();
+      }
       #[cfg(not(feature = "nvgpu"))]
       PMach::NvGpu => {
         unimplemented!();
       }
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
-        let addr = match self.nvgpu.as_ref().unwrap().try_alloc(&self.ctr, ty, locus) {
-          Err(e) => {
-            println!("BUG:   PCtx::alloc: unimplemented error: {:?}", e);
-            panic!();
-          }
-          Ok(addr) => addr
-        };
-        addr
+        let gpu = self.nvgpu.as_ref().unwrap();
+        let mut retry = false;
+        'retry: loop {
+          let addr = match gpu.try_alloc(&self.ctr, ty, locus) {
+            Err(PMemErr::Oom) => {
+              if retry {
+                println!("ERROR:  PCtx::alloc: unrecoverable out-of-memory failure (nvgpu device memory)");
+                panic!();
+              }
+              if gpu.mem_pool.try_yeet_some(ty.packed_span_bytes().try_into().unwrap()).is_none() {
+                println!("ERROR:  PCtx::alloc: out-of-memory, yeet failure (nvgpu device memory)");
+                panic!();
+              }
+              retry = true;
+              continue 'retry;
+            }
+            Err(e) => {
+              println!("ERROR:  PCtx::alloc: unimplemented error: {:?} (locus={:?} pmach={:?})",
+                  e, locus, PMach::NvGpu);
+              panic!();
+            }
+            Ok(addr) => addr
+          };
+          return addr
+        }
       }
       _ => {
         println!("DEBUG: PCtx::alloc: {:?}", &self.lpmatrix);
@@ -387,6 +408,38 @@ impl PCtx {
     }
   }
 
+  pub fn retain(&self, addr: PAddr) {
+    self.swap.retain(addr);
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      gpu.retain(addr);
+    }
+    // TODO
+  }
+
+  pub fn pin(&self, addr: PAddr) {
+    self.swap.pin(addr);
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      gpu.pin(addr);
+    }
+    // TODO
+  }
+
+  pub fn pinned(&self, addr: PAddr) -> bool {
+    if self.swap.pinned(addr) {
+      return true;
+    }
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      if gpu.pinned(addr) {
+        return true;
+      }
+    }
+    // TODO
+    false
+  }
+
   pub fn release(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
     {
       let pm = PMach::Swap;
@@ -401,6 +454,30 @@ impl PCtx {
     if let Some(gpu) = self.nvgpu.as_ref() {
       let pm = PMach::NvGpu;
       match gpu.release(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    // TODO
+    None
+  }
+
+  pub fn unpin(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    {
+      let pm = PMach::Swap;
+      match self.swap.unpin(addr) {
+        None => {}
+        Some((loc, icel)) => {
+          return Some((loc, pm, icel));
+        }
+      }
+    }
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      let pm = PMach::NvGpu;
+      match gpu.unpin(addr) {
         None => {}
         Some((loc, icel)) => {
           return Some((loc, pm, icel));
@@ -791,8 +868,9 @@ pub trait InnerCell {
   //fn set_pin(&self, _flag: bool) { unimplemented!(); }
   fn tag(&self) -> Option<u32> { unimplemented!(); }
   fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
+  fn live(&self) -> bool { unimplemented!(); }
   fn retain(&self) { unimplemented!(); }
-  fn release(&self) -> bool { unimplemented!(); }
+  fn release(&self) { unimplemented!(); }
   fn pinned(&self) -> bool { unimplemented!(); }
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
@@ -814,8 +892,9 @@ pub trait InnerCell_ {
   //fn set_pin(&self, _flag: bool);
   fn tag(&self) -> Option<u32>;
   fn set_tag(&self, _tag: Option<u32>);
+  fn live(&self) -> bool;
   fn retain(&self);
-  fn release(&self) -> bool;
+  fn release(&self);
   fn pinned(&self) -> bool;
   fn pin(&self);
   fn unpin(&self);
@@ -868,11 +947,15 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     InnerCell::set_tag(self, tag)
   }
 
+  fn live(&self) -> bool {
+    InnerCell::live(self)
+  }
+
   fn retain(&self) {
     InnerCell::retain(self)
   }
 
-  fn release(&self) -> bool {
+  fn release(&self) {
     InnerCell::release(self)
   }
 

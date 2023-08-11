@@ -21,11 +21,11 @@ pub struct SwapCowMemCell {
   pub mem:  MmapFileSlice,
 }
 
-impl Drop for SwapCowMemCell {
+/*impl Drop for SwapCowMemCell {
   fn drop(&mut self) {
     //let _ = self.buf.take();
   }
-}
+}*/
 
 impl SwapCowMemCell {
   // TODO
@@ -81,6 +81,11 @@ impl InnerCell for SwapCowMemCell {
     }
   }*/
 
+  fn live(&self) -> bool {
+    let c = self.refc.get();
+    c > 0
+  }
+
   fn retain(&self) {
     let c = self.refc.get();
     if c >= u32::max_value() {
@@ -89,13 +94,12 @@ impl InnerCell for SwapCowMemCell {
     self.refc.set(c + 1);
   }
 
-  fn release(&self) -> bool {
+  fn release(&self) {
     let c = self.refc.get();
     if c <= 0 {
       panic!("bug");
     }
     self.refc.set(c - 1);
-    c <= 1
   }
 
   fn pinned(&self) -> bool {
@@ -205,10 +209,45 @@ impl SwapPCtx {
     Ok(cel)
   }
 
-  pub fn release(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
-    // FIXME: refcounted release.
+  pub fn retain(&self, addr: PAddr) {
+    match self.page_tab.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if cfg_debug() {
+          println!("DEBUG: SwapPCtx::retain: addr={:?}", addr);
+        }
+        InnerCell::retain(&**icel);
+      }
+    }
+  }
+
+  pub fn pin(&self, addr: PAddr) {
+    match self.page_tab.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if cfg_debug() {
+          println!("DEBUG: SwapPCtx::pin: addr={:?}", addr);
+        }
+        InnerCell::pin(&**icel);
+      }
+    }
+  }
+
+  pub fn pinned(&self, addr: PAddr) -> bool {
+    match self.page_tab.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if InnerCell::pinned(&**icel) {
+          return true;
+        }
+      }
+    }
+    false
+  }
+
+  pub fn _yeet(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
     if cfg_debug() {
-      println!("DEBUG: SwapPCtx::release: addr={:?}", addr);
+      println!("DEBUG: SwapPCtx::_yeet: addr={:?}", addr);
     }
     match self.page_tab.borrow_mut().remove(&addr) {
       None => None,
@@ -216,13 +255,46 @@ impl SwapPCtx {
     }
   }
 
+  pub fn release(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
+    match self.page_tab.borrow().get(&addr) {
+      None => return None,
+      Some(icel) => {
+        if cfg_debug() {
+          println!("DEBUG: SwapPCtx::release: addr={:?}", addr);
+        }
+        InnerCell::release(&**icel);
+        if InnerCell::live(&**icel) || InnerCell::pinned(&**icel) {
+          return None;
+        }
+      }
+    }
+    self._yeet(addr)
+  }
+
+  pub fn unpin(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
+    match self.page_tab.borrow().get(&addr) {
+      None => return None,
+      Some(icel) => {
+        if cfg_debug() {
+          println!("DEBUG: SwapPCtx::unpin: addr={:?}", addr);
+        }
+        InnerCell::unpin(&**icel);
+        if InnerCell::live(&**icel) || InnerCell::pinned(&**icel) {
+          return None;
+        }
+      }
+    }
+    self._yeet(addr)
+  }
+
   pub fn yeet(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {
+    match self.page_tab.borrow().get(&addr) {
+      None => return None,
+      Some(_) => {}
+    }
     if cfg_debug() {
       println!("DEBUG: SwapPCtx::yeet: addr={:?}", addr);
     }
-    match self.page_tab.borrow_mut().remove(&addr) {
-      None => None,
-      Some(icel) => Some((Locus::Mem, icel))
-    }
+    self._yeet(addr)
   }
 }
