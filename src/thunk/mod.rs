@@ -2859,12 +2859,17 @@ impl FutharkThunkImpl<MulticoreBackend> {
             let root_ty = match env._lookup_mut_ref_(out) {
               Err(_) => panic!("bug"),
               Ok(e) => {
+                assert_eq!(&e.ty, e.root_ty);
                 match e.cel_ {
                   &mut Cell_::Top(ref state, optr) => {
                     assert_eq!(e.root(), optr);
                     let state = RefCell::new(state.borrow().clone());
                     let clo = RefCell::new(CellClosure::default());
-                    *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
+                    let mut pcel = PCell::new(optr, e.root_ty.clone());
+                    pctx.retain(addr);
+                    pcel.push_noroot(oclk, Locus::Mem, PMach::NvGpu, addr);
+                    *e.cel_ = Cell_::Phy(state, clo, pcel);
+                    // *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
                     f = true;
                     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out: const cow {:?} --> {:?} -> {:?} -> {:?}", out, optr, k.1, addr); }
                     e.root_ty.clone()
@@ -2891,16 +2896,6 @@ impl FutharkThunkImpl<MulticoreBackend> {
         }
       }
       if !f {
-        /*let oroot = match env._lookup_ref_(out) {
-          Err(_) => panic!("bug"),
-          Ok(e) => e.root()
-        };
-        let oroot_ty = match env._lookup_ref_(oroot) {
-          Err(_) => panic!("bug"),
-          Ok(e) => e.ty.clone()
-        };
-        // FIXME: the out and root types must be concordant.
-        assert_eq!(oroot_ty.span_bytes(), out_ty_[0].span_bytes());*/
         match env._lookup_mut_view(out) {
           Err(_) => panic!("bug"),
           Ok(e) => {
@@ -3636,12 +3631,17 @@ impl FutharkThunkImpl<CudaBackend> {
                 let root_ty = match env._lookup_mut_ref_(out) {
                   Err(_) => panic!("bug"),
                   Ok(e) => {
+                    assert_eq!(&e.ty, e.root_ty);
                     match e.cel_ {
                       &mut Cell_::Top(ref state, optr) => {
                         assert_eq!(e.root(), optr);
                         let state = RefCell::new(state.borrow().clone());
                         let clo = RefCell::new(CellClosure::default());
-                        *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
+                        let mut pcel = PCell::new(optr, e.root_ty.clone());
+                        pctx.retain(addr);
+                        pcel.push_noroot(oclk, Locus::VMem, PMach::NvGpu, addr);
+                        *e.cel_ = Cell_::Phy(state, clo, pcel);
+                        // *e.cel_ = Cell_::Cow(state, clo, CowCell{optr, pcel: *(k.1).as_ref(), pclk: Clock::default()});
                         f = true;
                         if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out: const cow {:?} --> {:?} -> {:?} -> {:?}", out, optr, k.1, addr); }
                         e.root_ty.clone()

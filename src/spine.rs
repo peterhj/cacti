@@ -1426,8 +1426,8 @@ impl Spine {
             // FIXME: want to put this logic after clock_sync_rec,
             // but fails the borrowchecker.
             match e.cel_ {
-              &Cell_::Phy(_, ref clo, _) |
-              &Cell_::Cow(_, ref clo, _) => {
+              &Cell_::Phy(_, ref clo, _) => {
+              //&Cell_::Cow(_, ref clo, _) => {}
                 clo.borrow_mut().init_once(next_clk, ThunkPtr::opaque());
               }
               _ => panic!("bug")
@@ -1710,8 +1710,8 @@ impl Spine {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
-                &Cell_::Phy(_, ref clo, _) |
-                &Cell_::Cow(_, ref clo, _) => {
+                &Cell_::Phy(_, ref clo, _) => {
+                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().init_once(xclk, th);
                 }
                 _ => panic!("bug")
@@ -1774,8 +1774,8 @@ impl Spine {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
-                &Cell_::Phy(_, ref clo, _) |
-                &Cell_::Cow(_, ref clo, _) => {
+                &Cell_::Phy(_, ref clo, _) => {
+                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().init_once(xclk, th);
                 }
                 _ => panic!("bug: Spine::_step: Apply: cel={:?}", e.cel_.name())
@@ -1833,8 +1833,8 @@ impl Spine {
             Err(_) => panic!("bug"),
             Ok(e) => {
               match e.cel_ {
-                &Cell_::Phy(_, ref clo, _) |
-                &Cell_::Cow(_, ref clo, _) => {
+                &Cell_::Phy(_, ref clo, _) => {
+                //&Cell_::Cow(_, ref clo, _) => {}
                   clo.borrow_mut().update(xclk, th);
                 }
                 _ => panic!("bug")

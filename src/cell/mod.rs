@@ -2043,6 +2043,14 @@ impl PCell {
     self._push(clk, locus, pmach, addr);
   }
 
+  pub fn push_noroot(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
+    match self.replicas.find((locus, pmach)) {
+      None => {}
+      Some(_) => panic!("bug")
+    }
+    self._push(clk, locus, pmach, addr);
+  }
+
   /*pub fn push_new_replica(&mut self, root: CellPtr, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
     self.push(root, clk, locus, pmach, addr)
   }*/
