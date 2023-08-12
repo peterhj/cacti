@@ -16,18 +16,22 @@ thread_local! {
 pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
-  pub vmem_limit: Option<()>,
-  pub virtualenv: bool,
+  pub mem_soft_limit: Option<()>,
+  pub mem_oom:    Option<()>,
+  pub vmem_soft_limit: Option<()>,
+  pub vmem_oom:   Option<()>,
   pub no_kcache:  bool,
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
   pub silent:     bool,
   pub debug_yeet: i8,
+  pub debug_mem_pool: i8,
   pub debug_initialize: i8,
   pub debug_accumulate: i8,
   pub debug_apply: i8,
   pub debug:      i8,
   pub devel_dump: bool,
+  //pub virtualenv: bool,
 }
 
 impl CfgEnv {
@@ -75,13 +79,22 @@ impl CfgEnv {
       ps
     }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
     )));
-    let vmem_limit = var("CACTI_VMEM_LIMIT").map(|s| {
+    let mem_soft_limit = var("CACTI_MEM_SOFT_LIMIT").map(|s| {
       // FIXME
       ()
     }).ok();
-    let virtualenv = var("VIRTUAL_ENV")
-      .map(|_| true)
-      .unwrap_or_else(|_| false);
+    let mem_oom = var("CACTI_MEM_OOM").map(|s| {
+      // FIXME
+      ()
+    }).ok();
+    let vmem_soft_limit = var("CACTI_VMEM_SOFT_LIMIT").map(|s| {
+      // FIXME
+      ()
+    }).ok();
+    let vmem_oom = var("CACTI_VMEM_OOM").map(|s| {
+      // FIXME
+      ()
+    }).ok();
     let no_kcache = var("CACTI_NO_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -95,6 +108,12 @@ impl CfgEnv {
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let debug_yeet = var("CACTI_DEBUG_YEET")
+      .map(|s| match s.parse() {
+        Ok(d) => d,
+        Err(_) => 1
+      })
+      .unwrap_or_else(|_| 0);
+    let debug_mem_pool = var("CACTI_DEBUG_MEM_POOL")
       .map(|s| match s.parse() {
         Ok(d) => d,
         Err(_) => 1
@@ -127,6 +146,9 @@ impl CfgEnv {
     let devel_dump = var("CACTI_DEVEL_DUMP")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    /*let virtualenv = var("VIRTUAL_ENV")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);*/
     if !silent && debug >= 0 {
       for p in cabalpath.iter() {
         println!("INFO:   cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
@@ -140,18 +162,22 @@ impl CfgEnv {
     CfgEnv{
       cabalpath,
       cudaprefix,
-      vmem_limit,
-      virtualenv,
+      mem_soft_limit,
+      mem_oom,
+      vmem_soft_limit,
+      vmem_oom,
       no_kcache,
       futhark_pedantic,
       futhark_trace,
       silent,
       debug_yeet,
+      debug_mem_pool,
       debug_initialize,
       debug_accumulate,
       debug_apply,
       debug,
       devel_dump,
+      //virtualenv,
     }
   }
 }

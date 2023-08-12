@@ -368,10 +368,12 @@ impl PCtx {
                 println!("ERROR:  PCtx::alloc: unrecoverable out-of-memory failure (nvgpu device memory)");
                 panic!();
               }
-              let req_sz: usize = ty.packed_span_bytes().try_into().unwrap();
-              if gpu.mem_pool.try_yeet_some(req_sz).is_none() {
-                println!("ERROR:  PCtx::alloc: out-of-memory, yeet failure (nvgpu device memory): req sz={:?}", req_sz);
-                panic!();
+              if locus == Locus::VMem {
+                let req_sz: usize = ty.packed_span_bytes().try_into().unwrap();
+                if gpu.mem_pool.try_yeet_some(req_sz).is_none() {
+                  println!("ERROR:  PCtx::alloc: out-of-memory, yeet failure (nvgpu device memory): req sz={:?}", req_sz);
+                  panic!();
+                }
               }
               retry = true;
               continue 'retry;

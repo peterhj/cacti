@@ -22,6 +22,7 @@ dependencies = [
  "cacti_cfg_env",
  "cacti_gpu_cu_ffi",
  "cacti_smp_c_ffi",
+ "cellsplit",
  "futhark_ffi",
  "glob",
  "half",
@@ -30,7 +31,6 @@ dependencies = [
  "once_cell",
  "repugnant_pickle",
  "rustc_serialize",
- "safetensor_serialize",
  "sentencepiece_ffi",
  "smol_str",
 ]
@@ -65,6 +65,13 @@ dependencies = [
 [[package]]
 name = "cc"
 version = "1.0.79"
+
+[[package]]
+name = "cellsplit"
+version = "0.1.0-devel"
+dependencies = [
+ "rustc_serialize",
+]
 
 [[package]]
 name = "cfg_if"
@@ -151,13 +158,6 @@ name = "rustc_serialize"
 version = "0.4.0-devel"
 dependencies = [
  "smol_str",
-]
-
-[[package]]
-name = "safetensor_serialize"
-version = "0.3.2"
-dependencies = [
- "rustc_serialize",
 ]
 
 [[package]]

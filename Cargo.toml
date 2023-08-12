@@ -38,6 +38,7 @@ byteorder = { path = "../byteorder" }
 cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
+cellsplit = { path = "../cellsplit" }
 #fast_float = { path = "../fast_float" }
 futhark_ffi = { path = "../futhark_ffi" }
 #futhark_syntax = { path = "../futhark_syntax" }
@@ -49,7 +50,7 @@ once_cell = { path = "../once_cell" }
 repugnant_pickle = { path = "../repugnant_pickle" }
 rustc_serialize = { path = "../rustc_serialize" }
 #ryu = { path = "../ryu" }
-safetensor_serialize = { path = "../safetensor_serialize" }
+#safetensor_serialize = { path = "../safetensor_serialize" }
 sentencepiece_ffi = { path = "../sentencepiece_ffi" }
 smol_str = { path = "../smol_str", default-features = false }
 
