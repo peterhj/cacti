@@ -1146,6 +1146,13 @@ pub enum NvGpuMemPoolReq {
 }
 
 impl NvGpuMemPoolReq {
+  pub fn is_oom(&self) -> bool {
+    match self {
+      NvGpuMemPoolReq::Oom => true,
+      _ => false
+    }
+  }
+
   pub fn size(&self) -> usize {
     match self {
       NvGpuMemPoolReq::Oom => panic!("bug"),
@@ -1815,38 +1822,89 @@ impl NvGpuMemPool {
         self.yeet_scanner.set(0);
       }
       let celfront = ctx.ctr.celfront.borrow();
-      let mut env = ctx.env.borrow_mut();
+      if _cfg_debug_yeet() {
+        println!("DEBUG:  NvGpuMemPool::try_yeet_some: old usage: front={} free={} back={} total={}",
+            self.front_cursor.get(),
+            self.free_size.get(),
+            self.back_cursor.get(),
+            self.front_sz,
+        );
+        println!("DEBUG:  NvGpuMemPool::try_yeet_some: query sz={} search start={} end={}",
+            query_sz, self.yeet_scanner.get(), celfront.len());
+      }
+      let mut aggro = false;
+      'retry: loop {
+      let mut yeet_ct = 0;
+      let env = ctx.env.borrow();
       for p in self.yeet_scanner.get() .. celfront.len() {
         let x = celfront[p];
-        match env._lookup_ref_(x) {
-          Err(_) => {}
-          Ok(e) => {
+        match env._try_lookup_ref_(x) {
+          None | Some(Err(_)) => {}
+          Some(Ok(e)) => {
             let root = e.root();
+            if e.root_ty.is_top() {
+              continue;
+            }
             let root_sz: usize = e.root_ty.packed_span_bytes().try_into().unwrap();
-            if root_sz < query_sz {
+            if !aggro && root_sz < query_sz {
               continue;
             }
             let mut cel_ = e.cel_.borrow_mut();
             match &mut *cel_ {
               &mut Cell_::Phy(ref state, .., ref mut pcel) => {
+                if _cfg_debug_yeet() {
+                  println!("DEBUG:  NvGpuMemPool::try_yeet_some:   found phy: p={} root={:?} sz={}", p, root, root_sz);
+                }
+                if pcel.ogty.is_top() {
+                  // FIXME: this is likely an auto const cell, created by a Futhark thunk;
+                  // now that we have cow inner cells, just remove these...
+                  if _cfg_debug_yeet() {
+                    println!("DEBUG:  NvGpuMemPool::try_yeet_some:     og top, continue");
+                  }
+                  continue;
+                }
                 let cur_clk = state.borrow().clk;
-                // FIXME: need reentrant pcel here (i.e. pcel.try_borrow_mut()).
                 match pcel.lookup(Locus::VMem, PMach::NvGpu) {
                   None => {
+                    if _cfg_debug_yeet() {
+                      println!("DEBUG:  NvGpuMemPool::try_yeet_some:     nonresident 1, continue");
+                    }
                     continue;
                   }
                   Some((prev_clk, prev_addr)) => {
+                    if prev_clk > cur_clk {
+                      println!("WARNING:NvGpuMemPool::try_yeet_some: p={} x={:?} root={:?} cur clk={:?} prev clk={:?} addr={:?}",
+                          p, x, root, cur_clk, prev_clk, prev_addr);
+                      pcel._dump_replicas();
+                      panic!("bug");
+                    }
                     if self.lookup_(prev_addr).is_none() {
+                      if _cfg_debug_yeet() {
+                        println!("DEBUG:  NvGpuMemPool::try_yeet_some:     nonresident 2, continue");
+                      }
                       pcel.replicas.remove((Locus::VMem, PMach::NvGpu));
                       continue;
                     }
-                    if prev_clk > cur_clk {
-                      panic!("bug");
+                    if self.pinned(prev_addr) {
+                      if _cfg_debug_yeet() {
+                        println!("DEBUG:  NvGpuMemPool::try_yeet_some:     pinned, continue");
+                      }
+                      continue;
                     }
                     if prev_clk < cur_clk {
                       let _ = self.yeet(prev_addr).unwrap();
-                      self.yeet_scanner.set(p + 1);
-                      return Some(());
+                      yeet_ct += 1;
+                      if !self.try_pre_alloc(query_sz).is_oom() {
+                        println!("DEBUG:  NvGpuMemPool::try_yeet_some: success 1");
+                        println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+                            self.front_cursor.get(),
+                            self.free_size.get(),
+                            self.back_cursor.get(),
+                            self.front_sz,
+                        );
+                        self.yeet_scanner.set(p + 1);
+                        return Some(());
+                      }
                     }
                     match pcel.find_any_other(cur_clk, Locus::VMem, PMach::NvGpu) {
                       Some((o_loc, _, _)) => {
@@ -1864,10 +1922,23 @@ impl NvGpuMemPool {
                         assert_eq!(prev_clk, prev_clk2);
                         assert_eq!(prev_addr, prev_addr2);
                         /*let _ = self.yeet(prev_addr).unwrap();*/
-                        self.yeet_scanner.set(p + 1);
-                        return Some(());
+                        yeet_ct += 1;
+                        if !self.try_pre_alloc(query_sz).is_oom() {
+                          println!("DEBUG:  NvGpuMemPool::try_yeet_some: success 2");
+                          println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+                              self.front_cursor.get(),
+                              self.free_size.get(),
+                              self.back_cursor.get(),
+                              self.front_sz,
+                          );
+                          self.yeet_scanner.set(p + 1);
+                          return Some(());
+                        }
                       }
                     }
+                    /*if !aggro {
+                      unreachable!();
+                    }*/
                   }
                 }
               }
@@ -1878,10 +1949,41 @@ impl NvGpuMemPool {
           }
         }
       }
+      if aggro && yeet_ct == 0 {
+        if _cfg_debug_yeet() {
+          println!("DEBUG:  NvGpuMemPool::try_yeet_some: failure 1");
+          println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+              self.front_cursor.get(),
+              self.free_size.get(),
+              self.back_cursor.get(),
+              self.front_sz,
+          );
+        }
+        self.yeet_scanner.set(celfront.len());
+        return None;
+      }
+      aggro = true;
+      self.yeet_scanner.set(0);
+      }
+      if _cfg_debug_yeet() {
+        println!("DEBUG:  NvGpuMemPool::try_yeet_some: failure 2");
+        println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+            self.front_cursor.get(),
+            self.free_size.get(),
+            self.back_cursor.get(),
+            self.front_sz,
+        );
+      }
       self.yeet_scanner.set(celfront.len());
       None
     })
   }
+}
+
+pub fn _cfg_debug_yeet() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && (cfg.debug >= 1 || cfg.debug_yeet >= 1)
+  })
 }
 
 pub extern "C" fn tl_pctx_nvgpu_mem_alloc_hook(ptr: *mut *mut c_void, sz: usize, raw_tag: *const c_char) -> c_int {
@@ -1990,18 +2092,16 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
         let req = gpu.mem_pool.try_pre_alloc(sz);
         (req, None)
       } else {
-        unsafe {
-          let ctag = ctag.unwrap();
-          if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook: sz={} ctag=\"{}\"",
-              sz,
-              safe_ascii(ctag.to_bytes()),
-          ); }
-          let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
-          let mut unify = &mut *pctx.tagunify.borrow_mut();
-          unify.find(tag);
-          let req = gpu.mem_pool.try_pre_alloc_with_tag(sz, tag, unify);
-          (req, Some(tag))
-        }
+        let ctag = ctag.unwrap();
+        if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_alloc_hook: sz={} ctag=\"{}\"",
+            sz,
+            safe_ascii(ctag.to_bytes()),
+        ); }
+        let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
+        let mut unify = &mut *pctx.tagunify.borrow_mut();
+        unify.find(tag);
+        let req = gpu.mem_pool.try_pre_alloc_with_tag(sz, tag, unify);
+        (req, Some(tag))
       };
       match req {
         NvGpuMemPoolReq::Oom => {

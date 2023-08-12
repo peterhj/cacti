@@ -1430,8 +1430,9 @@ pub type CellDerefView<'a> = CellDerefResult<CellRef_<'a, CellView>>;
 pub enum CellDerefErr {
   MissingRoot,
   Missing,
-  Read,
-  Write,
+  Reentrant,
+  //Read,
+  //Write,
   View,
   Bot,
 }
@@ -1615,6 +1616,83 @@ impl CtxEnv {
             _ => unimplemented!()
           }
         }
+      }
+    }
+  }
+
+  pub fn _try_lookup_ref_(&self, query: CellPtr) -> Option<CellDerefPtr> {
+    let (ty, stablect) = match self.celtab.get(&query) {
+      None => return Some(Err(CellDerefErr::Missing)),
+      Some(e) => {
+        let cel_ = match e.cel_.try_borrow() {
+          Err(_) => return None,
+          Ok(cel_) => cel_
+        };
+        match &*cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(query, optr);
+          }
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(query, cel.optr);
+          }
+          &Cell_::Alias(..) => {}
+          &Cell_::Bot => {
+            return Some(Err(CellDerefErr::Bot));
+          }
+          _ => unimplemented!()
+        }
+        match &*cel_ {
+          &Cell_::Top(..) |
+          &Cell_::Phy(..) => {
+            return Some(Ok(CellRef_{
+              ref_: query,
+              root_ty: &e.ty,
+              ty: &e.ty,
+              stablect: e.stablect.get(),
+              cel_: &e.cel_,
+            }));
+          }
+          &Cell_::Alias(..) => {}
+          _ => unreachable!()
+        }
+        (&e.ty, e.stablect.get())
+      }
+    };
+    let root = match self._probe_ref(query) {
+      Err(e) => return Some(Err(e)),
+      Ok(root) => root
+    };
+    match self.celtab.get(&root) {
+      None => return Some(Err(CellDerefErr::MissingRoot)),
+      Some(e) => {
+        let cel_ = e.cel_.borrow();
+        match &*cel_ {
+          &Cell_::Top(.., optr) => {
+            assert_eq!(root, optr);
+          }
+          &Cell_::Phy(.., ref cel) => {
+            assert_eq!(root, cel.optr);
+          }
+          &Cell_::Alias(..) => {
+            panic!("bug");
+          }
+          &Cell_::Bot => {
+            return Some(Err(CellDerefErr::Bot));
+          }
+          _ => unimplemented!()
+        }
+        // FIXME: type compat.
+        if e.ty.dtype != Dtype::_Top {
+          assert_eq!(ty.dtype.size_bytes(), e.ty.dtype.size_bytes());
+          assert!(ty.shape_compat(&e.ty) != ShapeCompat::Incompat);
+        }
+        Some(Ok(CellRef_{
+          ref_: root,
+          root_ty: &e.ty,
+          ty,
+          stablect,
+          cel_: &e.cel_,
+        }))
       }
     }
   }

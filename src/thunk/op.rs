@@ -4155,7 +4155,7 @@ pub struct MatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl MatrixMulF16F32GpuThunkImpl {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter"); }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -4185,9 +4185,10 @@ impl MatrixMulF16F32GpuThunkImpl {
       }
       _ => unimplemented!()
     }
+    TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match env._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_ref_(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());
@@ -4242,7 +4243,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    let b_dptr = match env.pread_view(arg[0].0, arg[0].1, loc) {
+    let b_dptr = match ctx.env.borrow().pread_view(arg[0].0, arg[0].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(e.ty, &arg_ty_[0]);
@@ -4273,7 +4274,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       }
     };
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    let a_dptr = match env.pread_view(arg[1].0, arg[1].1, loc) {
+    let a_dptr = match ctx.env.borrow().pread_view(arg[1].0, arg[1].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(e.ty, &arg_ty_[1]);
@@ -4304,6 +4305,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       }
     };
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
+    let env = ctx.env.borrow();
     let c_dptr = match match mode {
       ThunkMode::Apply => env.pwrite_view(out, oclk, loc),
       ThunkMode::Accumulate |
@@ -4338,6 +4340,7 @@ impl MatrixMulF16F32GpuThunkImpl {
         }
       }
     };
+    drop(env);
     let b_gputy = match arg_ty_[0].dtype {
       Dtype::F32 => CUDA_R_32F,
       Dtype::F16 => CUDA_R_16F,
@@ -4424,21 +4427,22 @@ impl MatrixMulF16F32GpuThunkImpl {
       });
       Ok(())
     })
+    })
   }
 }
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::apply"); }
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, /*env,*/ spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::accumulate"); }
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, /*env,*/ spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
@@ -4762,7 +4766,7 @@ pub struct BlockMatrixMulF16F32GpuThunkImpl {
 
 #[cfg(feature = "nvgpu")]
 impl BlockMatrixMulF16F32GpuThunkImpl {
-  pub fn _enter(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
+  pub fn _enter(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock, mode: ThunkMode) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter"); }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -4792,9 +4796,10 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
       _ => unimplemented!()
     }
+    TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match env._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_ref_(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());
@@ -4867,7 +4872,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       gpu.device_locus()
     });
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[0]..."); }
-    match env.pread_view(arg[0].0, arg[0].1, loc) {
+    match ctx.env.borrow().pread_view(arg[0].0, arg[0].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(e.ty, &arg_ty_[0]);
@@ -4919,7 +4924,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: read arg[1]..."); }
-    match env.pread_view(arg[1].0, arg[1].1, loc) {
+    match ctx.env.borrow().pread_view(arg[1].0, arg[1].1, loc) {
       Err(_) => panic!("bug"),
       Ok(e) => {
         assert_eq!(e.ty, &arg_ty_[1]);
@@ -4971,6 +4976,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }
     }
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: write out..."); }
+    let env = ctx.env.borrow();
     match match mode {
       ThunkMode::Apply => env.pwrite_view(out, oclk, loc),
       ThunkMode::Accumulate |
@@ -5024,6 +5030,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
         }
       }
     }
+    drop(env);
     //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_a=[0x{:016x}]", self.tmp_a.borrow()[0]);
     //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_b=[0x{:016x}]", self.tmp_b.borrow()[0]);
     //println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: tmp_c=[0x{:016x}]", self.tmp_c.borrow()[0]);
@@ -5171,21 +5178,22 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       });
       Ok(())
     })
+    })
   }
 }
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for BlockMatrixMulF16F32GpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::apply"); }
     let mode = ThunkMode::Apply;
-    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, /*env,*/ spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 
-  fn accumulate(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn accumulate(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::accumulate"); }
     let mode = ThunkMode::Accumulate;
-    self._enter(ctr, env, spec_, param, arg, th, out, prev_oclk, oclk, mode)
+    self._enter(ctr, /*env,*/ spec_, param, arg, th, out, prev_oclk, oclk, mode)
   }
 }
 
@@ -5237,13 +5245,14 @@ pub struct MemcpyNvGpuThunkImpl;
 
 #[cfg(feature = "nvgpu")]
 impl ThunkImpl for MemcpyNvGpuThunkImpl {
-  fn apply(&self, ctr: &CtxCtr, env: &mut CtxEnv, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+  fn apply(&self, ctr: &CtxCtr, /*env: &CtxEnv,*/ spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
     //if cfg_debug() { println!("DEBUG: MemcpyNvGpuThunkImpl::apply"); }
     if cfg_debug() { println!("DEBUG: MemcpyNvGpuThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
     let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
+    TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match env._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_ref_(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());
@@ -5266,7 +5275,7 @@ impl ThunkImpl for MemcpyNvGpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       let loc = gpu.device_locus();
-      let src_dptr = match env.pread_view(arg[0].0, arg[0].1, loc) {
+      let src_dptr = match ctx.env.borrow().pread_view(arg[0].0, arg[0].1, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(e.ty, &arg_ty_[0]);
@@ -5294,7 +5303,7 @@ impl ThunkImpl for MemcpyNvGpuThunkImpl {
           }
         }
       };
-      let dst_dptr = match env.pwrite_view(out, oclk, loc) {
+      let dst_dptr = match ctx.env.borrow().pwrite_view(out, oclk, loc) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           assert_eq!(e.ty, &out_ty_);
@@ -5346,6 +5355,7 @@ impl ThunkImpl for MemcpyNvGpuThunkImpl {
       //let t1 = Stopwatch::tl_stamp();
       //println!("DEBUG: MemcpyNvpuThunkImpl::apply: OK elapsed: {:.06} s", t1 - t0);
       Ok(())
+    })
     })
   }
 }

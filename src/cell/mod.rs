@@ -542,17 +542,17 @@ pub trait CellDeref {
 }*/
 
 pub trait CellStoreTo {
-  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv);
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &CtxEnv);
 }
 
 /*impl<'a> CellStoreTo for &'a [u8] {
-  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv) {
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &CtxEnv) {
     unimplemented!();
   }
 }*/
 
 impl CellStoreTo for MmapFileSlice {
-  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &mut CtxEnv) {
+  fn _store_to(&self, dst: CellPtr, clk: Clock, env: &CtxEnv) {
     assert!(!dst.is_nil());
     match env._lookup_view(dst) {
       Err(_) => panic!("bug"),
@@ -2013,7 +2013,7 @@ impl PCell {
   }
 
   pub fn _dump_replicas(&self) {
-    print!("DEBUG: PCell::_dump_replicas: optr={:?} ogty={:?} reps=[", self.optr, &self.ogty);
+    print!("DEBUG:  PCell::_dump_replicas: optr={:?} ogty={:?} reps=[", self.optr, &self.ogty);
     for (i, (key, rep)) in self.replicas.iter().enumerate() {
       let &(loc, pm) = key.as_ref();
       let addr = rep.addr.get();

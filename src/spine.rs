@@ -1370,10 +1370,6 @@ impl Spine {
             if prev_clk >= next_clk {
               panic!("bug");
             } else if prev_clk < next_clk {
-              //e.state().flag.unset_seal();
-              // FIXME FIXME
-              //e.state().clk = next_clk;
-              // NB: clock_sync is _probably_ the right thing here.
               e.clock_sync_rec(prev_clk, next_clk, &*env);
             }
             let cel_ = e.cel_.borrow();
@@ -1389,7 +1385,7 @@ impl Spine {
       }
       SpineEntry::YieldSet(x, _xclk, loc) => {
         TL_CTX.with(|ctx| {
-          let mut env = ctx.env.borrow_mut();
+          let env = ctx.env.borrow();
         let ctlp = self.ctlp.get();
         let retp = if self.retp.get() == u32::max_value() { None } else { Some(self.retp.get()) };
         if cfg_debug() {
@@ -1454,9 +1450,6 @@ impl Spine {
               if prev_clk >= next_clk {
                 panic!("bug");
               } else if prev_clk < next_clk {
-                //e.state().flag.unset_seal();
-                // FIXME: probably should not clock_sync here.
-                //e.clock_sync_loc(loc, prev_clk, next_clk, env);
                 e.clock_sync(prev_clk, next_clk, &*env);
               }
               (prev_clk, next_clk)
@@ -1574,7 +1567,7 @@ impl Spine {
                   e.root()
                 }
               };
-              val._store_to(root, xclk, &mut *env);
+              val._store_to(root, xclk, &*env);
               match env._lookup_ref_(x) {
                 Err(CellDerefErr::View) => panic!("bug"),
                 Err(_) => panic!("bug"),
@@ -1628,9 +1621,9 @@ impl Spine {
       }
       SpineEntry::Initialize(x, _xclk, th) => {
         TL_CTX.with(|ctx| {
-          let mut env = ctx.env.borrow_mut();
+          //let env = ctx.env.borrow();
         // FIXME FIXME
-        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
+        let (xroot, prev_xclk, xclk) = match ctx.env.borrow()._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1642,9 +1635,7 @@ impl Spine {
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).init_once();
             assert!(prev_clk < next_clk);
-            //e.state().clk = next_clk;
-            // FIXME: probably should not clock_sync here.
-            e.clock_sync(prev_clk, next_clk, &*env);
+            e.clock_sync(prev_clk, next_clk, &*ctx.env.borrow());
             (root, prev_clk, next_clk)
           }
         };
@@ -1658,7 +1649,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.initialize(ctr, &mut *env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.initialize(ctr, /*&*env,*/ &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Initialize: thunk not implemented");
@@ -1670,7 +1661,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_view(x) {
+          match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               let cel_ = e.cel_.borrow();
@@ -1687,8 +1678,8 @@ impl Spine {
       }
       SpineEntry::Apply(x, _xclk, th) => {
         TL_CTX.with(|ctx| {
-          let mut env = ctx.env.borrow_mut();
-        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
+          //let env = ctx.env.borrow();
+        let (xroot, prev_xclk, xclk) = match ctx.env.borrow()._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1702,9 +1693,7 @@ impl Spine {
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).init_once();
             assert!(prev_clk < next_clk);
-            //e.state().clk = next_clk;
-            // FIXME: probably should not clock_sync here.
-            e.clock_sync(prev_clk, next_clk, &*env);
+            e.clock_sync(prev_clk, next_clk, &*ctx.env.borrow());
             (root, prev_clk, next_clk)
           }
         };
@@ -1722,7 +1711,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.apply(ctr, &mut *env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.apply(ctr, /*&*env,*/ &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Apply: thunk not implemented");
@@ -1734,7 +1723,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_view(x) {
+          match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               let cel_ = e.cel_.borrow();
@@ -1751,8 +1740,8 @@ impl Spine {
       }
       SpineEntry::Accumulate(x, _xclk, th) => {
         TL_CTX.with(|ctx| {
-          let mut env = ctx.env.borrow_mut();
-        let (xroot, prev_xclk, xclk) = match env._lookup_view(x) {
+          //let env = ctx.env.borrow();
+        let (xroot, prev_xclk, xclk) = match ctx.env.borrow()._lookup_view(x) {
           Err(_) => panic!("bug"),
           Ok(e) => {
             let root = e.root();
@@ -1765,9 +1754,7 @@ impl Spine {
             let prev_clk = e.state().clk;
             let next_clk = base_clk.max(prev_clk).update();
             assert!(prev_clk < next_clk);
-            //e.state().clk = next_clk;
-            // FIXME: probably should not clock_sync here.
-            e.clock_sync(prev_clk, next_clk, &*env);
+            e.clock_sync(prev_clk, next_clk, &*ctx.env.borrow());
             (root, prev_clk, next_clk)
           }
         };
@@ -1781,7 +1768,7 @@ impl Spine {
             None => panic!("bug"),
             Some(te) => te
           };
-          let ret = te.pthunk.accumulate(ctr, &mut *env, &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
+          let ret = te.pthunk.accumulate(ctr, /*&*env,*/ &tclo.param, &tclo.arg, th, x, prev_xclk, xclk, tclo.pmach);
           match ret {
             Err(ThunkErr::NotImpl) => {
               println!("ERROR: Spine::_step: Accumulate: thunk not implemented");
@@ -1793,7 +1780,7 @@ impl Spine {
             }
             Ok(_) => {}
           }
-          match env._lookup_view(x) {
+          match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
               let cel_ = e.cel_.borrow();
