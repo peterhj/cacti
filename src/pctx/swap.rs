@@ -144,6 +144,7 @@ impl InnerCell for SwapCowMemCell {
 pub struct SwapPCtx {
   pub page_tab: RefCell<HashMap<PAddr, Rc<SwapCowMemCell>>>,
   //pub page_idx: RefCell<HashMap<*mut c_void, PAddr>>,
+  pub usage:    Cell<usize>,
 }
 
 impl PCtxImpl for SwapPCtx {
@@ -170,6 +171,15 @@ impl SwapPCtx {
   pub fn new() -> SwapPCtx {
     SwapPCtx{
       page_tab: RefCell::new(HashMap::new()),
+      usage:    Cell::new(0),
+    }
+  }
+
+  pub fn _dump_usage(&self) {
+    if cfg_info() {
+      println!("INFO:   SwapPCtx::_dump_usage:  usage: total={}",
+          self.usage.get(),
+      );
     }
   }
 
@@ -206,6 +216,8 @@ impl SwapPCtx {
     InnerCell_::set_cow(&*cel, true);
     assert!(self.page_tab.borrow_mut().insert(addr, cel.clone()).is_none());
     //assert!(self.page_idx.borrow_mut().insert(cel.ptr, addr).is_none());
+    let sz = cel.mem.size_bytes();
+    self.usage.fetch_add(sz);
     Ok(cel)
   }
 
@@ -251,7 +263,11 @@ impl SwapPCtx {
     }
     match self.page_tab.borrow_mut().remove(&addr) {
       None => None,
-      Some(icel) => Some((Locus::Mem, icel))
+      Some(icel) => {
+        let sz = icel.mem.size_bytes();
+        self.usage.fetch_sub(sz);
+        Some((Locus::Mem, icel))
+      }
     }
   }
 

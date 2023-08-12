@@ -43,7 +43,7 @@ impl Default for CtxCfg {
       gpu_reserve:      Cell::new(9001),
       gpu_workspace:    Cell::new(111),
       //gpu_reserve:      Cell::new(901),
-      //gpu_workspace:    Cell::new(11),
+      //gpu_workspace:    Cell::new(1),
       _seal:            Cell::new(false),
     }
   }
@@ -155,8 +155,9 @@ impl Ctx {
     let mut free_ct = 0;
     TL_PCTX.with(|pctx| {
       if let Some(gpu) = pctx.nvgpu.as_ref() {
-        gpu._dump_info();
+        gpu._dump_usage();
       }
+      pctx.swap._dump_usage();
       for &x in self.ctr.celfront.borrow().iter() {
         let mut f = false;
         match env._lookup_view(x) {
@@ -199,8 +200,9 @@ impl Ctx {
         }
       }
       if let Some(gpu) = pctx.nvgpu.as_ref() {
-        gpu._dump_info();
+        gpu._dump_usage();
       }
+      pctx.swap._dump_usage();
     });
     drop(spine_env);
     if cfg_info() { println!("INFO:   Ctx::reset: gc:   free {} cells", free_ct); }

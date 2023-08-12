@@ -3879,10 +3879,11 @@ impl FutharkThunkImpl<CudaBackend> {
                 };
                 //gpu.mem_pool.release(tmp);
               }
-              // FIXME: could also relocate into a free region.
               let req = gpu.mem_pool._try_front_pre_alloc(o_query_sz);
               match req {
                 NvGpuMemPoolReq::Front{offset, next_offset} => {
+                  // NB: safe to unpin and release oaddr, as its region
+                  // is protected by the back alloc cursor.
                   let req_sz = next_offset - offset;
                   assert!(gpu.mem_pool.pinned(oaddr));
                   assert!(gpu.mem_pool.unpin(oaddr).is_none());

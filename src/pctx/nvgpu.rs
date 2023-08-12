@@ -170,7 +170,7 @@ pub struct NvGpuPCtx {
 
 impl Drop for NvGpuPCtx {
   fn drop(&mut self) {
-    self._dump_info();
+    self._dump_usage();
   }
 }
 
@@ -641,15 +641,15 @@ impl NvGpuPCtx {
     None
   }
 
-  pub fn _dump_info(&self) {
+  pub fn _dump_usage(&self) {
     if cfg_info() {
-    println!("INFO:   NvGpuPCtx::_dump_info: mem pool usage: front={} free={} back={} total={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool usage: front={} free={} back={} total={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.free_size.get(),
         self.mem_pool.back_cursor.get(),
         self.mem_pool.reserve_sz,
     );
-    println!("INFO:   NvGpuPCtx::_dump_info: page map usage: total={} page rounded={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: page map usage: total={} page rounded={}",
         self.page_map.usage.get(),
         self.page_map.pg_usage.get(),
     );
