@@ -16,6 +16,7 @@ thread_local! {
 pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
+  pub vmem_limit: Option<()>,
   pub virtualenv: bool,
   pub no_kcache:  bool,
   pub futhark_pedantic: bool,
@@ -74,6 +75,10 @@ impl CfgEnv {
       ps
     }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
     )));
+    let vmem_limit = var("CACTI_VMEM_LIMIT").map(|s| {
+      // FIXME
+      ()
+    }).ok();
     let virtualenv = var("VIRTUAL_ENV")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -129,10 +134,13 @@ impl CfgEnv {
       for p in cudaprefix.iter() {
         println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
+      // FIXME: format.
+      //println!("INFO:   cacti_cfg_env: CACTI_VMEM_LIMIT={}", _);
     }
     CfgEnv{
       cabalpath,
       cudaprefix,
+      vmem_limit,
       virtualenv,
       no_kcache,
       futhark_pedantic,

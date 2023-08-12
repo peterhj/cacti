@@ -101,8 +101,8 @@ pub fn ctx_cfg_set_gpu_workspace_mem_per_10k(m: u16) {
 }
 
 pub struct Ctx {
-  pub ctr:      CtxCtr,
   pub ctlstate: CtxCtlState,
+  pub ctr:      CtxCtr,
   pub env:      RefCell<CtxEnv>,
   pub thunkenv: RefCell<CtxThunkEnv>,
   pub spine:    Spine,
@@ -136,8 +136,8 @@ impl Ctx {
   pub fn new() -> Ctx {
     if cfg_debug() { println!("DEBUG: Ctx::new"); }
     Ctx{
-      ctr:      CtxCtr::new(),
       ctlstate: CtxCtlState::default(),
+      ctr:      CtxCtr::new(),
       env:      RefCell::new(CtxEnv::default()),
       thunkenv: RefCell::new(CtxThunkEnv::default()),
       spine:    Spine::default(),
