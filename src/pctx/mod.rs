@@ -370,8 +370,8 @@ impl PCtx {
               }
               if locus == Locus::VMem {
                 let req_sz: usize = ty.packed_span_bytes().try_into().unwrap();
-                if gpu.mem_pool.try_yeet_some(req_sz).is_none() {
-                  println!("ERROR:  PCtx::alloc: out-of-memory, yeet failure (nvgpu device memory): req sz={:?}", req_sz);
+                if gpu.mem_pool._try_soft_oom(req_sz).is_none() {
+                  println!("ERROR:  PCtx::alloc: out-of-memory, soft oom failure (nvgpu device memory): req sz={:?}", req_sz);
                   panic!();
                 }
               }

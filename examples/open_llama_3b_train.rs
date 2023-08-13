@@ -168,15 +168,15 @@ fn main() {
     /*sink.add(&out.out_lm_loss, out.out_lm_loss.type_().ones() * loss_scale);*/
     sink.add(&out.out_lm_loss, &in_.in_lm_loss_scale);
     let allsrc = CellMap::new();
-    allsrc.vadd(&param, &grad);
-    vjp(&allsrc, &sink);
+    for (p, g) in param.iter().zip(grad.iter()) {
+      allsrc.add(p, g);
+    }
+    allsrc.vjp(&sink);
     param_log2_hist.clear();
     param_nan_count.clear();
     grad_log2_hist.clear();
     grad_nan_count.clear();
     for (p, g) in param.iter().zip(grad.iter()) {
-      let p = *p.borrow();
-      let g = *g.borrow();
       if !(allsrc.get(p) == g) {
         println!("boot: WARNING: grad mismatch");
       }
@@ -367,9 +367,7 @@ fn main() {
       }
     }
     //println!("boot: inspect gradient");
-    for (((param, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
-      let p = *param.borrow();
-      let g = *g.borrow();
+    for (((p, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
       if !(allsrc.get(p) == g) {
         println!("boot: WARNING: grad mismatch");
         continue;
@@ -407,10 +405,10 @@ fn main() {
           h[0xff],
           nan,
           total,
-          inv_matches.get(param),
+          inv_matches.get(p),
       );
         println!("boot: param log2 hist: WARNING: fp blowup: label={:?}",
-            inv_matches.get(param),
+            inv_matches.get(p),
         );
       }
     }

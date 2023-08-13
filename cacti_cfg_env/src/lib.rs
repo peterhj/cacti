@@ -24,6 +24,7 @@ pub struct CfgEnv {
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
   pub silent:     bool,
+  pub verbose:    bool,
   pub debug_yeet: i8,
   pub debug_mem_pool: i8,
   pub debug_initialize: i8,
@@ -107,6 +108,9 @@ impl CfgEnv {
     let silent = var("CACTI_SILENT")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let verbose = var("CACTI_VERBOSE")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let debug_yeet = var("CACTI_DEBUG_YEET")
       .map(|s| match s.parse() {
         Ok(d) => d,
@@ -170,6 +174,7 @@ impl CfgEnv {
       futhark_pedantic,
       futhark_trace,
       silent,
+      verbose,
       debug_yeet,
       debug_mem_pool,
       debug_initialize,
@@ -191,6 +196,12 @@ pub fn cfg_devel_dump() -> bool {
 pub fn cfg_info() -> bool {
   TL_CFG_ENV.with(|cfg| {
     !cfg.silent && cfg.debug >= 0
+  })
+}
+
+pub fn cfg_verbose_info() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.verbose && cfg.debug >= 0
   })
 }
 

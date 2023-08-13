@@ -6,9 +6,11 @@ fi
 echo "- cacti: bootstrapping from git HEAD..."
 cacti_remote_prefix="https://git.sr.ht/~ptrj"
 echo "- cacti: cloning recursive dependencies via remote url ${cacti_remote_prefix}..."
+set -x
 git clone -b patch "${cacti_remote_prefix}/aho_corasick" ../aho_corasick
 git clone "${cacti_remote_prefix}/byteorder" ../byteorder
 git clone -b patch "${cacti_remote_prefix}/cc" ../cc
+git clone "${cacti_remote_prefix}/cellsplit" ../cellsplit
 git clone -b patch "${cacti_remote_prefix}/cfg_if" ../cfg_if
 git clone "${cacti_remote_prefix}/cmake" ../cmake
 git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast
@@ -28,12 +30,19 @@ git clone -b patch "${cacti_remote_prefix}/nom" ../nom
 git clone -b patch "${cacti_remote_prefix}/once_cell" ../once_cell
 git clone -b patch "${cacti_remote_prefix}/regex" ../regex
 git clone -b patch "${cacti_remote_prefix}/repugnant_pickle" ../repugnant_pickle
-git clone -b remaster "${cacti_remote_prefix}/rustc_serialize" ../rustc_serialize
-git clone "${cacti_remote_prefix}/ryu" ../ryu
-git clone -b patch "${cacti_remote_prefix}/safetensor_serialize" ../safetensor_serialize
+git clone -b patch "${cacti_remote_prefix}/rustc_serialize" ../rustc_serialize
+#git clone "${cacti_remote_prefix}/ryu" ../ryu
+#git clone -b patch "${cacti_remote_prefix}/safetensor_serialize" ../safetensor_serialize
 git clone -b patch --recurse-submodules "${cacti_remote_prefix}/sentencepiece_ffi" ../sentencepiece_ffi
 git clone -b patch "${cacti_remote_prefix}/smol_str" ../smol_str
 git clone -b patch "${cacti_remote_prefix}/zip" ../zip
+{ set +x;} 2>&-
+echo "- cacti: configuring cacti-futhark (note: this calls 'cabal update')..."
+set -x
+make -C ../futhark configure
+{ set +x;} 2>&-
 echo "- cacti: building and installing cacti-futhark to cabal bin path..."
+set -x
 make -C ../futhark install
+{ set +x;} 2>&-
 echo "- cacti: bootstrap complete."

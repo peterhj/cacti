@@ -27,10 +27,15 @@ codegen-units = 1
 incremental = false
 
 [features]
-default = ["gpu", "librarium"]
+default = [
+  "gpu",
+  "librarium",
+  "sentencepiece",
+]
 gpu = ["nvgpu"]
 nvgpu = ["cacti_gpu_cu_ffi"]
 librarium = []
+sentencepiece = ["librarium", "sentencepiece_ffi"]
 
 [dependencies]
 aho_corasick = { path = "../aho_corasick", default-features = false, features = ["std"] }
@@ -51,32 +56,15 @@ repugnant_pickle = { path = "../repugnant_pickle" }
 rustc_serialize = { path = "../rustc_serialize" }
 #ryu = { path = "../ryu" }
 #safetensor_serialize = { path = "../safetensor_serialize" }
-sentencepiece_ffi = { path = "../sentencepiece_ffi" }
+sentencepiece_ffi = { path = "../sentencepiece_ffi", optional = true }
 smol_str = { path = "../smol_str", default-features = false }
-
-#[dev-dependencies]
-#dessert = { path = "../dessert" }
 
 [[bin]]
 name = "inspect_pth"
 path = "tools/inspect_pth.rs"
 
-#[[bin]]
-#name = "boot"
-#path = "tools/boot.rs"
+# For internal development:
 
 #[[bin]]
-#name = "boot_array"
-#path = "tools/boot_array.rs"
-
-[[bin]]
-name = "boot_deploy"
-path = "tools/boot_deploy.rs"
-
-[[bin]]
-name = "boot_train"
-path = "tools/boot_train.rs"
-
-[[bin]]
-name = "gen_macros"
-path = "tools/gen_macros.rs"
+#name = "gen_macros"
+#path = "tools/gen_macros.rs"

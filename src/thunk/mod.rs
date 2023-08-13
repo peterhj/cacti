@@ -34,6 +34,8 @@ use futhark_ffi::{
   AbiScalar as FutAbiScalar,
   AbiSpace as FutAbiSpace,
   EntryAbi as FutEntryAbi,
+  types::MemFFI,
+  Array_,
   Array as FutArray,
   //FutharkFloatFormatter,
 };
@@ -1895,7 +1897,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
             });
           });
           TL_CTX.with(|ctx| {
-            consts.push((p, StableCell::retain(&*ctx.env.borrow(), x)));
+            consts.push((p, StableCell::_retain(&*ctx.env.borrow(), x)));
           });
           // FIXME: what else?
         }
@@ -2073,7 +2075,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
             });
           });
           TL_CTX.with(|ctx| {
-            consts.push((p, StableCell::retain(&*ctx.env.borrow(), x)));
+            consts.push((p, StableCell::_retain(&*ctx.env.borrow(), x)));
           });
           // FIXME: what else?
         }
@@ -3857,7 +3859,7 @@ impl FutharkThunkImpl<CudaBackend> {
                     tmp*/
                   }
                   NvGpuMemPoolReq::Oom(_) => {
-                    match gpu.mem_pool.try_yeet_some(o_query_sz) {
+                    match gpu.mem_pool._try_soft_oom(o_query_sz) {
                       None => {
                         println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: oom");
                         panic!();

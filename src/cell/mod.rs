@@ -17,15 +17,18 @@ use smol_str::{SmolStr};
 
 use std::borrow::{Borrow};
 use std::cell::{Cell, RefCell};
+use std::cmp::{Ordering};
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::hash::{Hash, Hasher};
 use std::mem::{align_of, size_of, swap};
 use std::ops::{Deref, Neg};
 use std::rc::{Rc, Weak};
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 use std::str::{FromStr};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+//#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy)]
 #[repr(transparent)]
 pub struct CellPtr {
   pub raw_: i64,
@@ -58,6 +61,12 @@ impl AsRef<CellPtr> for CellPtr {
 impl CellDeref for CellPtr {
   fn _deref(&self) -> CellPtr {
     *self
+  }
+}
+
+impl<'a> CellDeref for &'a CellPtr {
+  fn _deref(&self) -> CellPtr {
+    **self
   }
 }
 
@@ -103,7 +112,33 @@ impl CellPtr {
   }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+impl<R: ?Sized + CellDeref> PartialEq<R> for CellPtr {
+  fn eq(&self, rhs: &R) -> bool {
+    self.raw_.eq(&rhs._deref().raw_)
+  }
+}
+
+impl Eq for CellPtr {}
+
+impl<R: ?Sized + CellDeref> PartialOrd<R> for CellPtr {
+  fn partial_cmp(&self, rhs: &R) -> Option<Ordering> {
+    Some(self.raw_.cmp(&rhs._deref().raw_))
+  }
+}
+
+impl Ord for CellPtr {
+  fn cmp(&self, rhs: &CellPtr) -> Ordering {
+    self.partial_cmp(rhs).unwrap()
+  }
+}
+
+impl Hash for CellPtr {
+  fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.raw_.hash(hasher);
+  }
+}
+
+//#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct StableCell {
   pub ptr_: CellPtr,
@@ -148,13 +183,13 @@ impl Deref for StableCell {
   }
 }
 
-impl<'a> CellDeref for &'a StableCell {
+impl CellDeref for StableCell {
   fn _deref(&self) -> CellPtr {
     *self.as_ptr_ref()
   }
 }
 
-impl CellDeref for StableCell {
+impl<'a> CellDeref for &'a StableCell {
   fn _deref(&self) -> CellPtr {
     *self.as_ptr_ref()
   }
@@ -197,15 +232,19 @@ impl From<CellType> for StableCell {
 }
 
 impl StableCell {
-  pub fn retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
+  pub fn _retain(env: &CtxEnv, ptr: CellPtr) -> StableCell {
     assert!(!ptr.is_nil());
     env._retain_probe(ptr);
     StableCell{ptr_: ptr}
   }
 
-  pub fn new() -> StableCell {
-    let ty = CellType{shape: Vec::new(), dtype: Dtype::_Top};
-    ctx_insert(ty).into()
+  pub fn top() -> StableCell {
+    let ty = CellType::top();
+    TL_CTX.with(|ctx| {
+      let x = ctx.ctr.fresh_cel();
+      ctx.env.borrow_mut().insert_top(x, ty);
+      x.into()
+    })
   }
 
   pub fn scalar<D: TryInto<Dtype>>(dtype: D) -> StableCell {
@@ -214,7 +253,11 @@ impl StableCell {
       Err(_) => panic!("bug: StableCell::scalar: invalid dtype")
     };
     let ty = CellType{shape: Vec::new(), dtype};
-    ctx_insert(ty).into()
+    TL_CTX.with(|ctx| {
+      let x = ctx.ctr.fresh_cel();
+      ctx.env.borrow_mut().insert_top(x, ty);
+      x.into()
+    })
   }
 
   pub fn set_scalar<T: IntoScalarValExt>(value: T) -> StableCell {
@@ -228,10 +271,14 @@ impl StableCell {
       Err(_) => panic!("bug: StableCell::array: invalid dtype")
     };
     let ty = CellType{shape, dtype};
-    ctx_insert(ty).into()
+    TL_CTX.with(|ctx| {
+      let x = ctx.ctr.fresh_cel();
+      ctx.env.borrow_mut().insert_top(x, ty);
+      x.into()
+    })
   }
 
-  pub fn release(mut self, env: &CtxEnv) -> CellPtr {
+  pub fn _release(mut self, env: &CtxEnv) -> CellPtr {
     let mut ptr = CellPtr::nil();
     swap(&mut ptr, &mut self.ptr_);
     env._release_probe(ptr);
@@ -260,6 +307,32 @@ impl StableCell {
     // SAFETY: The following is safe as `StableCell` has the same
     // (transparent) repr as `CellPtr`.
     unsafe { &mut *((self as *mut StableCell) as *mut CellPtr) }
+  }
+}
+
+impl<R: ?Sized + CellDeref> PartialEq<R> for StableCell {
+  fn eq(&self, rhs: &R) -> bool {
+    self.ptr_.eq(&rhs._deref())
+  }
+}
+
+impl Eq for StableCell {}
+
+impl<R: ?Sized + CellDeref> PartialOrd<R> for StableCell {
+  fn partial_cmp(&self, rhs: &R) -> Option<Ordering> {
+    Some(self.ptr_.cmp(&rhs._deref()))
+  }
+}
+
+impl Ord for StableCell {
+  fn cmp(&self, rhs: &StableCell) -> Ordering {
+    self.partial_cmp(rhs).unwrap()
+  }
+}
+
+impl Hash for StableCell {
+  fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.ptr_.hash(hasher);
   }
 }
 
@@ -439,33 +512,44 @@ impl CellMap {
   }
 
   #[track_caller]
-  pub fn add<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: K, v: V) {
+  pub fn add<K: CellDeref, V: CellDeref>(&self, k: K, v: V) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
-      spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+      spine.add2(self.ptr_, k._deref(), v._deref());
     }))
   }
 
-  #[track_caller]
-  pub fn vadd<K: Borrow<CellPtr>, V: Borrow<CellPtr>>(&self, k: &[K], v: &[V]) {
+  /*#[track_caller]
+  pub fn vadd<K: CellDeref, V: CellDeref>(&self, k: &[K], v: &[V]) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       for (k, v) in k.iter().zip(v.iter()) {
-        spine.add2(self.ptr_, *k.borrow(), *v.borrow());
+        spine.add2(self.ptr_, k._deref(), v._deref());
       }
     }))
-  }
+  }*/
 
   #[track_caller]
-  pub fn get(&self, key: CellPtr) -> CellPtr {
+  pub fn get<K: CellDeref>(&self, key: K) -> CellPtr {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
+      let key = key._deref();
       let kclk = spine._version(key).unwrap_or_else(|| Clock::default());
       spine._get(self.as_ptr(), key, kclk).map(|(v, _)| v).unwrap_or_else(|| CellPtr::nil())
     }))
   }
 
   #[track_caller]
+  pub fn maybe_get<K: CellDeref>(&self, key: K) -> Option<CellPtr> {
+    let v = self.get(key);
+    if v.is_nil() {
+      None
+    } else {
+      Some(v)
+    }
+  }
+
+  /*#[track_caller]
   pub fn vget(&self, vkey: &[CellPtr]) -> Vec<CellPtr> {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let mut vval = Vec::with_capacity(vkey.len());
@@ -477,7 +561,7 @@ impl CellMap {
       }
       vval
     }))
-  }
+  }*/
 }
 
 enum _Void {}

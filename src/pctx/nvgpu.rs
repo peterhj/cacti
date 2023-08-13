@@ -1872,11 +1872,11 @@ impl NvGpuMemPool {
     self._yeet(addr)
   }
 
-  pub fn try_yeet_some(&self, query_sz: usize) -> Option<()> {
+  pub fn _try_soft_oom(&self, query_sz: usize) -> Option<()> {
     let req_sz = ((query_sz + ALLOC_ALIGN - 1) / ALLOC_ALIGN) * ALLOC_ALIGN;
     assert!(query_sz <= req_sz);
     TL_CTX.with(|ctx| {
-      let next_reset = ctx.ctr.reset.get();
+      let next_reset = ctx.spine.ctr.get();
       if self.yeet_reset.get() > next_reset {
         panic!("bug");
       } else if self.yeet_reset.get() < next_reset {
@@ -1885,17 +1885,17 @@ impl NvGpuMemPool {
       }
       let celfront = ctx.ctr.celfront.borrow();
       if _cfg_debug_yeet() {
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some: old usage: front={} free={} back={} total={}",
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom: old usage: front={} free={} back={} total={}",
             self.front_cursor.get(),
             self.free_size.get(),
             self.back_cursor.get(),
             self.front_sz,
         );
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some:   front prefix=0x{:016x}", self.front_cursor.get());
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some:   back  suffix=0x{:016x}", self.back_cursor.get());
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
-        println!("DEBUG:  NvGpuMemPool::try_yeet_some: query sz={} req sz={} search start={} end={}",
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom: query sz={} req sz={} search start={} end={}",
             query_sz, req_sz, self.yeet_scanner.get(), celfront.len());
       }
       let mut retry = false;
@@ -1921,13 +1921,13 @@ impl NvGpuMemPool {
             match &mut *cel_ {
               &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                 if _cfg_debug_yeet() {
-                  println!("DEBUG:  NvGpuMemPool::try_yeet_some:   found phy: p={} root={:?} sz={}", p, root, root_sz);
+                  println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   found phy: p={} root={:?} sz={}", p, root, root_sz);
                 }
                 if pcel.ogty.is_top() {
                   // FIXME: this is likely an auto const cell, created by a Futhark thunk;
                   // now that we have cow inner cells, just remove these...
                   if _cfg_debug_yeet() {
-                    println!("DEBUG:  NvGpuMemPool::try_yeet_some:     og top, continue");
+                    println!("DEBUG:  NvGpuMemPool::_try_soft_oom:     og top, continue");
                   }
                   continue;
                 }
@@ -1935,27 +1935,27 @@ impl NvGpuMemPool {
                 match pcel.lookup(Locus::VMem, PMach::NvGpu) {
                   None => {
                     if _cfg_debug_yeet() {
-                      println!("DEBUG:  NvGpuMemPool::try_yeet_some:     nonresident 1, continue");
+                      println!("DEBUG:  NvGpuMemPool::_try_soft_oom:     nonresident 1, continue");
                     }
                     continue;
                   }
                   Some((prev_clk, prev_addr)) => {
                     if prev_clk > cur_clk {
-                      println!("WARNING:NvGpuMemPool::try_yeet_some: p={} x={:?} root={:?} cur clk={:?} prev clk={:?} addr={:?}",
+                      println!("WARNING:NvGpuMemPool::_try_soft_oom: p={} x={:?} root={:?} cur clk={:?} prev clk={:?} addr={:?}",
                           p, x, root, cur_clk, prev_clk, prev_addr);
                       pcel._dump_replicas();
                       panic!("bug");
                     }
                     if self.lookup_(prev_addr).is_none() {
                       if _cfg_debug_yeet() {
-                        println!("DEBUG:  NvGpuMemPool::try_yeet_some:     nonresident 2, continue");
+                        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:     nonresident 2, continue");
                       }
                       pcel.replicas.remove((Locus::VMem, PMach::NvGpu));
                       continue;
                     }
                     if self.pinned(prev_addr) {
                       if _cfg_debug_yeet() {
-                        println!("DEBUG:  NvGpuMemPool::try_yeet_some:     pinned, continue");
+                        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:     pinned, continue");
                       }
                       continue;
                     }
@@ -1964,18 +1964,18 @@ impl NvGpuMemPool {
                       yeet_ct += 1;
                       if !self.try_pre_alloc(query_sz).is_oom() {
                         if _cfg_debug_yeet() {
-                          println!("DEBUG:  NvGpuMemPool::try_yeet_some: success 1");
-                          println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+                          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: success 1");
+                          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
                               self.front_cursor.get(),
                               self.free_size.get(),
                               self.back_cursor.get(),
                               self.front_sz,
                           );
-                          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front prefix=0x{:016x}", self.front_cursor.get());
-                          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front free  ={}", self.free_size.get());
-                          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-                          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  suffix=0x{:016x}", self.back_cursor.get());
-                          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
+                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
+                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
+                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
+                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
+                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                         }
                         self.yeet_scanner.set(p + 1);
                         return Some(());
@@ -2000,18 +2000,18 @@ impl NvGpuMemPool {
                         yeet_ct += 1;
                         if !self.try_pre_alloc(query_sz).is_oom() {
                           if _cfg_debug_yeet() {
-                            println!("DEBUG:  NvGpuMemPool::try_yeet_some: success 2");
-                            println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+                            println!("DEBUG:  NvGpuMemPool::_try_soft_oom: success 2");
+                            println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
                                 self.front_cursor.get(),
                                 self.free_size.get(),
                                 self.back_cursor.get(),
                                 self.front_sz,
                             );
-                            println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front prefix=0x{:016x}", self.front_cursor.get());
-                            println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front free  ={}", self.free_size.get());
-                            println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-                            println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  suffix=0x{:016x}", self.back_cursor.get());
-                            println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
+                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
+                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
+                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
+                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
+                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                           }
                           self.yeet_scanner.set(p + 1);
                           return Some(());
@@ -2030,18 +2030,18 @@ impl NvGpuMemPool {
       }
       if retry && yeet_ct == 0 {
         if _cfg_debug_yeet() {
-          println!("DEBUG:  NvGpuMemPool::try_yeet_some: failure 1");
-          println!("DEBUG:  NvGpuMemPool::try_yeet_some: new usage: front={} free={} back={} total={}",
+          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: failure 1");
+          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
               self.front_cursor.get(),
               self.free_size.get(),
               self.back_cursor.get(),
               self.front_sz,
           );
-          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front prefix=0x{:016x}", self.front_cursor.get());
-          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   front free  ={}", self.free_size.get());
-          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   back  suffix=0x{:016x}", self.back_cursor.get());
-          println!("DEBUG:  NvGpuMemPool::_try_yeet_some:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
+          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
+          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
+          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
+          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
+          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
         }
         self.yeet_scanner.set(celfront.len());
         return None;
@@ -2189,8 +2189,8 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
             println!("ERROR:  tl_pctx_nvgpu_alloc_hook: unrecoverable out-of-memory failure (device memory)");
             panic!();
           }
-          if gpu.mem_pool.try_yeet_some(sz).is_none() {
-            println!("ERROR:  tl_pctx_nvgpu_alloc_hook: out-of-memory, yeet failure (device memory)");
+          if gpu.mem_pool._try_soft_oom(sz).is_none() {
+            println!("ERROR:  tl_pctx_nvgpu_alloc_hook: out-of-memory, soft oom failure (device memory)");
             panic!();
           }
           retry = true;

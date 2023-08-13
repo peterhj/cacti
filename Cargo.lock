@@ -71,6 +71,7 @@ name = "cellsplit"
 version = "0.1.0-devel"
 dependencies = [
  "rustc_serialize",
+ "smol_str",
 ]
 
 [[package]]

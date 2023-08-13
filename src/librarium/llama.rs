@@ -31,17 +31,41 @@ limitations under the License. */
 // original model code by Xinyang Geng and Hao Liu, and is
 // distributed according to the Apache 2.0 license.
 
+/// Hyperparameters for specifying a LLaMa-style language model.
 #[derive(Clone, Copy, Debug)]
 pub struct LlamaConfig {
+  /// The number of layers.
   pub num_layer: i64,
+
+  /// The tokenizer vocabulary size; should be no greater than 65536.
   pub tok_dim: i64,
+
+  /// The hidden unit size of one attention head.
   pub head_dim: i64,
+
+  /// The number of attention heads per multi-head attention layer.
   pub num_head: i64,
+
+  /// The hidden unit size of the MLP layer.
   pub mlp_inner_dim: i64,
-  pub pos_len:  i64,
-  pub seq_cap: i64,
-  pub ubat_sz: i64,
+
+  /// The supported length of the positional embedding.
+  pub pos_len: i64,
+
+  /// The RMS-norm variance epsilon.
   pub rms_norm_eps: f32,
+
+  /// The pretraining tensor parallelism (LLaMa 2).
+  pub ten_par: Option<i64>,
+
+  /// The maximum sequence length; this should not be greater than
+  /// the value of `pos_len`.
+  pub seq_cap: i64,
+
+  /// The micro-batch size.
+  pub ubat_sz: i64,
+
+  /// The dtype of the model parameters.
   pub dtype: Dtype,
 }
 
@@ -54,14 +78,19 @@ impl LlamaConfig {
       num_head:   32,
       mlp_inner_dim:  8640,
       pos_len:    2048,
+      rms_norm_eps:   1.0e-6,
+      ten_par:    None,
       seq_cap:    2048,
       ubat_sz:    1,
-      rms_norm_eps:   1.0e-6,
       dtype:      f16::dtype_(),
     }
   }
 
   pub fn open_llama_7b() -> LlamaConfig {
+    LlamaConfig::llama_7b()
+  }
+
+  pub fn llama_7b() -> LlamaConfig {
     LlamaConfig{
       num_layer:  32,
       tok_dim:    32000,
@@ -69,14 +98,19 @@ impl LlamaConfig {
       num_head:   32,
       mlp_inner_dim:  11008,
       pos_len:    2048,
+      rms_norm_eps:   1.0e-6,
+      ten_par:    None,
       seq_cap:    2048,
       ubat_sz:    1,
-      rms_norm_eps:   1.0e-6,
       dtype:      f16::dtype_(),
     }
   }
 
   pub fn open_llama_13b() -> LlamaConfig {
+    LlamaConfig::llama_13b()
+  }
+
+  pub fn llama_13b() -> LlamaConfig {
     LlamaConfig{
       num_layer:  40,
       tok_dim:    32000,
@@ -84,9 +118,10 @@ impl LlamaConfig {
       num_head:   40,
       mlp_inner_dim:  13824,
       pos_len:    2048,
+      rms_norm_eps:   1.0e-6,
+      ten_par:    None,
       seq_cap:    2048,
       ubat_sz:    1,
-      rms_norm_eps:   1.0e-6,
       dtype:      f16::dtype_(),
     }
   }
@@ -106,6 +141,9 @@ pub struct LlamaLayer {
   pub down: StableCell,
 }
 
+/// A LLaMa language model.
+/// This implementation is preferable for fine-tuning/training.
+/// NB: `Llama` and `LlamaCached` may share parameters.
 #[derive(Clone, Debug)]
 pub struct Llama {
   pub cfg: LlamaConfig,
@@ -127,7 +165,7 @@ impl From<LlamaConfig> for Llama {
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
-    assert!(tok_dim <= u16::max_value() as i64 + 1);
+    assert!(tok_dim <= 0x10000);
     let cos = None;
     let sin = None;
     let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
@@ -152,6 +190,19 @@ impl From<LlamaConfig> for Llama {
 }
 
 impl Llama {
+  /// Convert the `Llama` model to a `LlamaCached` model, where both
+  /// models share the same model parameters, but possess distinct
+  /// activations.
+  pub fn to_cached(&self) -> LlamaCached {
+    LlamaCached::from(self.clone())
+  }
+
+  /// `match_pickle_dir` will match the `Cell`s corresponding
+  /// to model parameters to the appropriate tensor labels in
+  /// the pickle/torch files located in the given directory.
+  ///
+  /// This matching is done safely; please see `crate::util::cell`
+  /// and `crate::util::safepickle` for further details.
   pub fn match_pickle_dir(&self, pickdir: &PickleDir) -> CellInvMatches {
     let mut matcher = CellMatcher::new();
     matcher.insert("embed", self.embed.clone());
@@ -219,11 +270,7 @@ impl Llama {
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
       let freq2 = freq.inner_concat(freq);
       let cos = freq2.cos().cast(dtype);
-               //.new_shape([1, seq_cap, 1, head_dim])
-               //.const_();
       let sin = freq2.sin().cast(dtype);
-               //.new_shape([1, seq_cap, 1, head_dim])
-               //.const_();
       (cos, sin)
     };
     let (cos, sin) = init_embed();
@@ -236,6 +283,8 @@ impl Llama {
     self.sin.as_ref().unwrap().cache();
   }
 
+  /// `apply` performs one forward pass of the model
+  /// on the given inputs.
   pub fn apply<X: CellDeref, Y: CellDeref>(&self, in_tok: X, in_lm_tok: Y) -> LanguageModelOut {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
@@ -332,6 +381,9 @@ pub struct LlamaCachedState {
   pub v_cache: StableCell,
 }
 
+/// A LLaMa language model with cached KV-activations.
+/// This implementation is preferable for deployment/inference.
+/// NB: `LlamaCached` and `Llama` may share parameters.
 #[derive(Clone, Debug)]
 pub struct LlamaCached {
   pub cfg: LlamaConfig,
@@ -354,7 +406,7 @@ impl From<LlamaConfig> for LlamaCached {
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
-    assert!(tok_dim <= u16::max_value() as i64 + 1);
+    assert!(tok_dim <= 0x10000);
     let cos = None;
     let sin = None;
     let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
@@ -382,7 +434,37 @@ impl From<LlamaConfig> for LlamaCached {
   }
 }
 
+impl From<Llama> for LlamaCached {
+  fn from(model: Llama) -> LlamaCached {
+    let cfg = model.cfg;
+    let ubat_sz = cfg.ubat_sz;
+    let seq_cap = cfg.seq_cap;
+    let num_head = cfg.num_head;
+    let head_dim = cfg.head_dim;
+    let num_layers = cfg.num_layer as usize;
+    let cos = model.cos;
+    let sin = model.sin;
+    let embed = model.embed;
+    let layers = model.layers;
+    let mut states = Vec::with_capacity(num_layers);
+    for _ in 0 .. num_layers {
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
+      states.push(LlamaCachedState{k_cache, v_cache});
+    }
+    let head_norm = model.head_norm;
+    let lm_head = model.lm_head;
+    LlamaCached{cfg, cos, sin, embed, layers, states, head_norm, lm_head}
+  }
+}
+
 impl LlamaCached {
+  /// `match_pickle_dir` will match the `Cell`s corresponding
+  /// to model parameters to the appropriate tensor labels in
+  /// the pickle/torch files located in the given directory.
+  ///
+  /// This matching is done safely; please see `crate::util::cell`
+  /// and `crate::util::safepickle` for further details.
   pub fn match_pickle_dir(&self, pickdir: &PickleDir) -> CellInvMatches {
     let mut matcher = CellMatcher::new();
     matcher.insert("embed", self.embed.clone());
@@ -442,11 +524,7 @@ impl LlamaCached {
       let freq = pos.outer_mul(&self.layers[0].inv_freq);
       let freq2 = freq.inner_concat(freq);
       let cos = freq2.cos().cast(dtype);
-               //.new_shape([1, seq_cap, 1, head_dim])
-               //.const_();
       let sin = freq2.sin().cast(dtype);
-               //.new_shape([1, seq_cap, 1, head_dim])
-               //.const_();
       (cos, sin)
     };
     let (cos, sin) = init_embed();
@@ -490,14 +568,8 @@ impl LlamaCached {
     }
   }
 
-  /*pub fn apply<X: CellDeref>(&self, in_tok: X) -> LanguageModelDeployOut {
-    unimplemented!();
-  }*/
-
-  /*pub fn apply<X: CellDeref>(&mut self, in_tok: &mut [X], prev_seq_len: i64, next_seq_len: i64) -> LanguageModelBatchDeployOut {
-    unimplemented!();
-  }*/
-
+  /// `apply` performs one forward pass of the model
+  /// on the given inputs.
   pub fn apply(&mut self, in_: &mut [LanguageModelDeployIn], prev_seq_len: i64, next_seq_len: i64) -> Vec<LanguageModelDeployOut> {
     let ubat_sz = self.cfg.ubat_sz;
     let seq_cap = self.cfg.seq_cap;
@@ -709,8 +781,6 @@ impl FutharkThunkSpec for InnerSymplecticMapFutThunkSpec {
     code.into()
   }
 }
-
-// TODO
 
 #[track_caller]
 pub fn row_causal_attention_mask<X: CellDeref>(x: X, initial_row: i64) -> CellPtr {

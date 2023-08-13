@@ -2422,7 +2422,7 @@ pub trait TypeOps: Borrow<CellType> {
 
 impl TypeOps for CellType {}
 
-pub trait MMapOps: Borrow<MCellPtr> {
+/*pub trait MMapOps: Borrow<MCellPtr> {
   #[track_caller]
   fn vjp(&self) -> CellMap {
     panick_wrap(|| TL_CTX.with(|ctx| {
@@ -2446,18 +2446,20 @@ pub trait MMapOps: Borrow<MCellPtr> {
   }
 }
 
-impl MMapOps for CellMap {}
+impl MMapOps for CellMap {}*/
 
-pub fn vjp(allsrc: &CellMap, sink: &CellMap) {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    let spine = ctx.spine.borrow();
-    spine.adj_map(allsrc.as_ptr(), sink.as_ptr(), &ctx.ctr, &ctx.thunkenv);
-  }))
-}
+impl CellMap {
+  pub fn vjp(&self, sink: &CellMap) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      spine.adj_map(self.as_ptr(), sink.as_ptr(), &ctx.ctr, &ctx.thunkenv);
+    }))
+  }
 
-pub fn jvp(allsink: &CellMap, src: &CellMap) {
-  panick_wrap(|| TL_CTX.with(|ctx| {
-    let spine = ctx.spine.borrow();
-    spine.dual_map(allsink.as_ptr(), src.as_ptr(), &ctx.ctr, &ctx.thunkenv);
-  }))
+  pub fn jvp(&self, src: &CellMap) {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      spine.dual_map(self.as_ptr(), src.as_ptr(), &ctx.ctr, &ctx.thunkenv);
+    }))
+  }
 }
