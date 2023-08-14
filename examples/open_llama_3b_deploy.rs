@@ -1,13 +1,10 @@
 extern crate cacti;
 
 use cacti::prelude::*;
-use cacti::algo::str::*;
-use cacti::librarium::adamw::*;
-use cacti::librarium::llama::*;
-use cacti::librarium::sentencepiece::*;
-use cacti::util::pickle::*;
-
-use std::borrow::{Borrow};
+use cacti::algo::str::{safe_ascii};
+use cacti::librarium::llama::{LlamaConfig, LlamaCached};
+use cacti::librarium::sentencepiece::{SentencePieceTokenizer};
+use cacti::util::pickle::{PickleDir};
 
 // This inference example makes extensive use of
 // `LlamaCached` (src/librarium/llama.rs), which you may
@@ -29,15 +26,16 @@ fn main() {
   cfg.seq_cap = 256;
   //cfg.seq_cap = 512;
   //cfg.seq_cap = 1024;
+  println!("deploy: llama config: {:?}", cfg);
 
   // The directory we provided at the beginning of `main`
-  // should contain some pytorch-style pickle files.
+  // should contain "pytorch_model*.bin" pickle files.
   // Opening a `PickleDir` will safely parse the files'
   // metadata, without loading all the data just yet.
-  let pickdir = PickleDir::from(data_dir).unwrap();
+  let pickdir = PickleDir::open(data_dir).unwrap();
   println!("deploy: loaded pickle dir");
 
-  // Also load a SentencePiece tokenizer using the
+  // Also load a SentencePiece tokenizer from the
   // "tokenizer.model" file in the above directory.
   let tokenizer = SentencePieceTokenizer::from_dir(data_dir).unwrap();
   println!("deploy: loaded sentencepiece tokenizer");
@@ -148,8 +146,10 @@ fn main() {
         //    "set" to should be in host/CPU memory.
         cel.mem_set_yield_();
       }
-      // Initialize constants (for to the positional embedding)
+
+      // Initialize constants (for the positional embedding)
       model.init_constants();
+
       // Initialize the cached KV-activations to zeros.
       model.init_state();
     } else {
@@ -160,6 +160,7 @@ fn main() {
         p.cache();
       }
       model.cache_constants();*/
+
       // On the other hand, we _do_ need to `cache` the previous cycle's
       // KV activations, as we want to update them during this cycle's
       // forward pass while preserving their values computed during the
@@ -168,17 +169,21 @@ fn main() {
     }
 
     if cycle_nr == 0 {
-      // As we used `mem_set_yield_` to initialize the
-      // model parameters, we will also use `mem_set_yield_`
-      // to initialize the input sequence.
-      in_[0].in_tok.mem_set_yield_();
+      for i in 0 .. cfg.ubat_sz as usize {
+        // As we used `mem_set_yield_` to initialize the
+        // model parameters, we will also use `mem_set_yield_`
+        // to initialize the input sequence.
+        in_[i].in_tok.mem_set_yield_();
+      }
     } else {
-      // The inference model is autoregressive, and so will
-      // automatically update the input sequence with freshly
-      // predicted tokens (up to the maximum sequence length).
-      // Thus, after the zero-th cycle, we just need to cache
-      // the input sequence.
-      in_[0].in_tok.cache();
+      for i in 0 .. cfg.ubat_sz as usize {
+        // The inference model is autoregressive, and so will
+        // automatically update the input sequence with freshly
+        // predicted tokens (up to the maximum sequence length).
+        // Thus, after the zero-th cycle, we just need to cache
+        // the input sequence.
+        in_[i].in_tok.cache();
+      }
     }
 
     // `LlamaCached::apply` will stage a forward pass of LLaMA;
@@ -195,7 +200,7 @@ fn main() {
     };
 
     if cycle_nr == 0 {
-      // For debugging, let's dump some shapes.
+      // For debugging, let's dump some shapes and dtypes.
       println!("deploy: in_tok.shape={:?}", in_[0].in_tok.shape());
       println!("deploy: in_tok.dtype={:?}", in_[0].in_tok.dtype());
       println!("deploy: out_lm_logit.shape={:?}", out[0].out_lm_logit.shape());
@@ -207,8 +212,8 @@ fn main() {
     }
 
     // At this point, we are done with dataflow setup.
-    // The spine coroutine, though still dormant, is now
-    // flush with instructions waiting to be executed.
+    // The spine coroutine, though still in a dormant state,
+    // is now flush with instructions waiting to run.
     //
     // But before we run the spine, first we call `compile`
     // to perform optimizations on the spine that can
@@ -228,32 +233,16 @@ fn main() {
     // as it steps through the staged dataflow instructions.
     //
     // (If you are already familiar with coroutines, then
-    // yes, this `resume` does what you expect.)
+    // yes, this `resume` does what you would expect.)
     resume();
 
     let seq_cap = cfg.seq_cap;
     let tok_dim = cfg.tok_dim;
     if cycle_nr == 0 {
       for (cel, key) in inv_matches.iter() {
-        /*resume_put_mem_with(cel, |ty, mem| {
-          let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
-          if ty.unbroadcast() != pickty.unbroadcast() {
-            panic!("ERROR: type mismatch: cel={:?} key=\"{}\" ty={:?} pickty={:?}", cel, key, ty, pickty);
-          }
-          mem.copy_from_bytes(pickfile.as_bytes());
-        });*/
         let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
         resume_put(cel, &pickty, pickfile.mmap());
       }
-      /*resume_put_mem_with(&in_[0].in_tok, |_, mem| {
-        println!("deploy: set in_tok...");
-        let mut tok_buf = Vec::with_capacity(seq_cap as _);
-        tok_buf.push(1_u16);
-        tok_buf.extend_from_slice(text_tok.as_ref());
-        // FIXME: put end-of-sentence token.
-        tok_buf.resize(seq_cap as _, 0_u16);
-        mem.copy_from_slice(&tok_buf);
-      });*/
       resume_put_mem_with(&in_[0].in_tok, |ty, mem| {
         println!("deploy: set in_tok...");
         let tok_buf = ty.prepare_bytes_mut::<u16>(mem).unwrap();
@@ -265,9 +254,9 @@ fn main() {
         }
       });
     }
-    let in_tok_mem = in_[0].in_tok._get_mem();
-    let out_tok_mem = out[0].out_lm_tok._get_mem();
-    //let out_lm_prob_mem = out[0].out_lm_prob._get_mem();
+    let in_tok_mem = in_[0].in_tok._get_unsafe_mem();
+    let out_tok_mem = out[0].out_lm_tok._get_unsafe_mem();
+    //let out_lm_prob_mem = out[0].out_lm_prob._get_unsafe_mem();
     //println!("deploy: in tok type   ={:?}", in_[0].in_tok.type_());
     //println!("deploy: in tok version={:?}", in_[0].in_tok.version());
     println!("deploy: in tok mem ptr=0x{:016x}", in_tok_mem.ptr as usize);
@@ -278,12 +267,12 @@ fn main() {
     println!("deploy: out lm prob version={:?}", out[0].out_lm_prob.version());
     println!("deploy: out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);
     println!("deploy: out lm prob mem sz ={}", out_lm_prob_mem.sz);*/
-    if cycle_nr == 0 {
+    /*if cycle_nr == 0 {
       println!("deploy: text str=\"{}\"", text_str);
       println!("deploy: text str.len={}", text_str.len());
       println!("deploy: text tok={:?}", text_tok.as_ref());
       println!("deploy: text tok.len={}", text_tok.len());
-    }
+    }*/
     let in_tok_u16 = in_tok_mem._as_slice_u16();
     let out_tok_u16 = out_tok_mem._as_slice_u16();
     //let ntok = tok_dim as usize;
@@ -300,19 +289,14 @@ fn main() {
         0
       };
       let prev_tok = in_tok_u16[prev_pos];
-      /*let act_next_tok = if pos < text_tok.len() + 1 {
-        text_tok.as_ref()[pos - 1]
-      } else {
-        0
-      };*/
       let next_tok = out_tok_u16[pos - start_pos];
       let act_next_tok = in_tok_u16[pos];
       println!("deploy: pos={} act prev={} prev={} next={} act next={} act prev={:?} prev={:?} next={:?} act next={:?}",
           pos, act_prev_tok, prev_tok, next_tok, act_next_tok,
-          tokenizer.id_to_piece(act_prev_tok as _).map(|s| sane_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(prev_tok as _).map(|s| sane_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(next_tok as _).map(|s| sane_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(act_next_tok as _).map(|s| sane_ascii(s.as_bytes())),
+          tokenizer.id_to_piece(act_prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
+          tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
+          tokenizer.id_to_piece(next_tok as _).map(|s| safe_ascii(s.as_bytes())),
+          tokenizer.id_to_piece(act_next_tok as _).map(|s| safe_ascii(s.as_bytes())),
       );
     }
     println!("deploy: end cycle={}", cycle_nr);

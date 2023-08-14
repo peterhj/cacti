@@ -1,14 +1,29 @@
 use crate::prelude::*;
 
+/// An implementation of AdamW for 32-bit floating point.
 #[derive(Clone, Copy, Debug)]
 pub struct AdamW32 {
+  /// A multiplicative un-scaling factor to apply to the
+  /// gradients _before_ adding them to the exponential
+  /// moving average moments.
   pub grad_unscale: f32,
+
+  /// The learning rate.
   pub lr: f32,
+
+  /// The weight decay.
   pub wd: f32,
+
+  /// The dampening factor for the 1st order moment
+  /// (relation to the original: `a1 + b1 = 1`).
   pub a1: f32,
+
+  /// The dampening factor for the 2nd order moment
+  /// (relation to the original: `a2 + b2 = 1`).
   pub a2: f32,
+
+  /// The epsilon for the 2nd order moment.
   pub eps: f32,
-  //pub dtype: Dtype,
 }
 
 impl Default for AdamW32 {

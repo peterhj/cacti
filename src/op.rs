@@ -1,9 +1,9 @@
-//use crate::cell::{CellPtr, StableCell, CellType, Dtype, ScalarVal_, IntoScalarValExt, CellState};
+use crate::algo::fp::*;
 use crate::cell::*;
 use crate::clock::{Clock};
 use crate::ctx::*;
 use crate::panick::*;
-use crate::pctx::{TL_PCTX, Locus, PMach, MemReg};
+use crate::pctx::{TL_PCTX, Locus, PMach, MemReg, BorrowRef};
 use crate::spine::{SpineRet, SpineEntry, SpineEntryName};
 use crate::thunk::{FutharkNdBroadcastMap2MonomorphicSpec};
 use crate::thunk::op::*;
@@ -93,45 +93,28 @@ impl<R: CellDeref> AddAssign<R> for CellPtr {
                     match cur_env._lookup_mut(rhs) {
                       None => panic!("bug"),
                       Some((_, state)) => {
-                        // FIXME: sealing here is kinda hacky.
-                        //state.flag.set_seal();
-                        //state.flag.unset_intro();
                         assert!(!state.clk.is_uninit());
                         state.clk = state.clk.uninit();
                       }
                     }
                     match cur_env._lookup_mut(this) {
                       None => {
-                        //let this_root = cur_env._deref(this);
                         let mut state = CellState::default();
-                        //state.flag.set_intro();
                         assert!(this_clk.is_init_once());
                         assert!(state.clk < this_clk);
                         state.clk = this_clk;
                         assert!(cur_env.state.insert(this_root, state.into()).is_none());
                       }
                       Some((_, state)) => {
-                        //state.flag.set_intro();
-                        //assert!(state.flag.intro());
-                        //assert!(!state.flag.seal());
-                        //state.flag.unset_seal();
-                        /*if !this_clk.is_update() {
-                          println!("DEBUG: AddAssign::add_assign: this={:?} this_clk={:?} state.clk={:?}",
-                              this, this_clk, state.clk);
-                        }
-                        assert!(this_clk.is_update());*/
                         assert!(this_clk.is_init_once() || this_clk.is_update());
                         assert!(state.clk < this_clk);
                         state.clk = this_clk;
                       }
                     }
-                    //let this_root = cur_env._deref(this);
-                    //let rhs_root = cur_env._deref(rhs);
                     let (orhs, arg) = cur_env.update.remove(&(rhs_root, rhs_clk)).unwrap();
                     //assert_eq!(orhs, rhs);
                     assert!(cur_env.update.insert((this_root, this_clk), (this, arg)).is_none());
                     drop(cur_env);
-                    // FIXME
                     let mut thunkenv = ctx.thunkenv.borrow_mut();
                     let mut tclo = thunkenv.update.remove(&(rhs, rhs_clk)).unwrap();
                     //assert_eq!(tclo.out, rhs);
@@ -159,12 +142,7 @@ impl<R: CellDeref> AddAssign<R> for CellPtr {
             }
             match state {
               0 => {}
-              //1 => panic!("bug"),
               1 => {
-                // FIXME: should seal rhs.
-                /*
-                spine.seal(rhs);
-                */
                 success = true;
               }
               _ => unreachable!()
@@ -1063,13 +1041,6 @@ pub trait MathSetOps: CellDeref {
 impl<L: CellDeref + ?Sized> MathSetOps for L {}
 
 pub trait MathBinaryOps<R: CellDeref>: CellDeref {
-  /*#[track_caller]
-  fn pow(&self, rhs: R) -> CellPtr {
-    panick_wrap(|| {
-      unimplemented!();
-    })
-  }*/
-
   #[track_caller]
   fn inner_concat(&self, rhs: R) -> CellPtr {
     panick_wrap(|| {
@@ -1480,139 +1451,6 @@ pub trait MathBinaryOps<R: CellDeref>: CellDeref {
       out
     })
   }
-
-  /*#[track_caller]
-  fn block_mm(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool) -> CellPtr {
-    panick_wrap(|| {
-      self.block_mm_scale(l_block, l_blk_t, rhs, r_block, r_blk_t, 1.0_f32)
-    })
-  }
-
-  #[track_caller]
-  fn block_mm_scale<T: IntoScalarValExt>(&self, l_block: [i64; 2], l_blk_t: bool, rhs: R, r_block: [i64; 2], r_blk_t: bool, scale: T) -> CellPtr {
-    panick_wrap(|| {
-      let p = self._deref();
-      let q = rhs._deref();
-      let p_ty = ctx_lookup_type(p);
-      let q_ty = ctx_lookup_type(q);
-      // FIXME: can relax the ndim requirement, with well documented semantics.
-      assert_eq!(p_ty.ndim(), 2);
-      assert_eq!(q_ty.ndim(), 2);
-      //println!("DEBUG: block_mm_scale: l_ty={:?} r_ty={:?}", p_ty, q_ty);
-      //println!("DEBUG: block_mm_scale: lblk={:?} rblk={:?}", l_block, r_block);
-      if cfg_debug() {
-      println!("DEBUG: block_mm_scale: ({:?} / {:?}{}) x ({:?} / {:?}{})",
-          &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
-          &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
-      );
-      }
-      let l_nrow = p_ty.shape[0] / l_block[0];
-      let l_ncol = p_ty.shape[1] / l_block[1];
-      let r_nrow = q_ty.shape[0] / r_block[0];
-      let r_ncol = q_ty.shape[1] / r_block[1];
-      assert_eq!(p_ty.shape[0] % l_block[0], 0);
-      assert_eq!(p_ty.shape[1] % l_block[1], 0);
-      assert_eq!(q_ty.shape[0] % r_block[0], 0);
-      assert_eq!(q_ty.shape[1] % r_block[1], 0);
-      // FIXME FIXME: modulo/round robin blocking in the thunk impl.
-      //let (l_nrow_t, l_ncol_t) = if lt { (l_ncol, l_nrow) } else { (l_nrow, l_ncol) };
-      //let (r_nrow_t, r_ncol_t) = if rt { (r_ncol, r_nrow) } else { (r_nrow, r_ncol) };
-      if !(l_nrow == r_nrow || l_nrow == 1 || r_nrow == 1) ||
-         !(l_ncol == r_ncol || l_ncol == 1 || r_ncol == 1)
-      {
-        println!("ERROR: block_mm_scale: incompatible shapes:");
-        println!("ERROR: block_mm_scale:   ({:?} / {:?}{}) x ({:?} / {:?}{})",
-            &p_ty.shape, l_block, if l_blk_t { "^T" } else { "" },
-            &q_ty.shape, r_block, if r_blk_t { "^T" } else { "" },
-        );
-        panic!();
-      }
-      let l_blk_inner = if l_blk_t { l_block[0] } else { l_block[1] };
-      let r_blk_inner = if r_blk_t { r_block[1] } else { r_block[0] };
-      if l_blk_inner != r_blk_inner {
-        println!("ERROR: block_mm_scale: incompatible blocks:");
-        println!("ERROR: block_mm_scale:   {:?}{} x {:?}{}",
-            l_block, if l_blk_t { "^T" } else { "" },
-            r_block, if r_blk_t { "^T" } else { "" },
-        );
-        panic!();
-      }
-      assert_eq!(16 % p_ty.dtype.size_bytes(), 0);
-      let l_dty_isz = p_ty.dtype.size_bytes() as i64;
-      if (l_block[1] * l_dty_isz) % 16 != 0 {
-        let l_pad = ((l_block[1] * l_dty_isz) + 16 - 1) / 16 * 16 / l_dty_isz;
-        println!("WARNING: block_mm_scale: left argument requires padding:");
-        println!("WARNING: block_mm_scale:   {:?}{} -> {:?}{}",
-            l_block, if l_blk_t { "^T" } else { "" },
-            [l_block[0], l_pad], if l_blk_t { "^T" } else { "" },
-        );
-        // TODO
-      }
-      assert_eq!(16 % q_ty.dtype.size_bytes(), 0);
-      let r_dty_isz = q_ty.dtype.size_bytes() as i64;
-      if (r_block[1] * r_dty_isz) % 16 != 0 {
-        let r_pad = ((r_block[1] * r_dty_isz) + 16 - 1) / 16 * 16 / r_dty_isz;
-        println!("WARNING: block_mm_scale: right argument requires padding:");
-        println!("WARNING: block_mm_scale:   {:?}{} -> {:?}{}",
-            r_block, if r_blk_t { "^T" } else { "" },
-            [r_block[0], r_pad], if r_blk_t { "^T" } else { "" },
-        );
-        // TODO
-      }
-      /*let (_m, _n) = match (lt, rt) {
-        (false, false) => {
-          assert_eq!(p_ty.shape[1], q_ty.shape[0]);
-          (p_ty.shape[0], q_ty.shape[1])
-        }
-        (true, false) => {
-          assert_eq!(p_ty.shape[0], q_ty.shape[0]);
-          (p_ty.shape[1], q_ty.shape[1])
-        }
-        (false, true) => {
-          assert_eq!(p_ty.shape[1], q_ty.shape[1]);
-          (p_ty.shape[0], q_ty.shape[0])
-        }
-        (true, true) => {
-          assert_eq!(p_ty.shape[0], q_ty.shape[1]);
-          (p_ty.shape[1], q_ty.shape[0])
-        }
-      };*/
-      let o_dtype = match p_ty.dtype.max(q_ty.dtype) {
-        None => {
-          println!("ERROR: block_mm_scale: incompatible dtypes: {:?} x {:?}", p_ty.dtype, q_ty.dtype);
-          panic!();
-        }
-        Some(dty) => dty
-      };
-      let o_scale = scale.into_scalar_val_();
-      let o_scale_dty = o_scale.dtype();
-      match o_scale_dty {
-        Dtype::F32 => {}
-        _ => {
-          println!("ERROR: block_mm_scale: unsupported scale dtype: {:?}", o_scale_dty);
-          panic!();
-        }
-      }
-      let op = BlockMatrixMulThunkSpec{
-        //l_shape: [p_ty.shape[0], p_ty.shape[1]],
-        //r_shape: [q_ty.shape[0], q_ty.shape[1]],
-        l_block,
-        r_block,
-        //l_nblock: [l_nrow, l_ncol],
-        //r_nblock: [r_nrow, r_ncol],
-        l_blk_t,
-        r_blk_t,
-        l_dtype: p_ty.dtype,
-        r_dtype: q_ty.dtype,
-        o_dtype,
-        o_scale,
-      };
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(p);
-      ctx_push_cell_arg(q);
-      ctx_pop_thunk(op)
-    })
-  }*/
 }
 
 impl<L: CellDeref + ?Sized, R: CellDeref> MathBinaryOps<R> for L {}
@@ -1795,7 +1633,7 @@ pub trait MathUnaryOps: CellDeref {
     panick_wrap(|| self.log())
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn inner_max(&self) -> CellPtr {
     panick_wrap(|| {
       unimplemented!();
@@ -1815,7 +1653,7 @@ pub trait MathUnaryOps: CellDeref {
       ctx_push_cell_arg(self._deref());
       ctx_pop_thunk(op)*/
     })
-  }
+  }*/
 
   #[track_caller]
   fn inner_mean(&self) -> CellPtr {
@@ -1863,16 +1701,6 @@ pub trait MathUnaryOps: CellDeref {
       ctx_pop_thunk(op)
     })
   }
-
-  /*#[track_caller]
-  fn inner_transpose(&self) -> CellPtr {
-    panick_wrap(|| {
-      let op = InnerTransposeFutThunkSpec;
-      assert!(ctx_clean_arg());
-      ctx_push_cell_arg(self._deref());
-      ctx_pop_thunk(op)
-    })
-  }*/
 
   #[track_caller]
   fn flat_sum(&self) -> CellPtr {
@@ -1954,6 +1782,22 @@ pub trait MathUnaryOps: CellDeref {
 
 impl<P: CellDeref + ?Sized> MathUnaryOps for P {}
 
+pub trait MathLScalarOps<R: CellDeref>: IntoScalarValExt {
+  #[track_caller]
+  fn pow(self, rhs: R) -> CellPtr where Self: Sized {
+    panick_wrap(|| {
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs._deref());
+      ctx_pop_thunk(LPowScalarFutThunkSpec{base: self.into_scalar_val_()})
+    })
+  }
+}
+
+impl<R: CellDeref> MathLScalarOps<R> for ScalarVal_ {}
+impl<R: CellDeref> MathLScalarOps<R> for f64 {}
+impl<R: CellDeref> MathLScalarOps<R> for f32 {}
+impl<R: CellDeref> MathLScalarOps<R> for f16 {}
+
 #[track_caller]
 pub fn inner_softmax_post_adj<Y: CellDeref, Dy: CellDeref>(y: Y, dy: Dy) -> CellPtr {
   panick_wrap(|| {
@@ -2000,33 +1844,22 @@ pub trait CastOps: CellDeref {
       if org_dtype == new_dtype {
         return x;
       }
+      let max_dtype = org_dtype.max(new_dtype);
+      if !(max_dtype == Some(new_dtype)) {
+        println!("ERROR:  cast: dtype {:?} does not subsume original dtype {:?}; use `lossy_cast` instead",
+            new_dtype, org_dtype);
+        panic!();
+      }
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
       match (org_dtype, new_dtype) {
-        (Dtype::F32, Dtype::Bf16) => {
-          let op = CastF32Bf16FutThunkSpec;
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
-        }
-        (Dtype::Bf16, Dtype::F16) => {
-          let op = CastBf16F16FutThunkSpec;
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
-        }
         (Dtype::Bf16, Dtype::F32) => {
-          let op = CastBf16F32FutThunkSpec;
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
+          ctx_pop_thunk(CastBf16F32FutThunkSpec)
         }
         // FIXME: other bf16 special cases.
         _ => {
-          let op = CastFutThunkSpec{new_dtype};
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
+          ctx_pop_thunk(CastFutThunkSpec{new_dtype})
         }
-        //_ => unimplemented!()
       }
     })
   }
@@ -2034,8 +1867,32 @@ pub trait CastOps: CellDeref {
   #[track_caller]
   fn lossy_cast(&self, new_dtype: Dtype) -> CellPtr {
     panick_wrap(|| {
-      // TODO
-      unimplemented!();
+      let x = self._deref();
+      let org_dtype = ctx_lookup_dtype(x);
+      if org_dtype == new_dtype {
+        return x;
+      }
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(x);
+      match (org_dtype, new_dtype) {
+        (Dtype::F32, Dtype::Bf16) => {
+          ctx_pop_thunk(CastF32Bf16FutThunkSpec)
+        }
+        (Dtype::F16, Dtype::Bf16) => {
+          ctx_pop_thunk(CastF16Bf16FutThunkSpec)
+        }
+        (Dtype::Bf16, Dtype::F16) => {
+          ctx_pop_thunk(CastBf16F16FutThunkSpec)
+        }
+        (Dtype::Bf16, Dtype::F32) => {
+          ctx_pop_thunk(CastBf16F32FutThunkSpec)
+        }
+        // FIXME: other bf16 special cases.
+        _ => {
+          ctx_pop_thunk(CastFutThunkSpec{new_dtype})
+        }
+        //_ => unimplemented!()
+      }
     })
   }
 }
@@ -2085,98 +1942,6 @@ pub trait ArrayOps: CellDeref {
 impl<L: CellDeref + ?Sized> ArrayOps for L {}
 
 pub trait Ops: CellDeref {
-  /*fn bar(self) -> Self {
-    unimplemented!();
-  }*/
-
-  /*fn set_mem(self, ) -> Self {
-    unimplemented!();
-  }*/
-
-  /*fn set_futhark(self, fut_str: &str) -> Self {
-    unimplemented!();
-  }*/
-
-  //fn set(self, set_f: Box<FnOnce() -> _>) -> Self;
-  //fn set_in_place(self, set_f: Box<FnOnce(_)>) -> Self;
-
-  /*#[track_caller]
-  fn init_futhark(self, fut_str: &str) -> Self {
-    unimplemented!();
-  }*/
-
-  //fn init(self, init_f: Box<FnOnce() -> _>) -> Self;
-
-  /*#[track_caller]
-  fn apply_futhark(&self, lam_src: Cow<'static, str>) -> CellPtr {
-    apply_futhark(lam_src, &[self.borrow()])
-  }*/
-
-  //fn apply_fut(self, fut_str: &[u8]) -> Self { self.apply_futhark(fut_str) }
-
-  /*#[track_caller]
-  fn unset(&self) {
-    unimplemented!();
-  }*/
-
-  #[track_caller]
-  fn cache(&self) /*-> Self */{
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow();
-      spine.cache(self._deref());
-      //self
-    }))
-  }
-
-  /*#[track_caller]
-  fn cache_init(&self) /*-> Self */{
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow();
-      spine.init_cache_mux(self._deref());
-      //self
-    }))
-  }
-
-  #[track_caller]
-  fn init_cache(&self) /*-> Self */{ self.cache_init() }*/
-
-  /*fn cache_init_futhark(self, fut_str: &str) -> Self {
-    // TODO: ???
-    unimplemented!();
-  }*/
-
-  #[track_caller]
-  fn keep(&self) -> StableCell {
-    panick_wrap(|| StableCell::from(self._deref()))
-  }
-
-  /*#[track_caller]
-  fn set<X: AsRef<CellPtr>>(&self, _x: X) where Self: Sized {
-    unimplemented!();
-  }*/
-
-  /*#[track_caller]
-  fn unsafe_unseal(self) -> Self {
-    unimplemented!();
-  }*/
-
-  /*#[track_caller]
-  fn unsafe_unseal_init(self) -> Self {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow();
-      spine.unseal_mux(self._deref());
-      self
-    }))
-  }*/
-
-  /*#[track_caller]
-  fn yield_get_and_set(self) -> Self {
-    panick_wrap(|| {
-      // FIXME
-      unimplemented!();
-    })
-  }*/
-
   #[track_caller]
   fn mem_set_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
@@ -2190,48 +1955,12 @@ pub trait Ops: CellDeref {
     panick_wrap(|| self.mem_set_yield_())
   }
 
-  /*#[track_caller]
-  fn mem_init_yield_(&self) {
+  #[track_caller]
+  fn const_(&self) -> CellPtr {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow();
-      spine.yield_init(self._deref(), Locus::Mem);
+      ctx.const_(self._deref())
     }))
   }
-
-  #[track_caller]
-  fn mem_init_yield_with(&self, _: ()) {
-    panick_wrap(|| self.mem_init_yield_())
-  }*/
-
-  /*#[track_caller]
-  fn eval(self) -> Self {
-    panick_wrap(|| {
-      let ret = eval(self._deref());
-      match ret {
-        SpineRet::Bot => panic!("EXCEPTION"),
-        _ => {}
-      }
-      self
-    })
-  }
-
-  #[track_caller]
-  fn try_eval(self) -> Result<Self, ()> {
-    panick_wrap(|| {
-      let ret = eval(*self.as_ref());
-      match ret {
-        SpineRet::Bot => return Err(()),
-        _ => {}
-      }
-      Ok(self)
-    })
-  }*/
-
-  /*#[track_caller]
-  fn tag(self, /*_: ???*/) -> Self {
-    unimplemented!();
-  }*/
-
 
   #[track_caller]
   fn _memcpy(&self) -> CellPtr {
@@ -2241,49 +1970,24 @@ pub trait Ops: CellDeref {
       ctx_pop_thunk(MemcpyThunkSpec)
     })
   }
-
-  #[track_caller]
-  fn const_(&self) -> CellPtr {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      ctx.const_(self._deref())
-    }))
-  }
-
-  /*#[track_caller]
-  fn snapshot(&self) -> CellPtr {
-    panick_wrap(|| ctx_snapshot(self._deref()))
-  }*/
-
-  /*#[track_caller]
-  fn checkpoint(self) -> CellPtr {
-    unimplemented!();
-  }*/
 }
 
 impl<L: CellDeref + ?Sized> Ops for L {}
 
 pub trait CtlOps: CellDeref {
-  /*#[track_caller]
-  fn resident(&self, loc: Locus) -> bool {
+  #[track_caller]
+  fn cache(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let this = self._deref();
-      let env = ctx.env.borrow();
-      match env.plookup_mut_view(this) {
-        Err(_) => {
-          println!("ERROR: CtlOps::resident: failed to dereference {:?} to a physical cell", this);
-          panic!("");
-        }
-        Ok(e) => {
-          match e.cel_ {
-            &mut Cell_::Phy(.., ref mut pcel) => {
-              pcel.lookup_loc(loc).is_some()
-            }
-            _ => panic!("bug")
-          }
-        }
-      }
+      let mut spine = ctx.spine.borrow();
+      spine.cache(self._deref());
+      //self
     }))
-  }*/
+  }
+
+  #[track_caller]
+  fn keep(&self) -> StableCell {
+    panick_wrap(|| StableCell::from(self._deref()))
+  }
 
   #[track_caller]
   fn spine_version(&self) -> Clock {
@@ -2299,7 +2003,7 @@ pub trait CtlOps: CellDeref {
   }
 
   #[track_caller]
-  fn _get_mem(&self) -> MemReg {
+  fn _get_unsafe_mem(&self) -> MemReg {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let x = self._deref();
       let xclk = ctx_lookup_clk(x);
@@ -2344,122 +2048,32 @@ pub trait CtlOps: CellDeref {
 
 impl<L: CellDeref + ?Sized> CtlOps for L {}
 
-/*#[track_caller]
-pub fn apply_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> CellPtr {
-  panick_wrap(|| {
-    let result = TL_CTX.with(|ctx| {
-      let mut fut = ctx.futhark.borrow_mut();
-      if fut.trie.is_none() {
-        fut.trie = Some(Rc::new(tokenizer_trie()));
-      }
-      drop(fut);
-      let trie = ctx.futhark.borrow().trie.as_ref().unwrap().clone();
-      let tokens = Tokenizer::new(trie, &*lam_src);
-      let parser = ExpParser::new(tokens);
-      parser.parse()
-    });
-    let mut wrap_parens = false;
-    match result.as_ref() {
-      Ok(&Exp::Lam(..)) => {}
-      Ok(&Exp::LamAlt(..)) => {
-        wrap_parens = true;
-      }
-      Ok(_) => panic!("ERROR: expected futhark lambda expression, e.g. (\\x y -> x + y)"),
-      Err(_) => panic!("ERROR: invalid futhark"),
-    }
-    let lam_exp = result.unwrap();
-    assert!(arg.len() < u16::max_value() as usize);
-    match &lam_exp {
-      &Exp::Lam(ref vars, ..) |
-      &Exp::LamAlt(ref vars, ..) => {
-        assert_eq!(arg.len(), vars.len());
-      }
-      _ => unreachable!()
-    }
-    let ar_in = arg.len() as u16;
-    // NB: arity out must be one because of the type signature (-> CellPtr).
-    let ar_out = 1;
-    assert!(ctx_clean_arg());
-    for &&x in arg.iter() {
-      // FIXME FIXME
-      let xty_ = ctx_lookup_dtype(x);
-      ctx_push_cell_arg(x);
-    }
-    let op = LamFutExpThunkSpec{lam_src, lam_exp, ar_in, ar_out, wrap_parens};
-    // FIXME FIXME: here we have to build the object, because we don't know
-    // the output dim or type. if the lam is annotated, double check the actual
-    // dim/type we read out of the manifest.
-    //let oty_ = _;
-    ctx_pop_thunk(op)
-    //ctx_pop_thunk_(op, oty_)
-  })
-}
-
-#[track_caller]
-pub fn apply2_futhark(lam_src: Cow<'static, str>, arg: &[&CellPtr]) -> (CellPtr, CellPtr) {
-  unimplemented!();
-}
-
-#[track_caller]
-pub fn apply_futhark_unverified(lam_src: &str, arg: &[&CellPtr]) -> CellPtr {
-  // FIXME FIXME
-  unimplemented!();
-}*/
-
-pub trait TypeOps: Borrow<CellType> {
+impl CellType {
   #[track_caller]
-  fn zeros(&self) -> CellPtr {
-    let ty = self.borrow();
-    zeros(&ty.shape as &[_], ty.dtype)
+  pub fn zeros(&self) -> CellPtr {
+    zeros(self.shape(), self.dtype())
   }
 
   #[track_caller]
-  fn ones(&self) -> CellPtr {
-    let ty = self.borrow();
-    ones(&ty.shape as &[_], ty.dtype)
+  pub fn ones(&self) -> CellPtr {
+    ones(self.shape(), self.dtype())
   }
 }
-
-impl TypeOps for CellType {}
-
-/*pub trait MMapOps: Borrow<MCellPtr> {
-  #[track_caller]
-  fn vjp(&self) -> CellMap {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let allsrc = CellMap::new();
-      let sink = *self.borrow();
-      let spine = ctx.spine.borrow();
-      spine.adj_map(allsrc.as_ptr(), sink, &ctx.ctr, &ctx.thunkenv);
-      allsrc
-    }))
-  }
-
-  #[track_caller]
-  fn jvp(&self) -> CellMap {
-    panick_wrap(|| TL_CTX.with(|ctx| {
-      let allsink = CellMap::new();
-      let src = *self.borrow();
-      let spine = ctx.spine.borrow();
-      spine.dual_map(allsink.as_ptr(), src, &ctx.ctr, &ctx.thunkenv);
-      allsink
-    }))
-  }
-}
-
-impl MMapOps for CellMap {}*/
 
 impl CellMap {
-  pub fn vjp(&self, sink: &CellMap) {
+  #[track_caller]
+  pub fn vadd_vjp(&self, /*src: &CellSet,*/ sink: &CellMap) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       spine.adj_map(self.as_ptr(), sink.as_ptr(), &ctx.ctr, &ctx.thunkenv);
     }))
   }
 
-  pub fn jvp(&self, src: &CellMap) {
+  /*#[track_caller]
+  pub fn vadd_jvp(&self, /*sink: &CellSet,*/ src: &CellMap) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       spine.dual_map(self.as_ptr(), src.as_ptr(), &ctx.ctr, &ctx.thunkenv);
     }))
-  }
+  }*/
 }

@@ -123,21 +123,21 @@ impl InnerCell for SwapCowMemCell {
     self.pinc.set(c - 1);
   }
 
-  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+  fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
     match self.borc._try_borrow() {
       Err(e) => {
-        println!("ERROR:  SwapCowMemCell::mem_borrow: borrow failure: {:?}", e);
-        panic!();
+        println!("WARNING:SwapCowMemCell::mem_borrow: borrow failure: {:?}", e);
+        Err(e)
       }
-      Ok(_) => {
+      Ok(()) => {
         let val = self.mem.as_bytes();
-        Some(BorrowRef{borc: &self.borc, val: Some(val)})
+        Ok(BorrowRef{borc: &self.borc, val: Some(val)})
       }
     }
   }
 
-  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
-    None
+  fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> {
+    Err(BorrowErr::Immutable)
   }
 }
 
@@ -145,6 +145,12 @@ pub struct SwapPCtx {
   pub page_tab: RefCell<HashMap<PAddr, Rc<SwapCowMemCell>>>,
   //pub page_idx: RefCell<HashMap<*mut c_void, PAddr>>,
   pub usage:    Cell<usize>,
+}
+
+impl Drop for SwapPCtx {
+  fn drop(&mut self) {
+    self._dump_usage();
+  }
 }
 
 impl PCtxImpl for SwapPCtx {

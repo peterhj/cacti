@@ -814,28 +814,28 @@ impl InnerCell for NvGpuMemCell {
     self.pinc.set(c - 1);
   }
 
-  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+  fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
     match self.borc._try_borrow() {
       Err(e) => {
-        println!("ERROR:  NvGpuMemCell::mem_borrow: borrow failure: {:?}", e);
-        panic!();
+        println!("WARNING:NvGpuMemCell::mem_borrow: borrow failure: {:?}", e);
+        Err(e)
       }
-      Ok(_) => unsafe {
+      Ok(()) => unsafe {
         let val = from_raw_parts(self.ptr as *const c_void as *const u8, self.sz);
-        Some(BorrowRef{borc: &self.borc, val: Some(val)})
+        Ok(BorrowRef{borc: &self.borc, val: Some(val)})
       }
     }
   }
 
-  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
+  fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> {
     match self.borc._try_borrow_mut() {
       Err(e) => {
-        println!("ERROR:  NvGpuMemCell::mem_borrow_mut: borrow failure: {:?}", e);
-        panic!();
+        println!("WARNING:NvGpuMemCell::mem_borrow_mut: borrow failure: {:?}", e);
+        Err(e)
       }
-      Ok(_) => unsafe {
+      Ok(()) => unsafe {
         let val = from_raw_parts_mut(self.ptr as *mut u8, self.sz);
-        Some(BorrowRefMut{borc: &self.borc, val: Some(val)})
+        Ok(BorrowRefMut{borc: &self.borc, val: Some(val)})
       }
     }
   }

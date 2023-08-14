@@ -1,4 +1,8 @@
-include common.mk
+CARGO := cargo --offline
+
+#TARGET := x86_64-unknown-linux-gnu
+#CARGO_TARGET := --target $(TARGET)
+CARGO_TARGET :=
 
 .PHONY: all dev debug build rel release clean distclean
 

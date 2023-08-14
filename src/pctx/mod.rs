@@ -877,8 +877,8 @@ pub trait InnerCell {
   fn pinned(&self) -> bool { unimplemented!(); }
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
-  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> { None }
-  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> { None }
+  fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> { Err(BorrowErr::NotImpl) }
+  fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> { Err(BorrowErr::NotImpl) }
 }
 
 pub trait InnerCell_ {
@@ -901,8 +901,8 @@ pub trait InnerCell_ {
   fn pinned(&self) -> bool;
   fn pin(&self);
   fn unpin(&self);
-  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>>;
-  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>>;
+  fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr>;
+  fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr>;
 }
 
 impl<C: InnerCell + Any> InnerCell_ for C {
@@ -974,11 +974,11 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     InnerCell::unpin(self)
   }
 
-  fn mem_borrow(&self) -> Option<BorrowRef<[u8]>> {
+  fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
     InnerCell::mem_borrow(self)
   }
 
-  fn mem_borrow_mut(&self) -> Option<BorrowRefMut<[u8]>> {
+  fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> {
     InnerCell::mem_borrow_mut(self)
   }
 }
@@ -986,7 +986,9 @@ impl<C: InnerCell + Any> InnerCell_ for C {
 #[derive(Clone, Copy, Debug)]
 #[repr(u8)]
 pub enum BorrowErr {
-  AlreadyMutablyBorrowed = 1,
+  NotImpl = 1,
+  Immutable,
+  AlreadyMutablyBorrowed,
   AlreadyBorrowed,
   TooManyBorrows,
 }
@@ -1070,6 +1072,13 @@ impl<'a, T: ?Sized> Deref for BorrowRef<'a, T> {
   }
 }
 
+impl<'a, T: ?Sized> BorrowRef<'a, T> {
+  pub fn map<F: FnOnce(&T) -> &T>(mut this: BorrowRef<'a, T>, f: F) -> BorrowRef<'a, T> {
+    this.val = Some((f)(this.val.take().unwrap()));
+    this
+  }
+}
+
 pub struct BorrowRefMut<'a, T: ?Sized> {
   borc: &'a BorrowCell,
   val:  Option<&'a mut T>,
@@ -1097,14 +1106,6 @@ impl<'a, T: ?Sized> DerefMut for BorrowRefMut<'a, T> {
 }
 
 impl<'a, T: ?Sized> BorrowRefMut<'a, T> {
-  /*pub fn map_mut<V: ?Sized, F: FnOnce(&mut T) -> &mut V>(this: BorrowRefMut<'a, T>, f: F) -> BorrowRefMut<'a, V> {
-    let BorrowRefMut{borc, val} = this;
-    BorrowRefMut{
-      borc: this.borc,
-      val:  (f)(val),
-    }
-  }*/
-
   pub fn map_mut<F: FnOnce(&mut T) -> &mut T>(this: &mut BorrowRefMut<'a, T>, f: F) {
     this.val = Some((f)(this.val.take().unwrap()));
   }

@@ -2,18 +2,19 @@
 
 `cacti` is a library for experimenting with computation graphs
 (or computation "spines"). `cacti` is written in Rust, and uses
-the [Futhark language](https://futhark-lang.org/) to implement
+the [Futhark](https://github.com/diku-dk/futhark)
+[language](https://futhark-lang.org/) to implement
 computational kernels targeting GPUs and multicore CPUs.
 
-The current early release of `cacti` is capable of larger-than-VRAM
-training or fine-tuning of LLaMA-style language models using the
-full-precision, full gradient update. For example, using `cacti`
-it is _possible_ to fine-tune a 30B, 65B, or 70B model on an 8 GB GPU
-(or smaller!), so long as your host CPU memory capacity is sufficiently
-large; although, for smaller GPUs, you will observe a slowdown due to
-excessive transfers over the PCIe bus, but the training will work.
+The current pre-release of `cacti` is capable of no-configuration,
+larger-than-VRAM training or fine-tuning of LLaMA-style language
+models, using the full-precision gradient (i.e. f16 or f32).
+In other words, using `cacti`, you do not modify your training
+script to enable larger-than-VRAM training or fine-tuning;
+`cacti` will do its best to utilize the available hardware resources,
+based on your system's GPU memory and host CPU memory capacities.
 `cacti` achieves this through an out-of-memory policy that
-opportunistically moves memory allocations from the GPU to the CPU.
+opportunistically spills memory allocations from the GPU to the CPU.
 
 `cacti` is oriented toward developing memory-safe AI systems,
 and so the `cacti` system code is entirely implemented in Rust.
@@ -34,7 +35,7 @@ visible in `cacti`.
 
 ### Tradeoffs and Limitations
 
-As this is an early release of `cacti`, there are a number of known
+As this is a pre-release of `cacti`, there are a number of known
 limitations due to tradeoffs made in prioritizing what to implement
 first. Given finite development resources, maintaining the design
 priorities listed earlier took precedence over significant extensions

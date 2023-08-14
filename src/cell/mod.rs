@@ -1710,6 +1710,10 @@ impl Dim {
   pub fn ndim(&self) -> i8 {
     self.ndim
   }
+
+  pub fn dtype(&self) -> Dtype {
+    self.dtype
+  }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1749,6 +1753,14 @@ impl CellType {
     assert!(self.dtype != Dtype::_Top);
     assert!(self.shape.len() <= i8::max_value() as usize);
     self.shape.len() as i8
+  }
+
+  pub fn shape(&self) -> &[i64] {
+    &self.shape
+  }
+
+  pub fn dtype(&self) -> Dtype {
+    self.dtype
   }
 
   pub fn is_top(&self) -> bool {

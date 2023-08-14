@@ -82,10 +82,6 @@ impl AsRef<Path> for PickleDir {
 }
 
 impl PickleDir {
-  pub fn from<P: Into<PathBuf>>(p: P) -> Result<PickleDir, PickleDirErr> {
-    PickleDir::open(p)
-  }
-
   pub fn open<P: Into<PathBuf>>(p: P) -> Result<PickleDir, PickleDirErr> {
     let mut this = PickleDir{
       dir_path: p.into(),

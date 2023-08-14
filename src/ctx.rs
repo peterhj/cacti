@@ -403,8 +403,8 @@ impl PMachScope {
     })
   }
 
-  pub fn with<F: FnMut(&PMachScope)>(&self, mut f: F) {
-    (f)(self);
+  pub fn with<F: FnMut(&PMachScope)>(self, mut f: F) {
+    (f)(&self);
   }
 }
 

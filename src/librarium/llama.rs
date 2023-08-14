@@ -55,14 +55,14 @@ pub struct LlamaConfig {
   /// The RMS-norm variance epsilon.
   pub rms_norm_eps: f32,
 
-  /// The attention group size (LLaMA 2).
-  pub group_sz: Option<i64>,
+  /// Linear RoPE scaling.
+  pub rope_lin_scale: Option<f32>,
 
-  /// The pretraining tensor parallelism (LLaMA 2).
+  /// The pretraining tensor parallelism.
   pub ten_par: Option<i64>,
 
-  /// Linear RoPE scaling (LLaMA 2).
-  pub rope_lin_scale: Option<f32>,
+  /// The attention group size.
+  pub group_sz: Option<i64>,
 
   /// The maximum sequence length; this should not be greater than
   /// the value of `pos_len`.
@@ -182,7 +182,6 @@ impl LlamaConfig {
 #[derive(Clone, Debug)]
 pub struct LlamaLayer {
   pub pre_norm: StableCell,
-  pub inv_freq: StableCell,
   pub q: StableCell,
   pub k: StableCell,
   pub v: StableCell,
@@ -217,26 +216,33 @@ impl From<LlamaConfig> for Llama {
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
+    let dtype = cfg.dtype;
+    if !(cfg.group_sz.unwrap_or(1) == 1 &&
+         cfg.ten_par.unwrap_or(1) == 1 &&
+         cfg.rope_lin_scale.unwrap_or(1.0) == 1.0)
+    {
+      println!("ERROR:  Llama::from: llama 2 config is not yet implemented");
+      panic!();
+    }
     assert!(tok_dim <= 0x10000);
     let cos = None;
     let sin = None;
-    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
+    let embed = StableCell::array([tok_dim, inner_dim], dtype);
     let mut layers = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let q = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let k = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let v = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let o = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
-      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
-      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype_());
-      let inv_freq = StableCell::array([head_dim / 2], f32::dtype_());
-      let pre_norm = StableCell::array([inner_dim], f16::dtype_());
-      let post_norm = StableCell::array([inner_dim], f16::dtype_());
-      layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
+      let q = StableCell::array([inner_dim, inner_dim], dtype);
+      let k = StableCell::array([inner_dim, inner_dim], dtype);
+      let v = StableCell::array([inner_dim, inner_dim], dtype);
+      let o = StableCell::array([inner_dim, inner_dim], dtype);
+      let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
+      let up = StableCell::array([mlp_inner_dim, inner_dim], dtype);
+      let down = StableCell::array([inner_dim, mlp_inner_dim], dtype);
+      let pre_norm = StableCell::array([inner_dim], dtype);
+      let post_norm = StableCell::array([inner_dim], dtype);
+      layers.push(LlamaLayer{q, k, v, o, gate, down, up, pre_norm, post_norm});
     }
-    let head_norm = StableCell::array([inner_dim], f16::dtype_());
-    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype_());
+    let head_norm = StableCell::array([inner_dim], dtype);
+    let lm_head = StableCell::array([tok_dim, inner_dim], dtype);
     Llama{cfg, cos, sin, embed, layers, head_norm, lm_head}
   }
 }
@@ -266,7 +272,6 @@ impl Llama {
       matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
       matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
       matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
-      matcher.insert((i, "inv_freq"), self.layers[i].inv_freq.clone());
       matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
       matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
     }
@@ -315,17 +320,25 @@ impl Llama {
   }
 
   pub fn init_constants(&mut self) {
-    let init_embed = || {
-      let seq_cap = self.cfg.seq_cap;
-      let dtype = self.cfg.dtype;
-      let pos = iota(seq_cap).cast(f32::dtype_());
-      let freq = pos.outer_mul(&self.layers[0].inv_freq);
+    let head_dim = self.cfg.head_dim;
+    let seq_cap = self.cfg.seq_cap;
+    let dtype = self.cfg.dtype;
+    let init_inv_freq = || {
+      let base = 10000.0_f32;
+      let exp = iota(head_dim / 2).lossy_cast(f32::dtype_()) * (-2.0_f32 / head_dim as f32);
+      let inv_freq = base.pow(exp);
+      inv_freq
+    };
+    let init_embed = |inv_freq| {
+      let pos = iota(seq_cap).lossy_cast(f32::dtype_());
+      let freq = pos.outer_mul(inv_freq);
       let freq2 = freq.inner_concat(freq);
-      let cos = freq2.cos().cast(dtype);
-      let sin = freq2.sin().cast(dtype);
+      let cos = freq2.cos().lossy_cast(dtype);
+      let sin = freq2.sin().lossy_cast(dtype);
       (cos, sin)
     };
-    let (cos, sin) = init_embed();
+    let inv_freq = init_inv_freq();
+    let (cos, sin) = init_embed(&inv_freq);
     self.cos = Some(cos.keep());
     self.sin = Some(sin.keep());
   }
@@ -347,6 +360,7 @@ impl Llama {
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
+    let dtype = self.cfg.dtype;
     let in_tok = in_tok._deref().const_();
     let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
       let x = x.new_shape([ubat_sz * seq_cap, num_head * head_dim]);
@@ -355,7 +369,7 @@ impl Llama {
                .new_shape([ubat_sz * seq_cap, 1]);
       let t = x / (v + eps).sqrt();
       let w = weight.new_shape([1, num_head * head_dim]);
-      let y = (w * t).cast(dtype);
+      let y = (w * t).lossy_cast(dtype);
       y
     };
     /*let inner_symplectic_map = |x: CellPtr| {
@@ -379,7 +393,7 @@ impl Llama {
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
     for ell in 0 .. num_layer as usize {
-      let pre_nrm = rms_norm(&stream, &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype_());
+      let pre_nrm = rms_norm(&stream, &self.layers[ell].pre_norm, rms_norm_eps, dtype);
       let q_proj = symplectic_embed(
                    pre_nrm
                   .matmul(false, &self.layers[ell].q, true)
@@ -397,13 +411,13 @@ impl Llama {
                 .cast(f32::dtype_());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
-                .cast(f16::dtype_());
+                .lossy_cast(dtype);
       let v_attn = attn.block_matmul(false, v_proj, false)
                   .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + o_proj;
-      let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, f16::dtype_());
+      let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, dtype);
       let up_proj = post_nrm
                    .matmul(false, &self.layers[ell].up, true);
       let gate_proj = post_nrm
@@ -414,7 +428,7 @@ impl Llama {
                      .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       stream = stream + down_proj;
     }
-    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, f16::dtype_());
+    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
     let out_lm_logit = stream
                       .matmul(false, &self.lm_head, true)
                       .new_shape([ubat_sz, seq_cap, tok_dim])
@@ -458,30 +472,37 @@ impl From<LlamaConfig> for LlamaCached {
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
+    let dtype = cfg.dtype;
+    if !(cfg.group_sz.unwrap_or(1) == 1 &&
+         cfg.ten_par.unwrap_or(1) == 1 &&
+         cfg.rope_lin_scale.unwrap_or(1.0) == 1.0)
+    {
+      println!("ERROR:  LlamaCached::from: llama 2 config is not yet implemented");
+      panic!();
+    }
     assert!(tok_dim <= 0x10000);
     let cos = None;
     let sin = None;
-    let embed = StableCell::array([tok_dim, inner_dim], f16::dtype_());
+    let embed = StableCell::array([tok_dim, inner_dim], dtype);
     let mut layers = Vec::with_capacity(num_layers);
     let mut states = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let q = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let k = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let v = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let o = StableCell::array([inner_dim, inner_dim], f16::dtype_());
-      let gate = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
-      let up = StableCell::array([mlp_inner_dim, inner_dim], f16::dtype_());
-      let down = StableCell::array([inner_dim, mlp_inner_dim], f16::dtype_());
-      let inv_freq = StableCell::array([head_dim / 2], f32::dtype_());
-      let pre_norm = StableCell::array([inner_dim], f16::dtype_());
-      let post_norm = StableCell::array([inner_dim], f16::dtype_());
-      layers.push(LlamaLayer{q, k, v, o, gate, down, up, inv_freq, pre_norm, post_norm});
-      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
-      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
+      let q = StableCell::array([inner_dim, inner_dim], dtype);
+      let k = StableCell::array([inner_dim, inner_dim], dtype);
+      let v = StableCell::array([inner_dim, inner_dim], dtype);
+      let o = StableCell::array([inner_dim, inner_dim], dtype);
+      let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
+      let up = StableCell::array([mlp_inner_dim, inner_dim], dtype);
+      let down = StableCell::array([inner_dim, mlp_inner_dim], dtype);
+      let pre_norm = StableCell::array([inner_dim], dtype);
+      let post_norm = StableCell::array([inner_dim], dtype);
+      layers.push(LlamaLayer{q, k, v, o, gate, down, up, pre_norm, post_norm});
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
       states.push(LlamaCachedState{k_cache, v_cache});
     }
-    let head_norm = StableCell::array([inner_dim], f16::dtype_());
-    let lm_head = StableCell::array([tok_dim, inner_dim], f16::dtype_());
+    let head_norm = StableCell::array([inner_dim], dtype);
+    let lm_head = StableCell::array([tok_dim, inner_dim], dtype);
     LlamaCached{cfg, cos, sin, embed, layers, states, head_norm, lm_head}
   }
 }
@@ -494,14 +515,15 @@ impl From<Llama> for LlamaCached {
     let num_head = cfg.num_head;
     let head_dim = cfg.head_dim;
     let num_layers = cfg.num_layer as usize;
+    let dtype = cfg.dtype;
     let cos = model.cos;
     let sin = model.sin;
     let embed = model.embed;
     let layers = model.layers;
     let mut states = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
-      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
-      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], f16::dtype_());
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
       states.push(LlamaCachedState{k_cache, v_cache});
     }
     let head_norm = model.head_norm;
@@ -528,7 +550,6 @@ impl LlamaCached {
       matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
       matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
       matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
-      matcher.insert((i, "inv_freq"), self.layers[i].inv_freq.clone());
       matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
       matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
     }
@@ -569,17 +590,25 @@ impl LlamaCached {
   }
 
   pub fn init_constants(&mut self) {
-    let init_embed = || {
-      let seq_cap = self.cfg.seq_cap;
-      let dtype = self.cfg.dtype;
-      let pos = iota(seq_cap).cast(f32::dtype_());
-      let freq = pos.outer_mul(&self.layers[0].inv_freq);
+    let head_dim = self.cfg.head_dim;
+    let seq_cap = self.cfg.seq_cap;
+    let dtype = self.cfg.dtype;
+    let init_inv_freq = || {
+      let base = 10000.0_f32;
+      let exp = iota(head_dim / 2).lossy_cast(f32::dtype_()) * (-2.0_f32 / head_dim as f32);
+      let inv_freq = base.pow(exp);
+      inv_freq
+    };
+    let init_embed = |inv_freq| {
+      let pos = iota(seq_cap).lossy_cast(f32::dtype_());
+      let freq = pos.outer_mul(inv_freq);
       let freq2 = freq.inner_concat(freq);
-      let cos = freq2.cos().cast(dtype);
-      let sin = freq2.sin().cast(dtype);
+      let cos = freq2.cos().lossy_cast(dtype);
+      let sin = freq2.sin().lossy_cast(dtype);
       (cos, sin)
     };
-    let (cos, sin) = init_embed();
+    let inv_freq = init_inv_freq();
+    let (cos, sin) = init_embed(&inv_freq);
     self.cos = Some(cos.keep());
     self.sin = Some(sin.keep());
   }
@@ -632,6 +661,7 @@ impl LlamaCached {
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
+    let dtype = self.cfg.dtype;
     let diff_seq_len = next_seq_len - prev_seq_len;
     assert_eq!(ubat_sz as usize, in_.len());
     assert!(diff_seq_len > 0);
@@ -642,7 +672,7 @@ impl LlamaCached {
                .new_shape([1 * diff_seq_len, 1]);
       let t = x / (v + eps).sqrt();
       let w = weight.new_shape([1, num_head * head_dim]);
-      let y = (w * t).cast(dtype);
+      let y = (w * t).lossy_cast(dtype);
       y
     };
     /*let inner_symplectic_map = |x: CellPtr| {
@@ -669,7 +699,7 @@ impl LlamaCached {
       for i in 0 .. ubat_sz {
         let idx = i as usize;
         let pre_nrm =
-               rms_norm(&stream[idx], &self.layers[ell].pre_norm, rms_norm_eps, f16::dtype_())
+               rms_norm(&stream[idx], &self.layers[ell].pre_norm, rms_norm_eps, dtype)
               .new_shape([1, diff_seq_len, num_head, head_dim]);
         let q_proj =
                symplectic_embed(
@@ -701,7 +731,7 @@ impl LlamaCached {
               .cast(f32::dtype_());
         let attn = row_causal_attention_mask(attn, prev_seq_len)
                   .inner_softmax()
-                  .cast(f16::dtype_());
+                  .lossy_cast(dtype);
         let v_attn =
                attn
               .block_matmul(
@@ -713,7 +743,7 @@ impl LlamaCached {
         let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
                     .new_shape([1, diff_seq_len, num_head, head_dim]);
         stream[idx] = stream[idx] + o_proj;
-        let post_nrm = rms_norm(&stream[idx], &self.layers[ell].post_norm, rms_norm_eps, f16::dtype_());
+        let post_nrm = rms_norm(&stream[idx], &self.layers[ell].post_norm, rms_norm_eps, dtype);
         let up_proj = post_nrm
                      .matmul(false, &self.layers[ell].up, true);
         let gate_proj = post_nrm
@@ -728,7 +758,7 @@ impl LlamaCached {
     let mut out = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
       let idx = i as usize;
-      stream[idx] = rms_norm(&stream[idx], &self.head_norm, rms_norm_eps, f16::dtype_());
+      stream[idx] = rms_norm(&stream[idx], &self.head_norm, rms_norm_eps, dtype);
       let out_lm_logit = stream[idx]
                         .matmul(false, &self.lm_head, true)
                         .new_shape([1, diff_seq_len, tok_dim])
@@ -739,7 +769,7 @@ impl LlamaCached {
                        .keep();
       let out_lm_tok = out_lm_logit
                       .inner_arg_max()
-                      .cast(u16::dtype_())
+                      .lossy_cast(u16::dtype_())
                       .keep();
       in_[idx].in_tok._deref()[(.., next_seq_len .. next_seq_len + 1)]
           += &out_lm_tok[(.., diff_seq_len - 1 .. diff_seq_len)];

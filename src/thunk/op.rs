@@ -569,7 +569,7 @@ impl FutharkThunkSpec for CastFutThunkSpec {
 
   fn pop_adj(&self, arg: &[(CellPtr, Clock)], _out: CellPtr, _out_clk: Clock, out_adj: CellPtr, arg_adj: &mut [CellPtr]) -> Result<FutharkThunkAdj, ThunkAdjErr> {
     let x_ty = arg[0].0.type_();
-    arg_adj[0] += out_adj.cast(x_ty.dtype);
+    arg_adj[0] += out_adj.lossy_cast(x_ty.dtype);
     Ok(FutharkThunkAdj::Spec)
   }
 }
@@ -697,6 +697,41 @@ impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     FutharkThunkGenCode::flat_map(arg[0], r"\u -> u16.u32 ((f32.to_bits u) >> 16)")
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct CastF16Bf16FutThunkSpec;
+
+impl FutharkThunkSpec for CastF16Bf16FutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.bf16.f16_cast")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if arg[0].dtype != Dtype::F16 {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::Bf16})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if arg[0].dtype != Dtype::F16 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Bf16})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], r"\u -> u16.u32 ((f32.to_bits (f32.f16 u)) >> 16)")
   }
 }
 
@@ -2835,6 +2870,41 @@ impl FutharkThunkSpec for TanhFutThunkSpec {
         arg[0].dtype.format_futhark(),
         arg[0].dtype.format_futhark(),
     ))
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct LPowScalarFutThunkSpec { pub base: ScalarVal_ }
+
+impl FutharkThunkSpec for LPowScalarFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.left_pow_scalar")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    if self.base.dtype() != arg[0].dtype() {
+      return Err(ThunkDimErr::_Bot);
+    }
+    Ok(arg[0])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    if self.base.dtype() != arg[0].dtype() {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    Ok(arg[0].clone())
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    FutharkThunkGenCode::flat_map(arg[0], format!(r"\u -> ({}) ** u", self.base.format_futhark()))
   }
 }
 
