@@ -27,11 +27,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 
-// The hyperparameters for OpenLLaMa are derived from the
+// The hyperparameters for OpenLLaMA are derived from the
 // original model code by Xinyang Geng and Hao Liu, and is
 // distributed according to the Apache 2.0 license.
 
-/// Hyperparameters for specifying a LLaMa-style language model.
+/// Hyperparameters for specifying a LLaMA-style language model.
 #[derive(Clone, Copy, Debug)]
 pub struct LlamaConfig {
   /// The number of layers.
@@ -55,8 +55,14 @@ pub struct LlamaConfig {
   /// The RMS-norm variance epsilon.
   pub rms_norm_eps: f32,
 
-  /// The pretraining tensor parallelism (LLaMa 2).
+  /// The attention group size (LLaMA 2).
+  pub group_sz: Option<i64>,
+
+  /// The pretraining tensor parallelism (LLaMA 2).
   pub ten_par: Option<i64>,
+
+  /// Linear RoPE scaling (LLaMA 2).
+  pub rope_lin_scale: Option<f32>,
 
   /// The maximum sequence length; this should not be greater than
   /// the value of `pos_len`.
@@ -79,7 +85,9 @@ impl LlamaConfig {
       mlp_inner_dim:  8640,
       pos_len:    2048,
       rms_norm_eps:   1.0e-6,
+      group_sz:   None,
       ten_par:    None,
+      rope_lin_scale: None,
       seq_cap:    2048,
       ubat_sz:    1,
       dtype:      f16::dtype_(),
@@ -87,7 +95,9 @@ impl LlamaConfig {
   }
 
   pub fn open_llama_7b() -> LlamaConfig {
-    LlamaConfig::llama_7b()
+    let mut llama = LlamaConfig::llama_7b();
+    llama.rms_norm_eps = 1.0e-6;
+    llama
   }
 
   pub fn llama_7b() -> LlamaConfig {
@@ -98,8 +108,10 @@ impl LlamaConfig {
       num_head:   32,
       mlp_inner_dim:  11008,
       pos_len:    2048,
-      rms_norm_eps:   1.0e-6,
+      rms_norm_eps:   1.0e-5,
+      group_sz:   None,
       ten_par:    None,
+      rope_lin_scale: None,
       seq_cap:    2048,
       ubat_sz:    1,
       dtype:      f16::dtype_(),
@@ -107,7 +119,9 @@ impl LlamaConfig {
   }
 
   pub fn open_llama_13b() -> LlamaConfig {
-    LlamaConfig::llama_13b()
+    let mut llama = LlamaConfig::llama_13b();
+    llama.rms_norm_eps = 1.0e-6;
+    llama
   }
 
   pub fn llama_13b() -> LlamaConfig {
@@ -118,8 +132,46 @@ impl LlamaConfig {
       num_head:   40,
       mlp_inner_dim:  13824,
       pos_len:    2048,
-      rms_norm_eps:   1.0e-6,
+      rms_norm_eps:   1.0e-5,
+      group_sz:   None,
       ten_par:    None,
+      rope_lin_scale: None,
+      seq_cap:    2048,
+      ubat_sz:    1,
+      dtype:      f16::dtype_(),
+    }
+  }
+
+  pub fn llama_30b() -> LlamaConfig {
+    LlamaConfig{
+      num_layer:  60,
+      tok_dim:    32000,
+      head_dim:   128,
+      num_head:   52,
+      mlp_inner_dim:  17920,
+      pos_len:    2048,
+      rms_norm_eps:   1.0e-5,
+      group_sz:   None,
+      ten_par:    None,
+      rope_lin_scale: None,
+      seq_cap:    2048,
+      ubat_sz:    1,
+      dtype:      f16::dtype_(),
+    }
+  }
+
+  pub fn llama_65b() -> LlamaConfig {
+    LlamaConfig{
+      num_layer:  80,
+      tok_dim:    32000,
+      head_dim:   128,
+      num_head:   64,
+      mlp_inner_dim:  22016,
+      pos_len:    2048,
+      rms_norm_eps:   1.0e-5,
+      group_sz:   None,
+      ten_par:    None,
+      rope_lin_scale: None,
       seq_cap:    2048,
       ubat_sz:    1,
       dtype:      f16::dtype_(),
@@ -141,7 +193,7 @@ pub struct LlamaLayer {
   pub down: StableCell,
 }
 
-/// A LLaMa language model.
+/// A LLaMA language model.
 /// This implementation is preferable for fine-tuning/training.
 /// NB: `Llama` and `LlamaCached` may share parameters.
 #[derive(Clone, Debug)]
@@ -381,7 +433,7 @@ pub struct LlamaCachedState {
   pub v_cache: StableCell,
 }
 
-/// A LLaMa language model with cached KV-activations.
+/// A LLaMA language model with cached KV-activations.
 /// This implementation is preferable for deployment/inference.
 /// NB: `LlamaCached` and `Llama` may share parameters.
 #[derive(Clone, Debug)]

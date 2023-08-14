@@ -6,7 +6,7 @@ the [Futhark language](https://futhark-lang.org/) to implement
 computational kernels targeting GPUs and multicore CPUs.
 
 The current early release of `cacti` is capable of larger-than-VRAM
-training or fine-tuning of LLaMa-style language models using the
+training or fine-tuning of LLaMA-style language models using the
 full-precision, full gradient update. For example, using `cacti`
 it is _possible_ to fine-tune a 30B, 65B, or 70B model on an 8 GB GPU
 (or smaller!), so long as your host CPU memory capacity is sufficiently
@@ -74,7 +74,7 @@ However, please note that Futhark itself depends on many
 Haskell packages which we do _not_ vendor, and are instead
 downloaded by cabal during bootstrapping.
 
-    git clone 'https://git.sr.ht:~ptrj/cacti-bootstrap'
+    git clone 'https://git.sr.ht/~ptrj/cacti-bootstrap'
     cd cacti-bootstrap
     ./bootstrap.sh
     cd cacti
@@ -92,7 +92,7 @@ directory.
 
     mkdir <your-workspace-dir>
     cd <your-workspace-dir>
-    git clone 'https://git.sr.ht:~ptrj/cacti'
+    git clone 'https://git.sr.ht/~ptrj/cacti'
     cd cacti
     ./bootstrap.sh
     make
@@ -101,7 +101,7 @@ directory.
 
 In the "examples" directory, you will find provided code for
 both fine-tuning and inference based on
-[OpenLLaMa-3B](https://huggingface.co/openlm-research/open_llama_3b_v2).
+[OpenLLaMA-3B](https://huggingface.co/openlm-research/open_llama_3b_v2).
 
 It is recommended to read and understand the examples, and
 to use them as starting points for your own experiments.
