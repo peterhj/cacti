@@ -6,9 +6,9 @@ authors = ["Peter Jin"]
 
 [workspace]
 members = [
-    "cacti_cfg_env",
-    "cacti_gpu_cu_ffi",
-    "cacti_smp_c_ffi",
+	"cacti_cfg_env",
+	"cacti_gpu_cu_ffi",
+	"cacti_smp_c_ffi",
 ]
 
 [profile.dev]
@@ -21,16 +21,18 @@ codegen-units = 256
 incremental = true
 
 [profile.release]
+debug = true
 overflow-checks = true
 panic = "abort"
 codegen-units = 1
 incremental = false
+lto = "thin"
 
 [features]
 default = [
-  "gpu",
-  "librarium",
-  "sentencepiece",
+	"gpu",
+	"librarium",
+	"sentencepiece",
 ]
 gpu = ["nvgpu"]
 nvgpu = ["cacti_gpu_cu_ffi"]
@@ -43,7 +45,7 @@ byteorder = { path = "../byteorder" }
 cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
-cellsplit = { path = "../cellsplit" }
+cell_split = { path = "../cell_split" }
 #fast_float = { path = "../fast_float" }
 futhark_ffi = { path = "../futhark_ffi" }
 #futhark_syntax = { path = "../futhark_syntax" }
@@ -60,8 +62,12 @@ sentencepiece_ffi = { path = "../sentencepiece_ffi", optional = true }
 smol_str = { path = "../smol_str", default-features = false }
 
 [[bin]]
-name = "inspect_pth"
-path = "tools/inspect_pth.rs"
+name = "inspect_pickle_bin"
+path = "tools/inspect_pickle_bin.rs"
+
+[[bin]]
+name = "inspect_pickle_dir"
+path = "tools/inspect_pickle_dir.rs"
 
 # For internal development:
 

@@ -11,7 +11,7 @@ set -x
 git clone -b patch "${cacti_remote_prefix}/aho_corasick" ../aho_corasick
 git clone "${cacti_remote_prefix}/byteorder" ../byteorder
 git clone -b patch "${cacti_remote_prefix}/cc" ../cc
-git clone "${cacti_remote_prefix}/cellsplit" ../cellsplit
+git clone "${cacti_remote_prefix}/cell_split" ../cell_split
 git clone -b patch "${cacti_remote_prefix}/cfg_if" ../cfg_if
 git clone "${cacti_remote_prefix}/cmake" ../cmake
 git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast

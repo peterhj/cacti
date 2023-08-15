@@ -22,7 +22,7 @@ dependencies = [
  "cacti_cfg_env",
  "cacti_gpu_cu_ffi",
  "cacti_smp_c_ffi",
- "cellsplit",
+ "cell_split",
  "futhark_ffi",
  "glob",
  "half",
@@ -67,7 +67,7 @@ name = "cc"
 version = "1.0.79"
 
 [[package]]
-name = "cellsplit"
+name = "cell_split"
 version = "0.1.0-devel"
 dependencies = [
  "rustc_serialize",

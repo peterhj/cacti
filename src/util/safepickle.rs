@@ -70,6 +70,7 @@ pub enum PickleDirErr {
 pub struct PickleDir {
   pub dir_path: PathBuf,
   pub model_paths: Vec<PathBuf>,
+  pub serial_key: Vec<SmolStr>,
   pub tensor_key: HashSet<SmolStr>,
   pub tensor_map: HashMap<SmolStr, (usize, PickleTensor)>,
   pub model_files: Vec<RefCell<Option<MmapFile>>>,
@@ -86,6 +87,7 @@ impl PickleDir {
     let mut this = PickleDir{
       dir_path: p.into(),
       model_paths: Vec::new(),
+      serial_key: Vec::new(),
       tensor_key: HashSet::new(),
       tensor_map: HashMap::new(),
       model_files: Vec::new(),
@@ -96,6 +98,7 @@ impl PickleDir {
 
   pub fn _reopen(&mut self) -> Result<(), PickleDirErr> {
     self.model_paths.clear();
+    self.serial_key.clear();
     self.tensor_key.clear();
     self.tensor_map.clear();
     let mut p = self.dir_path.clone();
@@ -136,6 +139,7 @@ impl PickleDir {
           return Err(PickleDirErr::DuplicateName(t.name.clone()));
         }
         if cfg_debug() { println!("DEBUG: PickleDir::_reopen:   name=\"{}\"", safe_ascii(t.name.as_bytes())); }
+        self.serial_key.push(t.name.clone());
         self.tensor_key.insert(t.name.clone());
         self.tensor_map.insert(t.name.clone(), (model_idx, t.clone()));
       }
