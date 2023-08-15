@@ -4199,9 +4199,9 @@ impl MatrixMulThunkSpec {
     let n = r_blk_outer;
     let o_ty = CellType{shape: vec![m, n], dtype: self.o_dtype};
     if cfg_debug() {
-    println!("DEBUG: BlockMatrixMulThunkSpec::_calculate_out_ty: {:?}{} x {:?}{} = {:?}",
-        &arg[0].shape, if self.l_t { " T" } else { "" },
-        &arg[1].shape, if self.r_t { " T" } else { "" },
+    println!("DEBUG: MatrixMulThunkSpec::_calculate_out_ty: {:?}{} x {:?}{} = {:?}",
+        &arg[0].shape, if self.l_t { "^T" } else { "" },
+        &arg[1].shape, if self.r_t { "^T" } else { "" },
         &o_ty.shape);
     }
     let tys = MatrixMulTypes{

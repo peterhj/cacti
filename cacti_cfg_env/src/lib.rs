@@ -12,19 +12,27 @@ thread_local! {
   pub static TL_CFG_ENV: CfgEnv = CFG_ENV.clone();
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum OomPolicy {
+  Soft,
+  Hard,
+}
+
 #[derive(Clone)]
 pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
   pub mem_soft_limit: Option<()>,
-  pub mem_oom:    Option<()>,
+  pub mem_oom:    OomPolicy,
   pub vmem_soft_limit: Option<()>,
-  pub vmem_oom:   Option<()>,
+  pub vmem_oom:   OomPolicy,
   pub no_kcache:  bool,
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
-  pub silent:     bool,
   pub verbose:    bool,
+  //pub verbose:    i8,
+  pub silent:     bool,
+  pub report:     bool,
   pub debug_yeet: i8,
   pub debug_mem_pool: i8,
   pub debug_initialize: i8,
@@ -32,6 +40,8 @@ pub struct CfgEnv {
   pub debug_apply: i8,
   pub debug:      i8,
   pub devel_dump: bool,
+  pub rust_backtrace: bool,
+  //pub cuda_visible_devices: (),
   //pub virtualenv: bool,
 }
 
@@ -84,18 +94,24 @@ impl CfgEnv {
       // FIXME
       ()
     }).ok();
-    let mem_oom = var("CACTI_MEM_OOM").map(|s| {
-      // FIXME
-      ()
-    }).ok();
+    let mem_oom = var("CACTI_MEM_OOM").ok().and_then(|s| {
+      match s.as_str() {
+        "soft" => Some(OomPolicy::Soft),
+        "hard" => Some(OomPolicy::Hard),
+        _ => None
+      }
+    }).unwrap_or_else(|| OomPolicy::Soft);
     let vmem_soft_limit = var("CACTI_VMEM_SOFT_LIMIT").map(|s| {
       // FIXME
       ()
     }).ok();
-    let vmem_oom = var("CACTI_VMEM_OOM").map(|s| {
-      // FIXME
-      ()
-    }).ok();
+    let vmem_oom = var("CACTI_VMEM_OOM").ok().and_then(|s| {
+      match s.as_str() {
+        "soft" => Some(OomPolicy::Soft),
+        "hard" => Some(OomPolicy::Hard),
+        _ => None
+      }
+    }).unwrap_or_else(|| OomPolicy::Soft);
     let no_kcache = var("CACTI_NO_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -105,10 +121,13 @@ impl CfgEnv {
     let futhark_trace = var("CACTI_FUTHARK_TRACE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let verbose = var("CACTI_VERBOSE")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let silent = var("CACTI_SILENT")
       .map(|_| true)
       .unwrap_or_else(|_| false);
-    let verbose = var("CACTI_VERBOSE")
+    let report = var("CACTI_REPORT")
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let debug_yeet = var("CACTI_DEBUG_YEET")
@@ -150,15 +169,23 @@ impl CfgEnv {
     let devel_dump = var("CACTI_DEVEL_DUMP")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let rust_backtrace = var("RUST_BACKTRACE").ok()
+      .map(|s| match s.as_str() {
+        "0" => false,
+        _ => true
+      })
+      .unwrap_or_else(|| false);
     /*let virtualenv = var("VIRTUAL_ENV")
       .map(|_| true)
       .unwrap_or_else(|_| false);*/
     if !silent && debug >= 0 {
-      for p in cabalpath.iter() {
-        println!("INFO:   cacti_cfg_env: CACTI_CABAL_PATH={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      for (i, p) in cabalpath.iter().enumerate() {
+        println!("INFO:   cacti_cfg_env: CACTI_CABAL_PATH[{}]={}",
+            i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
-      for p in cudaprefix.iter() {
-        println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX={}", p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      for (i, p) in cudaprefix.iter().enumerate() {
+        println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX[{}]={}",
+            i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
       // FIXME: format.
       //println!("INFO:   cacti_cfg_env: CACTI_VMEM_LIMIT={}", _);
@@ -173,8 +200,9 @@ impl CfgEnv {
       no_kcache,
       futhark_pedantic,
       futhark_trace,
-      silent,
       verbose,
+      silent,
+      report,
       debug_yeet,
       debug_mem_pool,
       debug_initialize,
@@ -182,6 +210,7 @@ impl CfgEnv {
       debug_apply,
       debug,
       devel_dump,
+      rust_backtrace,
       //virtualenv,
     }
   }
@@ -195,13 +224,25 @@ pub fn cfg_devel_dump() -> bool {
 
 pub fn cfg_info() -> bool {
   TL_CFG_ENV.with(|cfg| {
-    !cfg.silent && cfg.debug >= 0
+    !cfg.silent
   })
 }
 
 pub fn cfg_verbose_info() -> bool {
   TL_CFG_ENV.with(|cfg| {
-    !cfg.silent && cfg.verbose && cfg.debug >= 0
+    !cfg.silent && cfg.verbose
+  })
+}
+
+pub fn cfg_report() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.report
+  })
+}
+
+pub fn cfg_verbose_report() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && cfg.report && cfg.verbose
   })
 }
 

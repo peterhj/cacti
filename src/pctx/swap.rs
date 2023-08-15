@@ -149,7 +149,9 @@ pub struct SwapPCtx {
 
 impl Drop for SwapPCtx {
   fn drop(&mut self) {
-    self._dump_usage();
+    if cfg_info() {
+      self._dump_usage();
+    }
   }
 }
 
@@ -182,11 +184,9 @@ impl SwapPCtx {
   }
 
   pub fn _dump_usage(&self) {
-    if cfg_info() {
-      println!("INFO:   SwapPCtx::_dump_usage:  usage: total={}",
-          self.usage.get(),
-      );
-    }
+    println!("INFO:   SwapPCtx::_dump_usage:  page buf usage: total={}",
+        self.usage.get(),
+    );
   }
 
   pub fn lookup(&self, addr: PAddr) -> Option<(Locus, Rc<SwapCowMemCell>)> {

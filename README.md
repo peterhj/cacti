@@ -1,20 +1,27 @@
 # cacti
 
 `cacti` is a library for experimenting with computation graphs
-(or computation "spines"). `cacti` is written in Rust, and uses
-the [Futhark](https://github.com/diku-dk/futhark)
+(or computation "spines"). `cacti` is written in the
+[Rust](https://github.com/rust-lang/rust)
+[language](https://rust-lang.org/), and uses the
+[Futhark](https://github.com/diku-dk/futhark)
 [language](https://futhark-lang.org/) to implement
 computational kernels targeting GPUs and multicore CPUs.
 
-The current pre-release of `cacti` is capable of no-configuration,
-larger-than-VRAM training or fine-tuning of LLaMA-style language
-models, using the full-precision gradient (i.e. f16 or f32).
-In other words, using `cacti`, you do not modify your training
-script to enable larger-than-VRAM training or fine-tuning;
-`cacti` will do its best to utilize the available hardware resources,
-based on your system's GPU memory and host CPU memory capacities.
+The current pre-release of `cacti` is capable of larger-than-VRAM
+training or fine-tuning of LLaMA-style language models, using the
+full-precision gradient (e.g. fp16), without special handling.
+In other words, using `cacti`, there is no need to invoke any
+specialized optimizer to enable larger-than-VRAM training or
+fine-tuning;
+the underlying dataflow system of `cacti` will do its best to
+utilize the available hardware resources, based on your system's
+GPU memory and host CPU memory capacities.
 `cacti` achieves this through an out-of-memory policy that
-opportunistically spills memory allocations from the GPU to the CPU.
+aggressively garbage-collects those dataflow cells (i.e. "tensors")
+that are determined to be unreachable via a static analysis, and
+opportunistically spills other cells (that cannot be
+garbage-collected) from the GPU to the host CPU memory.
 
 `cacti` is oriented toward developing memory-safe AI systems,
 and so the `cacti` system code is entirely implemented in Rust.
@@ -29,7 +36,7 @@ visible in `cacti`.
 
 - Purely functional/monotone update semantics
 - Operational semantics specifying safe dataflow and autodiff
-- Programming model: repeatable coroutines + cyclic dataflow
+- Programming model: cyclic dataflow + coroutine (`reset`, `compile`, `resume`, `yield_`)
 - Computational kernels: first, write it in Futhark
 - Written for Rust
 
@@ -108,5 +115,30 @@ It is recommended to read and understand the examples, and
 to use them as starting points for your own experiments.
 
 ## Documentation
+
+### Environment variables
+
+`cacti` will inspect the following environment variables
+to control its run-time behavior.
+
+- `CACTI_CABAL_BIN_PATH`: This is a colon-delimited list of
+  paths in which to search for the `cacti-futhark` binary,
+  which was installed when bootstrapping from source.
+  If this variable was not specified, the default value is
+  `${HOME}/.cabal/bin` where `${HOME}` is the current user's
+  home directory.
+- `CACTI_CUDA_PREFIX`: This is a colon-delimited list of
+  paths at which CUDA is installed.
+  If this variable was not specified, the default value is
+  `/usr/local/cuda`.
+- `CACTI_VERBOSE`: Setting this will increase the verbosity
+  of the stdout logging.
+
+There are other environment variables defined though not
+yet documented, some of which are for debugging or internal
+development usage.
+Please see "cacti_cfg_env/src/lib.rs" for further details.
+
+### Reference (todo)
 
 Please check back soon; this is a work in progress.

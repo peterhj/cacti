@@ -1,4 +1,4 @@
-use crate::algo::{HashMap, HashSet};
+use crate::algo::{HashMap, BTreeSet};
 use crate::cell::*;
 use crate::clock::*;
 use crate::nd::{IRange};
@@ -157,10 +157,10 @@ impl Ctx {
     let mut free_ct = 0;
     TL_PCTX.with(|pctx| {
       if cfg_verbose_info() {
+      pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
       }
-      pctx.swap._dump_usage();
       }
       for &x in self.ctr.celfront.borrow().iter() {
         let mut f = false;
@@ -204,10 +204,10 @@ impl Ctx {
         }
       }
       if cfg_verbose_info() {
+      pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
       }
-      pctx.swap._dump_usage();
       }
     });
     drop(spine_env);
@@ -217,6 +217,7 @@ impl Ctx {
     }
     swap(&mut *self.ctr.celfront.borrow_mut(), &mut next_celfront);
     let rst = self.spine._reset();
+    env._reset();
     //self.ctr.reset.set(rst);
     rst
   }
@@ -1259,8 +1260,8 @@ pub enum CellDerefErr {
 
 //#[derive(Default)]
 pub struct CtxEnv {
-  // FIXME
   pub celtab:   HashMap<CellPtr, CellEnvEntry>,
+  pub unlive:   RefCell<BTreeSet<CellPtr>>,
   /*pub atomtab:  HashMap<Atom, ()>,
   pub mceltab:  HashMap<MCellPtr, MCellEnvEntry>,*/
   //pub tag:      HashMap<CellPtr, HashSet<String>>,
@@ -1271,6 +1272,7 @@ impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
       celtab:   HashMap::new(),
+      unlive:   RefCell::new(BTreeSet::new()),
       /*atomtab:  HashMap::new(),
       mceltab:  HashMap::new(),*/
       //tag:      HashMap::new(),
@@ -1279,8 +1281,10 @@ impl Default for CtxEnv {
 }
 
 impl CtxEnv {
-  /*pub fn reset(&mut self) {
-  }*/
+  pub fn _reset(&self) {
+    /*self.celtab.clear();*/
+    self.unlive.borrow_mut().clear();
+  }
 
   pub fn _retain_probe(&self, query: CellPtr) {
     if query.is_nil() {

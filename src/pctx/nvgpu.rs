@@ -170,7 +170,9 @@ pub struct NvGpuPCtx {
 
 impl Drop for NvGpuPCtx {
   fn drop(&mut self) {
-    self._dump_usage();
+    if cfg_info() {
+      self._dump_usage();
+    }
   }
 }
 
@@ -642,18 +644,16 @@ impl NvGpuPCtx {
   }
 
   pub fn _dump_usage(&self) {
-    if cfg_info() {
+    println!("INFO:   NvGpuPCtx::_dump_usage: pagelock usage: total={} page (4k) rounded={}",
+        self.page_map.usage.get(),
+        self.page_map.pg_usage.get(),
+    );
     println!("INFO:   NvGpuPCtx::_dump_usage: mem pool usage: front={} free={} back={} total={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.free_size.get(),
         self.mem_pool.back_cursor.get(),
         self.mem_pool.reserve_sz,
     );
-    println!("INFO:   NvGpuPCtx::_dump_usage: page map usage: total={} page rounded={}",
-        self.page_map.usage.get(),
-        self.page_map.pg_usage.get(),
-    );
-    }
   }
 }
 
@@ -1876,6 +1876,72 @@ impl NvGpuMemPool {
     let req_sz = ((query_sz + ALLOC_ALIGN - 1) / ALLOC_ALIGN) * ALLOC_ALIGN;
     assert!(query_sz <= req_sz);
     TL_CTX.with(|ctx| {
+      loop {
+        let env = ctx.env.borrow();
+        let x = match env.unlive.borrow().iter().next() {
+          None => {
+            break;
+          }
+          Some(&x) => x
+        };
+        let mut yeeted = false;
+        'inner: loop {
+          match env._try_lookup_ref_(x) {
+            None | Some(Err(_)) => {}
+            Some(Ok(e)) => {
+              let root = e.root();
+              if _cfg_debug_yeet() {
+                println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   found unlive: x={:?} root={:?}", x, root);
+              }
+              assert_eq!(x, root);
+              if e.root_ty.is_top() {
+                break 'inner;
+              }
+              if e.stablect >= 1 {
+                break 'inner;
+              }
+              /*match env._try_lookup_ref_(root) {
+                None | Some(Err(_)) => {}
+                Some(Ok(e)) => {
+                  if e.stablect >= 1 {
+                    break 'inner;
+                  }
+                }
+              }*/
+              let mut cel_ = e.cel_.borrow_mut();
+              match &mut *cel_ {
+                &mut Cell_::Phy(.., ref mut pcel) => {
+                  if pcel.ogty.is_top() {
+                    break 'inner;
+                  }
+                  let mut keys = Vec::new();
+                  for (key, _) in pcel.replicas.iter() {
+                    let &(loc, pm) = key.as_ref();
+                    keys.push((loc, pm));
+                  }
+                  for (loc, pm) in keys.into_iter() {
+                    pcel.yeet(loc, pm);
+                  }
+                  yeeted = true;
+                }
+                _ => {}
+              }
+            }
+          }
+          break 'inner;
+        }
+        env.unlive.borrow_mut().remove(&x);
+        if !yeeted {
+          // FIXME: would be helpful for error messages.
+          /*env.unyeet.borrow_mut().insert(x);*/
+        } else {
+          // FIXME: would be helpful for error messages.
+          /*env.yeeted.borrow_mut().insert(x);*/
+          if !self.try_pre_alloc(query_sz).is_oom() {
+            return Some(());
+          }
+        }
+      }
       let next_reset = ctx.spine.ctr.get();
       if self.yeet_reset.get() > next_reset {
         panic!("bug");

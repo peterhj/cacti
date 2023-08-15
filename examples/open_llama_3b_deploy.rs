@@ -6,10 +6,17 @@ use cacti::librarium::llama::{LlamaConfig, LlamaCached};
 use cacti::librarium::sentencepiece::{SentencePieceTokenizer};
 use cacti::util::pickle::{PickleDir};
 
-// This inference example makes extensive use of
-// `LlamaCached` (src/librarium/llama.rs), which you may
-// also want to read.
 fn main() {
+  // To run this inference example, you will need to have
+  // a copy of OpenLLaMA 3B in a local directory.
+  // The remote repo url is:
+  //
+  //    https://huggingface.co/openlm-research/open_llama_3b_v2
+  //
+  // Once you have cloned the repo and downloaded the parameters
+  // via git LFS, please set `data_dir` below to the local path
+  // at which you cloned the repo.
+  //
   // This example was written with OpenLLaMA 3B in mind,
   // but you are encouraged to try some other models.
   let data_dir = "data/openlm/open_llama_3b";
@@ -61,6 +68,9 @@ fn main() {
 
   // `LlamaCached::from` will create a LLaMA model from the
   // provided config that is suitable for inference.
+  //
+  // `LlamaCached` is implemented in (src/librarium/llama.rs),
+  // which you may also want to read.
   let mut model = LlamaCached::from(cfg);
 
   // So, we have an in-memory `model`, and we have a
@@ -216,12 +226,9 @@ fn main() {
     // is now flush with instructions waiting to run.
     //
     // But before we run the spine, first we call `compile`
-    // to perform optimizations on the spine that can
-    // potentially reduce memory usage, run-time, or both.
-    //
-    // (Though, currently, `compile` is just a no-op...
-    // But for future-proofing, it's a good idea to always
-    // call `compile` after you are done dataflow setup.)
+    // to perform a static analysis on the spine. The static
+    // analysis can then enable run-time optimizations to
+    // reduce memory usage and avoid OOM failures.
     compile();
 
     // Now we are ready to run the dataflow instructions in

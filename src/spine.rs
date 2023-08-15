@@ -11,7 +11,7 @@ use cacti_cfg_env::*;
 
 use std::any::{Any};
 use std::cell::{Cell, RefCell};
-use std::cmp::{Ordering};
+use std::cmp::{Ordering, max, min};
 use std::convert::{TryInto};
 use std::mem::{swap};
 
@@ -127,6 +127,7 @@ pub enum SpineEntry {
   Unseal(CellPtr),
   //Eval(CellPtr),
   //Uneval(CellPtr),
+  Live(CellPtr),
   Unlive(CellPtr),
   Unsync(CellPtr),
   //Fetch(_),
@@ -167,6 +168,7 @@ impl SpineEntry {
       &SpineEntry::Seal(..)       => SpineEntryName::Seal,
       &SpineEntry::Unseal(..)     => SpineEntryName::Unseal,
       //&SpineEntry::Eval(..)       => SpineEntryName::Eval,
+      &SpineEntry::Live(..)       => SpineEntryName::Live,
       &SpineEntry::Unlive(..)     => SpineEntryName::Unlive,
       &SpineEntry::Unsync(..)     => SpineEntryName::Unsync,
       &SpineEntry::Bot            => SpineEntryName::Bot,
@@ -206,6 +208,7 @@ pub enum SpineEntryName {
   Unseal,
   //Eval,
   //Uneval,
+  Live,
   Unlive,
   Unsync,
   //Fetch,
@@ -283,6 +286,39 @@ pub enum SpineEnvMapEntry2 {
   Alias(CellPtr),
 }
 
+#[derive(Clone, Default, Debug)]
+pub struct SpineFlowEnv {
+  pub live_cur: u32,
+  pub liveness: HashMap<CellPtr, SpineFlowLivenessEntry>,
+  pub liveinit: BTreeSet<(u32, CellPtr)>,
+  pub live_fin: BTreeSet<(u32, CellPtr)>,
+}
+
+impl SpineFlowEnv {
+  pub fn reset(&mut self) {
+    self.live_cur = 0;
+    self.liveness.clear();
+    self.liveinit.clear();
+    self.live_fin.clear();
+  }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SpineFlowLivenessEntry {
+  pub init: u32,
+  pub last: u32,
+  //pub lup:  u32,
+}
+
+impl Default for SpineFlowLivenessEntry {
+  fn default() -> SpineFlowLivenessEntry {
+    SpineFlowLivenessEntry{
+      init: u32::max_value(),
+      last: u32::max_value(),
+    }
+  }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum SpineEnvGet {
   Value(CellPtr, Clock),
@@ -291,26 +327,28 @@ pub enum SpineEnvGet {
 
 #[derive(Clone, Default, Debug)]
 pub struct SpineEnv {
-  // TODO TODO
   pub ctr:      Counter,
   pub state:    HashMap<CellPtr, SpineEnvEntry>,
+  //pub set:      BTreeSet<(MCellPtr, CellPtr)>,
   pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
   pub arg:      Vec<(CellPtr, Clock)>,
   //pub out:      Vec<(CellPtr, Clock)>,
   pub update:   HashMap<(CellPtr, Clock), (CellPtr, Vec<(CellPtr, Clock)>)>,
+  pub flow:     SpineFlowEnv,
 }
 
 impl SpineEnv {
   pub fn reset(&mut self, ctr: Counter) {
     if cfg_debug() { println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr); }
     self.ctr = ctr;
-    // FIXME
+    // FIXME: during ctx reset, need to manually clear gc'd state.
     /*self.state.clear();*/
     //self.set.clear();
     self.map.clear();
     self.arg.clear();
     //self.out.clear();
     self.update.clear();
+    self.flow.reset();
   }
 
   pub fn _deref(&self, query: CellPtr) -> CellPtr {
@@ -401,98 +439,6 @@ impl SpineEnv {
     if cfg_debug() { println!("DEBUG: SpineEnv::step: idx={} e={:?}", sp, &e_sp); }
     match e_sp {
       SpineEntry::_Top => {}
-      SpineEntry::Add(mx, x, _xclk) => {
-        // FIXME FIXME
-        unimplemented!();
-        /*let mut self_ = this.borrow_mut();
-        let xclk = match self_._lookup(x) {
-          //None => panic!("bug"),
-          None => Clock::default(),
-          Some((_, state)) => state.clk
-        };
-        let _ = self_.set.insert((mx, x, xclk.into()));
-        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, x, xclk);*/
-      }
-      SpineEntry::Add2(mx, k, _kclk, v, _vclk) => {
-        let mut self_ = this.borrow_mut();
-        let kroot = self_._deref(k);
-        let kclk = match self_._lookup(k) {
-          //None => panic!("bug"),
-          None => Clock::default(),
-          Some((_, state)) => state.clk
-        };
-        if v.is_nil() {
-          println!("ERROR: SpineEnv::step: Add2: trying to add a nil value: map={:?} k={:?} kroot={:?} v={:?}",
-              mx, k, kroot, v);
-          unimplemented!();
-        }
-        let vroot = self_._deref(v);
-        let vclk = match self_._lookup(v) {
-          //None => panic!("bug"),
-          None => Clock::default(),
-          Some((_, state)) => state.clk
-        };
-        if k != kroot {
-          if !(v != vroot) {
-            println!("DEBUG: SpineEnv::step: Add2 mx={:?} k={:?} v={:?}", mx, k, v);
-            println!("DEBUG: SpineEnv::step:   kroot={:?} kclk={:?}", kroot, kclk);
-            println!("DEBUG: SpineEnv::step:   vroot={:?} vclk={:?}", vroot, vclk);
-          }
-          assert!(v != vroot);
-          match self_.map.get_mut(&(mx, kroot)) {
-            None => {
-              let mut kvclk = Vec::new();
-              kvclk.push((kclk, vclk));
-              self_.map.insert((mx, kroot), SpineEnvMapEntry2::Value(vroot, kvclk));
-            }
-            Some(&mut SpineEnvMapEntry2::Value(ovroot, ref mut kvclk)) => {
-              assert_eq!(ovroot, vroot);
-              let fin = kvclk.len() - 1;
-              let (okclk, ovclk) = kvclk[fin];
-              // FIXME: descriptive error.
-              assert!(okclk <= kclk);
-              assert!(ovclk <= vclk);
-              if okclk == kclk {
-                kvclk[fin] = (kclk, vclk);
-              } else {
-                kvclk.push((kclk, vclk));
-              }
-            }
-            _ => panic!("bug")
-          }
-          match self_.map.insert((mx, k), SpineEnvMapEntry2::Alias(v)) {
-            None => {}
-            Some(SpineEnvMapEntry2::Alias(ov)) => {
-              assert_eq!(ov, v);
-            }
-            _ => panic!("bug")
-          }
-        } else {
-          assert_eq!(v, vroot);
-          match self_.map.get_mut(&(mx, k)) {
-            None => {
-              let mut kvclk = Vec::new();
-              kvclk.push((kclk, vclk));
-              self_.map.insert((mx, k), SpineEnvMapEntry2::Value(v, kvclk));
-            }
-            Some(&mut SpineEnvMapEntry2::Value(ov, ref mut kvclk)) => {
-              assert_eq!(ov, v);
-              let fin = kvclk.len() - 1;
-              let (okclk, ovclk) = kvclk[fin];
-              // FIXME: descriptive error.
-              assert!(okclk <= kclk);
-              assert!(ovclk <= vclk);
-              if okclk == kclk {
-                kvclk[fin] = (kclk, vclk);
-              } else {
-                kvclk.push((kclk, vclk));
-              }
-            }
-            _ => panic!("bug")
-          }
-        }
-        log.borrow_mut()[sp as usize] = SpineEntry::Add2(mx, k, kclk, v, vclk);
-      }
       SpineEntry::AdjMap(allsrc, sink) => {
         if cfg_debug() {
         println!("DEBUG: SpineEnv::step: AdjMap (allsrc={:?} sink={:?})",
@@ -740,6 +686,98 @@ impl SpineEnv {
         println!("ERROR: SpineEnv::step: unimplemented: jacobian-vector product via DualMap (allsink={:?} src={:?})",
             allsink, src);
         panic!();
+      }
+      SpineEntry::Add(mx, x, _xclk) => {
+        // FIXME FIXME
+        unimplemented!();
+        /*let mut self_ = this.borrow_mut();
+        let xclk = match self_._lookup(x) {
+          //None => panic!("bug"),
+          None => Clock::default(),
+          Some((_, state)) => state.clk
+        };
+        let _ = self_.set.insert((mx, x, xclk.into()));
+        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, x, xclk);*/
+      }
+      SpineEntry::Add2(mx, k, _kclk, v, _vclk) => {
+        let mut self_ = this.borrow_mut();
+        let kroot = self_._deref(k);
+        let kclk = match self_._lookup(k) {
+          //None => panic!("bug"),
+          None => Clock::default(),
+          Some((_, state)) => state.clk
+        };
+        if v.is_nil() {
+          println!("ERROR: SpineEnv::step: Add2: trying to add a nil value: map={:?} k={:?} kroot={:?} v={:?}",
+              mx, k, kroot, v);
+          unimplemented!();
+        }
+        let vroot = self_._deref(v);
+        let vclk = match self_._lookup(v) {
+          //None => panic!("bug"),
+          None => Clock::default(),
+          Some((_, state)) => state.clk
+        };
+        if k != kroot {
+          if !(v != vroot) {
+            println!("DEBUG: SpineEnv::step: Add2 mx={:?} k={:?} v={:?}", mx, k, v);
+            println!("DEBUG: SpineEnv::step:   kroot={:?} kclk={:?}", kroot, kclk);
+            println!("DEBUG: SpineEnv::step:   vroot={:?} vclk={:?}", vroot, vclk);
+          }
+          assert!(v != vroot);
+          match self_.map.get_mut(&(mx, kroot)) {
+            None => {
+              let mut kvclk = Vec::new();
+              kvclk.push((kclk, vclk));
+              self_.map.insert((mx, kroot), SpineEnvMapEntry2::Value(vroot, kvclk));
+            }
+            Some(&mut SpineEnvMapEntry2::Value(ovroot, ref mut kvclk)) => {
+              assert_eq!(ovroot, vroot);
+              let fin = kvclk.len() - 1;
+              let (okclk, ovclk) = kvclk[fin];
+              // FIXME: descriptive error.
+              assert!(okclk <= kclk);
+              assert!(ovclk <= vclk);
+              if okclk == kclk {
+                kvclk[fin] = (kclk, vclk);
+              } else {
+                kvclk.push((kclk, vclk));
+              }
+            }
+            _ => panic!("bug")
+          }
+          match self_.map.insert((mx, k), SpineEnvMapEntry2::Alias(v)) {
+            None => {}
+            Some(SpineEnvMapEntry2::Alias(ov)) => {
+              assert_eq!(ov, v);
+            }
+            _ => panic!("bug")
+          }
+        } else {
+          assert_eq!(v, vroot);
+          match self_.map.get_mut(&(mx, k)) {
+            None => {
+              let mut kvclk = Vec::new();
+              kvclk.push((kclk, vclk));
+              self_.map.insert((mx, k), SpineEnvMapEntry2::Value(v, kvclk));
+            }
+            Some(&mut SpineEnvMapEntry2::Value(ov, ref mut kvclk)) => {
+              assert_eq!(ov, v);
+              let fin = kvclk.len() - 1;
+              let (okclk, ovclk) = kvclk[fin];
+              // FIXME: descriptive error.
+              assert!(okclk <= kclk);
+              assert!(ovclk <= vclk);
+              if okclk == kclk {
+                kvclk[fin] = (kclk, vclk);
+              } else {
+                kvclk.push((kclk, vclk));
+              }
+            }
+            _ => panic!("bug")
+          }
+        }
+        log.borrow_mut()[sp as usize] = SpineEntry::Add2(mx, k, kclk, v, vclk);
       }
       SpineEntry::Cache(x, _xclk) => {
         let mut self_ = this.borrow_mut();
@@ -997,6 +1035,156 @@ impl SpineEnv {
   /*pub fn unstep(&mut self, /*sp: u32,*/ e: &SpineEntry) {
     // FIXME FIXME
   }*/
+
+  pub fn _live_flow(&mut self, curp: u32, log: &[SpineEntry]) {
+    let ctr = self.ctr;
+    let bp = self.flow.live_cur;
+    // FIXME: incremental analysis.
+    assert_eq!(bp, 0);
+    let mut sp = curp;
+    loop {
+      if sp == bp {
+        break;
+      }
+      sp -= 1;
+      match log[sp as usize] {
+        SpineEntry::Cache(y, yclk) |
+        SpineEntry::YieldSet(y, yclk, _) |
+        SpineEntry::Initialize(y, yclk, _) |
+        SpineEntry::Apply(y, yclk, _) => {
+          assert!(yclk.is_init_once());
+          assert_eq!(ctr, yclk.ctr());
+          let y = self._deref(y);
+          if cfg_debug() {
+            println!("DEBUG:  SpineEnv::_live_flow: sp={} yroot={:?} e={:?}",
+                sp, y, log[sp as usize]);
+          }
+          match self.flow.liveness.get_mut(&y) {
+            None => {
+              let mut e = SpineFlowLivenessEntry::default();
+              e.init = sp;
+              self.flow.liveness.insert(y, e);
+            }
+            Some(e) => {
+              assert_eq!(e.init, u32::max_value());
+              assert!(sp <= e.last);
+              e.init = sp;
+            }
+          }
+          let mut sp2 = sp;
+          loop {
+            if sp2 == bp {
+              sp = sp2;
+              break;
+            }
+            sp2 -= 1;
+            match log[sp2 as usize] {
+              SpineEntry::Push(x, xclk) => {
+                let x = self._deref(x);
+                if cfg_debug() {
+                  println!("DEBUG:  SpineEnv::_live_flow:   sp2={} xroot={:?} e={:?}",
+                      sp2, x, log[sp2 as usize]);
+                }
+                match self.flow.liveness.get(&x) {
+                  None => {
+                    let mut e = SpineFlowLivenessEntry::default();
+                    e.last = sp;
+                    self.flow.liveness.insert(x, e);
+                  }
+                  Some(e) => {
+                    if ctr == xclk.ctr() {
+                      if !(e.init == u32::max_value()) {
+                        println!("DEBUG:  SpineEnv::_live_flow:     sp2={} xroot={:?} live={:?}",
+                            sp2, x, e);
+                      }
+                      assert_eq!(e.init, u32::max_value());
+                    }
+                    assert!(sp <= e.last);
+                  }
+                }
+              }
+              _ => {
+                sp = sp2 + 1;
+                break;
+              }
+            }
+          }
+        }
+        SpineEntry::Accumulate(y, yclk, _) => {
+          assert!(yclk.is_update());
+          assert_eq!(ctr, yclk.ctr());
+          let y = self._deref(y);
+          if cfg_debug() {
+            println!("DEBUG:  SpineEnv::_live_flow: sp={} yroot={:?} e={:?}",
+                sp, y, log[sp as usize]);
+          }
+          match self.flow.liveness.get_mut(&y) {
+            None => {
+              let mut e = SpineFlowLivenessEntry::default();
+              e.last = sp;
+              self.flow.liveness.insert(y, e);
+            }
+            Some(e) => {
+              assert_eq!(e.init, u32::max_value());
+              assert!(sp <= e.last);
+            }
+          }
+          let mut sp2 = sp;
+          loop {
+            if sp2 == bp {
+              sp = sp2;
+              break;
+            }
+            sp2 -= 1;
+            match log[sp2 as usize] {
+              SpineEntry::Push(x, xclk) => {
+                let x = self._deref(x);
+                if cfg_debug() {
+                  println!("DEBUG:  SpineEnv::_live_flow:   sp2={} xroot={:?} e={:?}",
+                      sp2, x, log[sp2 as usize]);
+                }
+                match self.flow.liveness.get(&x) {
+                  None => {
+                    let mut e = SpineFlowLivenessEntry::default();
+                    e.last = sp;
+                    self.flow.liveness.insert(x, e);
+                  }
+                  Some(e) => {
+                    if ctr == xclk.ctr() {
+                      assert_eq!(e.init, u32::max_value());
+                    }
+                    assert!(sp <= e.last);
+                  }
+                }
+              }
+              _ => {
+                sp = sp2 + 1;
+                break;
+              }
+            }
+          }
+        }
+        _ => {}
+      }
+    }
+    for (&x, e) in self.flow.liveness.iter() {
+      if cfg_debug() {
+        if e.init == u32::max_value() {
+          println!("WARNING:SpineEnv::_live_flow: invalid: x={:?} e={:?}", x, e);
+        } else {
+          println!("DEBUG:  SpineEnv::_live_flow: valid: x={:?} e={:?}", x, e);
+        }
+      }
+      //assert!(!(e.init == u32::max_value()));
+      self.flow.liveinit.insert((min(e.init, e.last), x));
+      if e.last == u32::max_value() {
+        self.flow.live_fin.insert((e.init, x));
+      } else {
+        self.flow.live_fin.insert((max(e.init, e.last), x));
+      }
+    }
+    self.flow.live_cur = curp;
+  }
 }
 
 pub struct Spine {
@@ -1254,6 +1442,48 @@ impl Spine {
   }
 
   pub fn _compile(&self) {
+    if self.hltp.get() != 0 {
+      println!("ERROR:  Spine::_compile: incremental compilation is not yet supported;");
+      println!("ERROR:  Spine::_compile: for now, please call `compile` once per `reset");
+      panic!();
+    }
+    assert_eq!(self.ctlp.get(), 0);
+    assert_eq!(self.retp.get(), u32::max_value());
+    let prev_curp = self.curp.get();
+    {
+      let mut cur_env = self.cur_env.borrow_mut();
+      let log = self.log.borrow();
+      let prev_len: usize = prev_curp.try_into().unwrap();
+      assert_eq!(prev_len, log.len());
+      cur_env._live_flow(prev_curp, &*log);
+    }
+    {
+      let cur_env = self.cur_env.borrow();
+      let mut prev_log = self.log.borrow_mut();
+      let mut next_log = Vec::new();
+      for prev_sp in 0 .. prev_curp {
+        for &(sp, x) in cur_env.flow.liveinit.range((prev_sp, CellPtr::nil()) .. ) {
+          if prev_sp < sp {
+            break;
+          }
+          assert!(!x.is_nil());
+          next_log.push(SpineEntry::Live(x));
+        }
+        next_log.push(prev_log[prev_sp as usize]);
+        for &(sp, x) in cur_env.flow.live_fin.range((prev_sp, CellPtr::nil()) .. ) {
+          if prev_sp < sp {
+            break;
+          }
+          assert!(!x.is_nil());
+          next_log.push(SpineEntry::Unlive(x));
+        }
+      }
+      //cur_env.flow.reset();
+      let next_curp: u32 = next_log.len().try_into().unwrap();
+      // FIXME: we can save rather than drop the prev log.
+      swap(&mut *prev_log, &mut next_log);
+      self.curp.set(next_curp);
+    }
   }
 
   /*pub fn _start(&mut self) {
@@ -1742,6 +1972,20 @@ impl Spine {
         }
         });
       }*/
+      SpineEntry::Live(x) => {
+        if cfg_debug() { println!("DEBUG: Spine::_step: Live: x={:?}", x); }
+        TL_CTX.with(|ctx| {
+          let env = ctx.env.borrow();
+          assert!(!env.unlive.borrow().contains(&x));
+        });
+      }
+      SpineEntry::Unlive(x) => {
+        if cfg_debug() { println!("DEBUG: Spine::_step: Unlive: x={:?}", x); }
+        TL_CTX.with(|ctx| {
+          let env = ctx.env.borrow();
+          env.unlive.borrow_mut().insert(x);
+        });
+      }
       SpineEntry::Bot => {
         ret = SpineRet::Bot;
       }
