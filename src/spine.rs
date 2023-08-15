@@ -329,7 +329,7 @@ pub enum SpineEnvGet {
 pub struct SpineEnv {
   pub ctr:      Counter,
   pub state:    HashMap<CellPtr, SpineEnvEntry>,
-  //pub set:      BTreeSet<(MCellPtr, CellPtr)>,
+  pub set:      BTreeSet<(MCellPtr, CellPtr)>,
   pub map:      BTreeMap<(MCellPtr, CellPtr), SpineEnvMapEntry2>,
   pub arg:      Vec<(CellPtr, Clock)>,
   //pub out:      Vec<(CellPtr, Clock)>,
@@ -343,7 +343,7 @@ impl SpineEnv {
     self.ctr = ctr;
     // FIXME: during ctx reset, need to manually clear gc'd state.
     /*self.state.clear();*/
-    //self.set.clear();
+    self.set.clear();
     self.map.clear();
     self.arg.clear();
     //self.out.clear();
@@ -395,6 +395,11 @@ impl SpineEnv {
       Some(&mut SpineEnvEntry::State(ref mut state)) => Some((root, state)),
       _ => panic!("bug")
     }
+  }
+
+  pub fn _contains(&self, mx: MCellPtr, k: CellPtr) -> bool {
+    let kroot = self._deref(k);
+    self.set.contains(&(mx, kroot))
   }
 
   pub fn _get(&self, mx: MCellPtr, k: CellPtr, kclk: Clock) -> Option<SpineEnvGet> {
@@ -687,17 +692,15 @@ impl SpineEnv {
             allsink, src);
         panic!();
       }
-      SpineEntry::Add(mx, x, _xclk) => {
-        // FIXME FIXME
-        unimplemented!();
-        /*let mut self_ = this.borrow_mut();
-        let xclk = match self_._lookup(x) {
-          //None => panic!("bug"),
+      SpineEntry::Add(mx, k, _kclk) => {
+        let mut self_ = this.borrow_mut();
+        let kroot = self_._deref(k);
+        let kclk = match self_._lookup(k) {
           None => Clock::default(),
           Some((_, state)) => state.clk
         };
-        let _ = self_.set.insert((mx, x, xclk.into()));
-        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, x, xclk);*/
+        self_.set.insert((mx, k));
+        log.borrow_mut()[sp as usize] = SpineEntry::Add(mx, k, kclk);
       }
       SpineEntry::Add2(mx, k, _kclk, v, _vclk) => {
         let mut self_ = this.borrow_mut();
@@ -1405,6 +1408,11 @@ impl Spine {
     }
   }
 
+  pub fn _contains(&self, mm: MCellPtr, k: CellPtr) -> bool {
+    let cur_env = self.cur_env.borrow();
+    cur_env._contains(mm, k)
+  }
+
   pub fn _get(&self, mm: MCellPtr, k: CellPtr, kclk: Clock) -> Option<(CellPtr, Clock)> {
     let cur_env = self.cur_env.borrow();
     match cur_env.map.get(&(mm, k)) {
@@ -1560,6 +1568,7 @@ impl Spine {
         unimplemented!();
       }
       SpineEntry::AdjMap(..) => {}
+      //SpineEntry::DualMap(..) => {}
       SpineEntry::Add(_mx, _x, _xclk) => {}
       SpineEntry::Add2(_mx, _k, _kclk, _v, _vclk) => {}
       SpineEntry::Cache(x, _xclk) => {

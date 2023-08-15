@@ -124,7 +124,9 @@ impl InnerCell for SwapCowMemCell {
   }
 
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
-    match self.borc._try_borrow() {
+    println!("WARNING:SwapCowMemCell::mem_borrow: it is _always_ unsafe to use a mmap byte slice");
+    Err(BorrowErr::Unsafe)
+    /*match self.borc._try_borrow() {
       Err(e) => {
         println!("WARNING:SwapCowMemCell::mem_borrow: borrow failure: {:?}", e);
         Err(e)
@@ -133,7 +135,7 @@ impl InnerCell for SwapCowMemCell {
         let val = self.mem.as_bytes();
         Ok(BorrowRef{borc: &self.borc, val: Some(val)})
       }
-    }
+    }*/
   }
 
   fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> {
@@ -184,7 +186,7 @@ impl SwapPCtx {
   }
 
   pub fn _dump_usage(&self) {
-    println!("INFO:   SwapPCtx::_dump_usage:  page buf usage: total={}",
+    println!("INFO:   SwapPCtx::_dump_usage:  page buf: mem  used={} (upper bound)",
         self.usage.get(),
     );
   }

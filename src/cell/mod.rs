@@ -407,7 +407,8 @@ impl MCellPtr {
   }
 }
 
-/*pub struct CellSet {
+#[repr(transparent)]
+pub struct CellSet {
   pub ptr_: MCellPtr,
 }
 
@@ -429,11 +430,11 @@ impl Clone for CellSet {
   }
 }
 
-impl Drop for CellSet {
+/*impl Drop for CellSet {
   fn drop(&mut self) {
     //ctx_release(self.ptr_._into_cel_ptr());
   }
-}
+}*/
 
 impl From<MCellPtr> for CellSet {
   fn from(ptr: MCellPtr) -> CellSet {
@@ -445,9 +446,9 @@ impl From<MCellPtr> for CellSet {
 impl CellSet {
   #[track_caller]
   pub fn new() -> CellSet {
-    panick_wrap(|| {
-      ctx_fresh_mset().into()
-    })
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.ctr.fresh_mcel().into()
+    }))
   }
 
   pub fn as_ptr(&self) -> MCellPtr {
@@ -455,15 +456,23 @@ impl CellSet {
   }
 
   #[track_caller]
-  pub fn add<X: Borrow<CellPtr>>(&self, x: X) {
+  pub fn add<X: CellDeref>(&self, x: X) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      // FIXME: retain?
       let spine = ctx.spine.borrow();
-      spine.add(self.ptr_, *x.borrow());
+      spine.add(self.as_ptr(), x._deref());
     }))
   }
-}*/
 
+  #[track_caller]
+  pub fn contains<X: CellDeref>(&self, x: X) -> bool {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let spine = ctx.spine.borrow();
+      spine._contains(self.as_ptr(), x._deref())
+    }))
+  }
+}
+
+#[repr(transparent)]
 pub struct CellMap {
   pub ptr_: MCellPtr,
 }
@@ -486,11 +495,11 @@ impl Clone for CellMap {
   }
 }
 
-impl Drop for CellMap {
+/*impl Drop for CellMap {
   fn drop(&mut self) {
     //ctx_release(self.ptr_._into_cel_ptr());
   }
-}
+}*/
 
 impl From<MCellPtr> for CellMap {
   fn from(ptr: MCellPtr) -> CellMap {
@@ -502,9 +511,9 @@ impl From<MCellPtr> for CellMap {
 impl CellMap {
   #[track_caller]
   pub fn new() -> CellMap {
-    panick_wrap(|| {
-      ctx_fresh_mmap().into()
-    })
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      ctx.ctr.fresh_mcel().into()
+    }))
   }
 
   pub fn as_ptr(&self) -> MCellPtr {
@@ -515,7 +524,7 @@ impl CellMap {
   pub fn add<K: CellDeref, V: CellDeref>(&self, k: K, v: V) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
-      spine.add2(self.ptr_, k._deref(), v._deref());
+      spine.add2(self.as_ptr(), k._deref(), v._deref());
     }))
   }
 

@@ -644,11 +644,16 @@ impl NvGpuPCtx {
   }
 
   pub fn _dump_usage(&self) {
-    println!("INFO:   NvGpuPCtx::_dump_usage: pagelock usage: total={} page (4k) rounded={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: pagelock: mem  used={}",
         self.page_map.usage.get(),
-        self.page_map.pg_usage.get(),
+        //self.page_map.pg_usage.get(),
     );
-    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool usage: front={} free={} back={} total={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool: vmem used={}",
+        self.mem_pool.front_cursor.get()
+          - self.mem_pool.free_size.get()
+          + self.mem_pool.back_cursor.get(),
+    );
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:   front={} free={} back={} total={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.free_size.get(),
         self.mem_pool.back_cursor.get(),

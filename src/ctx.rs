@@ -489,7 +489,7 @@ pub fn ctx_lookup_clk(x: CellPtr) -> Clock {
     //ctx.env.borrow_mut().mceltab.insert(x, MCellEnvEntry{mcel_: MCell_::Set(MCellSet::default())});
     x
   })
-}*/
+}
 
 pub fn ctx_fresh_mmap() -> MCellPtr {
   TL_CTX.with(|ctx| {
@@ -497,7 +497,7 @@ pub fn ctx_fresh_mmap() -> MCellPtr {
     //ctx.env.borrow_mut().mceltab.insert(x, MCellEnvEntry{mcel_: MCell_::Map(MCellMap::default())});
     x
   })
-}
+}*/
 
 pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
   TL_CTX.with(|ctx| {

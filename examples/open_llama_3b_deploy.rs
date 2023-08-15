@@ -243,10 +243,24 @@ fn main() {
     // yes, this `resume` does what you would expect.)
     resume();
 
-    let seq_cap = cfg.seq_cap;
-    let tok_dim = cfg.tok_dim;
     if cycle_nr == 0 {
-      for (cel, key) in inv_matches.iter() {
+      // Earlier, we staged some `mem_set_yield_` operations
+      // to the spine. As the spine coroutine runs its code,
+      // it will pause when it encounters the instruction
+      // for `mem_set_yield_`. Then the spine coroutine will
+      // return back to the control thread (precisely, at the
+      // `resume` from a few lines above).
+      //
+      // The spine coroutine, which is paused at a
+      // `mem_set_yield_`, is now waiting to receive a value
+      // from the control thread. We would now like to
+      // simultaneously send a value to and resume running
+      // the spine coroutine.
+      //
+      // To do so, for each `mem_set_yield_` above, we call a
+      // corresponding `resume_put` or `resume_put_mem_with`
+      // below.
+      for (cel, _) in inv_matches.iter() {
         let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
         resume_put(cel, &pickty, pickfile.mmap());
       }
@@ -261,28 +275,23 @@ fn main() {
         }
       });
     }
+
     let in_tok_mem = in_[0].in_tok._get_unsafe_mem();
     let out_tok_mem = out[0].out_lm_tok._get_unsafe_mem();
-    //let out_lm_prob_mem = out[0].out_lm_prob._get_unsafe_mem();
-    //println!("deploy: in tok type   ={:?}", in_[0].in_tok.type_());
+    let out_lm_prob_mem = out[0].out_lm_prob._get_unsafe_mem();
+    /*//println!("deploy: in tok type   ={:?}", in_[0].in_tok.type_());
     //println!("deploy: in tok version={:?}", in_[0].in_tok.version());
     println!("deploy: in tok mem ptr=0x{:016x}", in_tok_mem.ptr as usize);
     println!("deploy: in tok mem sz ={}", in_tok_mem.sz);
     println!("deploy: out tok mem ptr=0x{:016x}", out_tok_mem.ptr as usize);
     println!("deploy: out tok mem sz ={}", out_tok_mem.sz);
-    /*println!("deploy: out lm prob type   ={:?}", out[0].out_lm_prob.type_());
-    println!("deploy: out lm prob version={:?}", out[0].out_lm_prob.version());
+    //println!("deploy: out lm prob type   ={:?}", out[0].out_lm_prob.type_());
+    //println!("deploy: out lm prob version={:?}", out[0].out_lm_prob.version());
     println!("deploy: out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);
     println!("deploy: out lm prob mem sz ={}", out_lm_prob_mem.sz);*/
-    /*if cycle_nr == 0 {
-      println!("deploy: text str=\"{}\"", text_str);
-      println!("deploy: text str.len={}", text_str.len());
-      println!("deploy: text tok={:?}", text_tok.as_ref());
-      println!("deploy: text tok.len={}", text_tok.len());
-    }*/
     let in_tok_u16 = in_tok_mem._as_slice_u16();
     let out_tok_u16 = out_tok_mem._as_slice_u16();
-    //let ntok = tok_dim as usize;
+    let out_lm_prob_f32 = out_lm_prob_mem._as_slice_f32();
     let (start_pos, fin_pos) = if cycle_nr == 0 {
       (1, 1 + text_tok.len())
     } else {
@@ -297,16 +306,21 @@ fn main() {
       };
       let prev_tok = in_tok_u16[prev_pos];
       let next_tok = out_tok_u16[pos - start_pos];
-      let act_next_tok = in_tok_u16[pos];
-      println!("deploy: pos={} act prev={} prev={} next={} act next={} act prev={:?} prev={:?} next={:?} act next={:?}",
-          pos, act_prev_tok, prev_tok, next_tok, act_next_tok,
+      let auto_next_tok = in_tok_u16[pos];
+      if pos >= 1 + text_tok.len() {
+        assert_eq!(next_tok, auto_next_tok);
+      }
+      let next_prob = out_lm_prob_f32[next_tok as usize];
+      println!("deploy: pos={} act prev={} prev={} next={} prob={:.06} act prev={:?} prev={:?} next={:?}",
+          pos, act_prev_tok, prev_tok, next_tok, next_prob,
           tokenizer.id_to_piece(act_prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
           tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
           tokenizer.id_to_piece(next_tok as _).map(|s| safe_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(act_next_tok as _).map(|s| safe_ascii(s.as_bytes())),
       );
     }
+
     println!("deploy: end cycle={}", cycle_nr);
   }
+
   println!("deploy: done");
 }

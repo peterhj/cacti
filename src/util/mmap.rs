@@ -43,11 +43,9 @@ impl MmapFileSlice {
     self.sz
   }
 
-  pub fn as_bytes(&self) -> &[u8] {
-    unsafe {
-      let ptr = self.as_ptr();
-      from_raw_parts(ptr as *mut u8 as *const u8, self.sz)
-    }
+  pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    let ptr = self.as_ptr();
+    from_raw_parts(ptr as *mut u8 as *const u8, self.sz)
   }
 }
 
@@ -105,12 +103,8 @@ impl MmapFile {
     self.size
   }
 
-  pub fn as_bytes(&self) -> &[u8] {
-    unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8, self.size) }
-  }
-
-  pub fn bytes(&self) -> &[u8] {
-    self.as_bytes()
+  pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 
   pub fn to_ref(&self) -> UnsafeMmapRef {
@@ -221,12 +215,8 @@ impl MmapBuf {
     self.size
   }
 
-  pub fn as_bytes(&self) -> &[u8] {
-    unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8, self.size) }
-  }
-
-  pub fn bytes(&self) -> &[u8] {
-    self.as_bytes()
+  pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 
   pub fn to_ref(&self) -> UnsafeMmapRef {
@@ -252,7 +242,7 @@ impl UnsafeMmapRef {
     self.size
   }
 
-  pub fn as_bytes(&self) -> &[u8] {
-    unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8, self.size) }
+  pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 }

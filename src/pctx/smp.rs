@@ -7,9 +7,13 @@ use cacti_smp_c_ffi::*;
 
 #[cfg(target_os = "linux")]
 use libc::{__errno_location};
-#[cfg(all(unix, not(target_os = "linux")))]
+#[cfg(not(target_os = "linux"))]
 use libc::{__errno as __errno_location};
-use libc::{ENOMEM, free, malloc, c_char, c_int, c_void};
+use libc::{
+  ENOMEM, _SC_PAGESIZE, _SC_NPROCESSORS_ONLN,
+  free, malloc, sysconf,
+  c_char, c_int, c_void,
+};
 
 use std::cell::{Cell};
 //use std::rc::{Rc};
@@ -81,7 +85,9 @@ impl SmpInnerCell {
 impl InnerCell for SmpInnerCell {}*/
 
 pub struct SmpPCtx {
-  pub pcore_ct: Cell<u32>,
+  pub page_sz:  usize,
+  pub lcore_ct: u32,
+  pub pcore_ct: u32,
 }
 
 impl PCtxImpl for SmpPCtx {
@@ -109,7 +115,21 @@ impl PCtxImpl for SmpPCtx {
 
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
-    let n = if LIBCBLAS.openblas.get_num_threads.is_some() {
+    let ret = unsafe { sysconf(_SC_PAGESIZE) };
+    if ret < 0 {
+      println!("ERROR:  SmpPCtx::new: failed to get the page size");
+      panic!();
+    }
+    let page_sz = ret.try_into().unwrap();
+    if cfg_info() { println!("INFO:   SmpPCtx::new: page size={}", page_sz); }
+    let ret = unsafe { sysconf(_SC_NPROCESSORS_ONLN) };
+    if ret < 0 {
+      println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
+      panic!();
+    }
+    let lcore_ct = ret.try_into().unwrap();
+    if cfg_info() { println!("INFO:   SmpPCtx::new: logical core count={}", lcore_ct); }
+    let n: u32 = if LIBCBLAS.openblas.get_num_threads.is_some() {
       let n = (LIBCBLAS.openblas.get_num_threads.as_ref().unwrap())();
       if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
       assert!(n >= 1);
@@ -124,8 +144,19 @@ impl SmpPCtx {
       1
     };
     SmpPCtx{
-      pcore_ct: Cell::new(n),
+      page_sz,
+      lcore_ct,
+      // FIXME
+      pcore_ct: lcore_ct,
     }
+  }
+
+  pub fn page_size(&self) -> usize {
+    self.page_sz
+  }
+
+  pub fn logical_core_count(&self) -> u32 {
+    self.lcore_ct
   }
 
   pub fn phy_core_ct(&self) -> u32 {
@@ -133,9 +164,7 @@ impl SmpPCtx {
   }
 
   pub fn physical_core_count(&self) -> u32 {
-    // FIXME
-    //1
-    self.pcore_ct.get()
+    self.pcore_ct
   }
 
   /*pub fn append_matrix(&self, lp: &mut Vec<(Locus, PMach)>, pl: &mut Vec<(PMach, Locus)>) {

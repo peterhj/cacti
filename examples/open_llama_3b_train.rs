@@ -157,20 +157,22 @@ fn main() {
     println!("train:  out_lm_loss.shape={:?}", out.out_lm_loss.shape());
     println!("train:  out_lm_loss.dtype={:?}", out.out_lm_loss.dtype());
 
+    let grad_map = CellMap::new();
+    let src = CellSet::new();
     let sink = CellMap::new();
     sink.add(&out.out_lm_loss, &in_.in_lm_loss_scale);
-    let allsrc = CellMap::new();
     for (p, g) in param.iter().zip(grad.iter()) {
-      allsrc.add(p, g);
+      src.add(p);
+      grad_map.add(p, g);
     }
-    allsrc.vadd_vjp(&sink);
+    grad_map.vadd_vjp(&src, &sink);
 
     param_log2_hist.clear();
     param_nan_count.clear();
     grad_log2_hist.clear();
     grad_nan_count.clear();
     for (p, g) in param.iter().zip(grad.iter()) {
-      if !(allsrc.get(p) == g) {
+      if !(grad_map.get(p) == g) {
         println!("train:  WARNING: grad mismatch");
       }
       let p_log2_hist = p.abs_log2_hist8();
@@ -305,7 +307,7 @@ fn main() {
         loss_sum += out_lm_loss_f32[pos as usize];
       }
     }
-    println!("train:  iter={} loss sum={:.06}", cycle_nr, loss_sum);
+    println!("train:  cycle={} loss sum={:.06}", cycle_nr, loss_sum);
     // TODO
     //println!("train:  inspect param");
     for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
@@ -351,7 +353,7 @@ fn main() {
     }
     //println!("train:  inspect gradient");
     for (((p, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
-      if !(allsrc.get(p) == g) {
+      if !(grad_map.get(p) == g) {
         println!("train:  WARNING: grad mismatch");
         continue;
       }

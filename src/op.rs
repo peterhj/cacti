@@ -2062,7 +2062,7 @@ impl CellType {
 
 impl CellMap {
   #[track_caller]
-  pub fn vadd_vjp(&self, /*src: &CellSet,*/ sink: &CellMap) {
+  pub fn vadd_vjp(&self, _src: &CellSet, sink: &CellMap) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       spine.adj_map(self.as_ptr(), sink.as_ptr(), &ctx.ctr, &ctx.thunkenv);
@@ -2070,7 +2070,7 @@ impl CellMap {
   }
 
   /*#[track_caller]
-  pub fn vadd_jvp(&self, /*sink: &CellSet,*/ src: &CellMap) {
+  pub fn vadd_jvp(&self, _sink: &CellSet, src: &CellMap) {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let spine = ctx.spine.borrow();
       spine.dual_map(self.as_ptr(), src.as_ptr(), &ctx.ctr, &ctx.thunkenv);

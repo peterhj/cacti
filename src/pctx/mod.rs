@@ -987,6 +987,7 @@ impl<C: InnerCell + Any> InnerCell_ for C {
 #[repr(u8)]
 pub enum BorrowErr {
   NotImpl = 1,
+  Unsafe,
   Immutable,
   AlreadyMutablyBorrowed,
   AlreadyBorrowed,
