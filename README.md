@@ -10,10 +10,9 @@ computational kernels targeting GPUs and multicore CPUs.
 
 The current pre-release of `cacti` is capable of larger-than-VRAM
 training or fine-tuning of LLaMA-style language models, using the
-full-precision gradient (e.g. fp16), without special handling.
-In other words, using `cacti`, there is no need to invoke any
-specialized optimizer to enable larger-than-VRAM training or
-fine-tuning;
+full-precision gradient (e.g. fp16). In other words, using `cacti`,
+there is no need to invoke any specialized optimizer to enable
+larger-than-VRAM training or fine-tuning;
 the underlying dataflow system of `cacti` will do its best to
 utilize the available hardware resources, based on your system's
 GPU memory and host CPU memory capacities.
@@ -22,6 +21,8 @@ aggressively garbage-collects those dataflow cells (i.e. "tensors")
 that are determined to be unreachable via a static analysis, and
 opportunistically spills other cells (that cannot be
 garbage-collected) from the GPU to the host CPU memory.
+(Note that you still need enough host CPU memory capacity;
+otherwise it is possible to observe OOM on the host CPU side.)
 
 `cacti` is oriented toward developing memory-safe AI systems,
 and so the `cacti` system code is entirely implemented in Rust.

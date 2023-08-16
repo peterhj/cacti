@@ -4258,7 +4258,7 @@ impl MatrixMulF16F32GpuThunkImpl {
     TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match ctx.env.borrow()._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_view(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());
@@ -4869,7 +4869,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
     TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match ctx.env.borrow()._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_view(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());
@@ -5322,7 +5322,7 @@ impl ThunkImpl for MemcpyNvGpuThunkImpl {
     TL_CTX.with(|ctx| {
     let mut arg_ty_ = Vec::with_capacity(arg.len());
     for &(x, _) in arg.iter() {
-      match ctx.env.borrow()._lookup_ref_(x) {
+      match ctx.env.borrow()._lookup_view(x) {
         Err(_) => panic!("bug"),
         Ok(e) => {
           arg_ty_.push(e.ty.clone());

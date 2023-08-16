@@ -6,6 +6,8 @@ use cacti::librarium::llama::{LlamaConfig, LlamaCached};
 use cacti::librarium::sentencepiece::{SentencePieceTokenizer};
 use cacti::util::pickle::{PickleDir};
 
+use std::io::{Write, stdout};
+
 fn main() {
   // To run this inference example, you will need to have
   // a copy of OpenLLaMA 3B in a local directory.
@@ -19,20 +21,19 @@ fn main() {
   //
   // This example was written with OpenLLaMA 3B in mind,
   // but you are encouraged to try some other models.
-  let data_dir = "data/openlm/open_llama_3b";
+  let data_dir = "data/openlm/open_llama_3b_v2";
   let mut cfg  = LlamaConfig::open_llama_3b();
-  //let data_dir = "data/openlm/open_llama_7b";
-  //let mut cfg  = LlamaConfig::open_llama_7b();
-  //let data_dir = "data/openlm/open_llama_13b";
-  //let mut cfg  = LlamaConfig::open_llama_13b();
 
   // Set the micro-batch size to 1.
   cfg.ubat_sz = 1;
+
   // Also set the maximum sequence length to 256, which will
   // be all we need for the example below.
+  //
+  // You will need to increase this if you would like a longer
+  // prompt or completion.
   cfg.seq_cap = 256;
-  //cfg.seq_cap = 512;
-  //cfg.seq_cap = 1024;
+
   println!("deploy: llama config: {:?}", cfg);
 
   // The directory we provided at the beginning of `main`
@@ -61,7 +62,7 @@ fn main() {
   println!("deploy: data: text str.len={}", text_str.len());
 
   // Now let's tokenize that string!
-  // We should get roughly 120 16-bit tokens.
+  // We should get roughly 130 16-bit tokens.
   let text_tok = tokenizer.encode16(text_str).unwrap();
   println!("deploy: data: text tok={:?}", text_tok.as_ref());
   println!("deploy: data: text tok.len={}", text_tok.len());
@@ -92,9 +93,9 @@ fn main() {
   // see (src/librarium/lm.rs).
   let mut in_ = model.fresh_input();
 
-  // We'll run this example for just 40 cycles.
-  for cycle_nr in 0 .. 40 {
-    println!("deploy: start cycle={}", cycle_nr);
+  // We'll run this example for 100 cycles.
+  for cycle_nr in 0 .. 100 {
+    //println!("deploy: start cycle={}", cycle_nr);
 
     // Up to now (before the `for` loop), we have been doing
     // prepatory rituals: opening the pickle data directory,
@@ -177,7 +178,7 @@ fn main() {
       for i in 0 .. cfg.ubat_sz as usize {
         // As we used `mem_set_yield_` to initialize the
         // model parameters, we will also use `mem_set_yield_`
-        // to initialize the input sequence.
+        // to set the input sequence.
         in_[i].in_tok.mem_set_yield_();
       }
     } else {
@@ -267,19 +268,20 @@ fn main() {
         // Then, copy the tokenized text to the input.
         tok_buf[1 ..= text_tok.len()].copy_from_slice(text_tok.as_ref());
         // Last, fill the rest of the input with 0 (= pad token).
-        for j in text_tok.len() + 1 .. tok_buf.len() {
+        for j in text_tok.len() + 1 .. cfg.seq_cap as _ {
           tok_buf[j] = 0;
         }
       });
     }
 
+    // Below, we read out the input and output tokens from
+    // running the language model, and display them in the
+    // format of "Prompt: ... Completion: ...".
     [ in_[0].in_tok.clone(),
       out[0].out_lm_tok.clone(),
-      out[0].out_lm_prob.clone(),
     ].with_mem(|typed_mems| {
       let in_tok_u16 = typed_mems[0].as_slice::<u16>().unwrap();
       let out_tok_u16 = typed_mems[1].as_slice::<u16>().unwrap();
-      let out_lm_prob_f32 = typed_mems[2].as_slice::<f32>().unwrap();
       let (start_pos, fin_pos) = if cycle_nr == 0 {
         (1, 1 + text_tok.len())
       } else {
@@ -298,18 +300,47 @@ fn main() {
         if pos >= 1 + text_tok.len() {
           assert_eq!(next_tok, auto_next_tok);
         }
-        let next_prob = out_lm_prob_f32[(pos - start_pos) * cfg.tok_dim as usize + next_tok as usize];
-        println!("deploy: pos={} prev={} next={} prob={:.06} prev={:?} next={:?}",
-            pos, prev_tok, next_tok, next_prob,
-            //tokenizer.id_to_piece(act_prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
-            tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
-            tokenizer.id_to_piece(next_tok as _).map(|s| safe_ascii(s.as_bytes())),
-        );
+        if pos <= 1 + text_tok.len() {
+          if pos == 1 {
+            println!();
+            println!("Prompt:");
+          }
+          let s = tokenizer.id_to_piece(prev_tok as _).unwrap();
+          for c in s.chars() {
+            if c as u32 == 9601 {
+              print!(" ");
+            } else {
+              print!("{}", c);
+            }
+          }
+        }
+        if pos >= 1 + text_tok.len() {
+          if pos == 1 + text_tok.len() {
+            println!();
+            println!();
+            println!("Completion:");
+          }
+          let s = tokenizer.id_to_piece(next_tok as _).unwrap();
+          for c in s.chars() {
+            if c as u32 == 9601 {
+              print!(" ");
+            } else {
+              print!("{}", c);
+            }
+          }
+        }
+        // Flush stdout to prevent the appearance of
+        // batching.
+        stdout().lock().flush().unwrap();
       }
     });
 
-    println!("deploy: end cycle={}", cycle_nr);
+    //println!("deploy: end cycle={}", cycle_nr);
   }
+  println!();
+  println!();
 
+  // And that's it for this example.
+  // Thank you for reaching the end!
   println!("deploy: done");
 }

@@ -1008,6 +1008,20 @@ pub trait MathSetOps: CellDeref {
       let this = self._deref();
       let rhs = rhs._deref();
       let ty = ctx_lookup_type(this);
+      // FIXME: this should do cast safety checks.
+      let new_dtype = ty.dtype;
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_apply_thunk(CastFutThunkSpec{new_dtype}, this)
+    })
+  }
+
+  #[track_caller]
+  fn set_lossy_cast<R: CellDeref>(&self, rhs: R) {
+    panick_wrap(|| {
+      let this = self._deref();
+      let rhs = rhs._deref();
+      let ty = ctx_lookup_type(this);
       let new_dtype = ty.dtype;
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);

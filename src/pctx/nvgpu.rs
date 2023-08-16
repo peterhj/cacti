@@ -654,7 +654,7 @@ impl NvGpuPCtx {
           - self.mem_pool.free_size.get()
           + self.mem_pool.back_cursor.get(),
     );
-    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:   front={} free={} back={} total={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:     front={} free={} back={} total={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.free_size.get(),
         self.mem_pool.back_cursor.get(),
