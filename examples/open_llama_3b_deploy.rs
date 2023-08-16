@@ -289,11 +289,11 @@ fn main() {
       };
       for pos in start_pos ..= fin_pos {
         let prev_pos = pos - 1;
-        let act_prev_tok = if prev_pos >= 1 && prev_pos < text_tok.len() + 1 {
+        /*let act_prev_tok = if prev_pos >= 1 && prev_pos < text_tok.len() + 1 {
           text_tok.as_ref()[prev_pos - 1]
         } else {
           0
-        };
+        };*/
         let prev_tok = in_tok_u16[prev_pos];
         let next_tok = out_tok_u16[pos - start_pos];
         let auto_next_tok = in_tok_u16[pos];
@@ -307,6 +307,8 @@ fn main() {
           }
           let s = tokenizer.id_to_piece(prev_tok as _).unwrap();
           for c in s.chars() {
+            // This sentencepiece tokenizer uses unicode scalar
+            // value 9601 for the initial space in a token string.
             if c as u32 == 9601 {
               print!(" ");
             } else {
@@ -322,6 +324,8 @@ fn main() {
           }
           let s = tokenizer.id_to_piece(next_tok as _).unwrap();
           for c in s.chars() {
+            // This sentencepiece tokenizer uses unicode scalar
+            // value 9601 for the initial space in a token string.
             if c as u32 == 9601 {
               print!(" ");
             } else {
