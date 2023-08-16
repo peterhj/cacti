@@ -1943,16 +1943,21 @@ impl<L: CellDeref + ?Sized> ArrayOps for L {}
 
 pub trait Ops: CellDeref {
   #[track_caller]
-  fn mem_set_yield_(&self) {
+  fn spine_version(&self) -> Clock {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let mut spine = ctx.spine.borrow();
-      spine.yield_set(self._deref(), Locus::Mem);
+      let spine = ctx.spine.borrow();
+      spine._version(self._deref()).unwrap_or_else(|| Clock::default())
     }))
   }
 
   #[track_caller]
-  fn mem_set_yield_with(&self, _: ()) {
-    panick_wrap(|| self.mem_set_yield_())
+  fn version(&self) -> Clock {
+    panick_wrap(|| ctx_lookup_clk(self._deref()))
+  }
+
+  #[track_caller]
+  fn keep(&self) -> StableCell {
+    panick_wrap(|| StableCell::from(self._deref()))
   }
 
   #[track_caller]
@@ -1974,7 +1979,7 @@ pub trait Ops: CellDeref {
 
 impl<L: CellDeref + ?Sized> Ops for L {}
 
-pub trait CtlOps: CellDeref {
+pub trait StableOps: CellDeref {
   #[track_caller]
   fn cache(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
@@ -1985,21 +1990,16 @@ pub trait CtlOps: CellDeref {
   }
 
   #[track_caller]
-  fn keep(&self) -> StableCell {
-    panick_wrap(|| StableCell::from(self._deref()))
-  }
-
-  #[track_caller]
-  fn spine_version(&self) -> Clock {
+  fn mem_set_yield_(&self) {
     panick_wrap(|| TL_CTX.with(|ctx| {
-      let spine = ctx.spine.borrow();
-      spine._version(self._deref()).unwrap_or_else(|| Clock::default())
+      let mut spine = ctx.spine.borrow();
+      spine.yield_set(self._deref(), Locus::Mem);
     }))
   }
 
   #[track_caller]
-  fn version(&self) -> Clock {
-    panick_wrap(|| ctx_lookup_clk(self._deref()))
+  fn mem_set_yield_with(&self, _: ()) {
+    panick_wrap(|| self.mem_set_yield_())
   }
 
   #[track_caller]
@@ -2028,12 +2028,12 @@ pub trait CtlOps: CellDeref {
               };
               TL_PCTX.with(|pctx| {
                 let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
-                let base_reg = icel.as_mem_reg().unwrap();
+                let base_reg = unsafe { icel.as_unsafe_mem_reg().unwrap() };
                 let ptr = unsafe {
-                  (base_reg.ptr as *mut u8).offset(v_ty.pointer_offset().try_into().unwrap()) as *mut _
+                  (base_reg.as_ptr() as *mut u8).offset(v_ty.pointer_offset().try_into().unwrap()) as *mut _
                 };
                 let sz = e.ty.packed_span_bytes().try_into().unwrap();
-                let reg = MemReg{ptr, sz};
+                let reg = unsafe { MemReg::_from_raw_parts(ptr, sz) };
                 assert!(reg.is_subregion(&base_reg));
                 reg
               })
@@ -2046,7 +2046,93 @@ pub trait CtlOps: CellDeref {
   }
 }
 
-impl<L: CellDeref + ?Sized> CtlOps for L {}
+impl StableOps for StableCell {}
+
+pub trait VStableOps: Borrow<[StableCell]> {
+  fn with_mem<V, F: FnMut(&[TypedMem]) -> V>(&self, mut f: F) -> V {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let cel_buf: &[StableCell] = self.borrow();
+      let mut buf = Vec::with_capacity(cel_buf.len());
+      for x in cel_buf.iter() {
+        let xclk = ctx_lookup_clk(x._deref());
+        match ctx.env.borrow_mut().pread_view(x._deref(), xclk, Locus::Mem) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+              Err(_) => {
+                println!("ERROR:  CtlOps::_get_mem: arg ({:?}) is not a zero-copy (contiguous) view", x);
+                panic!();
+              }
+              Ok(ty) => ty
+            };
+            assert_eq!(e.ty, v_ty.as_ref());
+            let off: usize = v_ty.pointer_offset().try_into().unwrap();
+            let sz: usize = e.ty.packed_span_bytes().try_into().unwrap();
+            let start = off;
+            let end = off + sz;
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
+              &mut Cell_::Phy(.., ref mut pcel) => {
+                let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                  None => panic!("bug"),
+                  Some((_, pm, addr)) => (pm, addr)
+                };
+                let icel = TL_PCTX.with(|pctx| {
+                  let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                  icel
+                });
+                match icel._try_borrow() {
+                  Err(_) => {
+                    println!("ERROR:  VStableOps::with_mem: failed to borrow mem");
+                    panic!();
+                  }
+                  Ok(()) => {}
+                }
+                // SAFETY: This is safe because the `_try_borrow`
+                // above succeeded.
+                unsafe {
+                  let base_reg = icel.as_unsafe_mem_reg().unwrap();
+                  let slice_reg = base_reg.slice(off, off + sz);
+                  buf.push(TypedMem{ty_: e.ty.clone(), buf: slice_reg._as_bytes()});
+                }
+              }
+              _ => panic!("bug")
+            }
+          }
+        }
+      }
+      let val = (f)(&buf);
+      for x in cel_buf.iter() {
+        let xclk = ctx_lookup_clk(x._deref());
+        match ctx.env.borrow_mut().pread_view(x._deref(), xclk, Locus::Mem) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
+              &mut Cell_::Phy(.., ref mut pcel) => {
+                let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                  None => panic!("bug"),
+                  Some((_, pm, addr)) => (pm, addr)
+                };
+                let icel = TL_PCTX.with(|pctx| {
+                  let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                  icel
+                });
+                icel._unborrow();
+              }
+              _ => panic!("bug")
+            }
+          }
+        }
+      }
+      val
+    }))
+  }
+}
+
+impl VStableOps for [StableCell] {}
+impl<'a> VStableOps for &'a [StableCell] {}
+impl VStableOps for Vec<StableCell> {}
 
 impl CellType {
   #[track_caller]

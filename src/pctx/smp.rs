@@ -127,9 +127,10 @@ impl SmpPCtx {
       println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
       panic!();
     }
+    // FIXME: lscpu log/phy core counts.
     let lcore_ct = ret.try_into().unwrap();
-    if cfg_info() { println!("INFO:   SmpPCtx::new: logical core count={}", lcore_ct); }
-    let n: u32 = if LIBCBLAS.openblas.get_num_threads.is_some() {
+    if cfg_info() { println!("INFO:   SmpPCtx::new: core count={}", lcore_ct); }
+    /*let n: u32 = if LIBCBLAS.openblas.get_num_threads.is_some() {
       let n = (LIBCBLAS.openblas.get_num_threads.as_ref().unwrap())();
       if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
       assert!(n >= 1);
@@ -142,7 +143,7 @@ impl SmpPCtx {
       n as _
     } else {
       1
-    };
+    };*/
     SmpPCtx{
       page_sz,
       lcore_ct,

@@ -337,7 +337,7 @@ pub fn _resume_put_mem_with<K: CellDeref, F: Fn(CellType, MemReg)>(key: K, fun: 
 }*/
 
 #[track_caller]
-pub fn resume_put_mem_with<K: CellDeref, F: Fn(&CellType, &mut [u8])>(key: K, fun: F) -> SpineRet {
+pub fn resume_put_mem_with<K: CellDeref, F: Fn(TypedMemMut)>(key: K, fun: F) -> SpineRet {
   panick_wrap(|| TL_CTX.with(|ctx| {
     let mut thunkenv = ctx.thunkenv.borrow_mut();
     ctx.spine._resume(&ctx.ctr, &mut *thunkenv, SpineResume::PutMemMutFun(key._deref(), &fun as _))

@@ -7,8 +7,6 @@ use cacti::librarium::llama::*;
 use cacti::librarium::sentencepiece::*;
 use cacti::util::pickle::*;
 
-use std::borrow::{Borrow};
-
 fn main() {
   let data_dir = "data/openlm/open_llama_3b";
   let mut cfg  = LlamaConfig::open_llama_3b();
@@ -23,16 +21,13 @@ fn main() {
   //cfg.seq_cap = 1024;
   println!("deploy: llama config: {:?}", cfg);
 
-  let pickdir = PickleDir::open(data_dir).unwrap();
-  println!("train:  loaded pickle dir");
+  let minibatch_sz: i32 = 1;
+  //let minibatch_sz = 2;
 
-  let tokenizer = SentencePieceTokenizer::from_dir(data_dir).unwrap();
-  println!("train:  loaded sentencepiece tokenizer");
-  println!("train:  tokenizer: n={:?}", tokenizer.num_pieces());
-  println!("train:  tokenizer: unk={:?}", tokenizer.unk_id());
-  println!("train:  tokenizer: bos={:?}", tokenizer.bos_id());
-  println!("train:  tokenizer: eos={:?}", tokenizer.eos_id());
-  println!("train:  tokenizer: pad={:?}", tokenizer.pad_id());
+  assert_eq!(minibatch_sz % cfg.ubat_sz as i32, 0);
+
+  let num_minibatch_iters: i32 = 4;
+  //let num_minibatch_iters = 2;
 
   let grad_scale = 1024.0_f32;
   let adamw = AdamW32{
@@ -45,6 +40,17 @@ fn main() {
     eps: 1.0e-5,
   };
 
+  let pickdir = PickleDir::open(data_dir).unwrap();
+  println!("train:  loaded pickle dir");
+
+  let tokenizer = SentencePieceTokenizer::from_dir(data_dir).unwrap();
+  println!("train:  loaded sentencepiece tokenizer");
+  println!("train:  tokenizer: n={:?}", tokenizer.num_pieces());
+  println!("train:  tokenizer: unk={:?}", tokenizer.unk_id());
+  println!("train:  tokenizer: bos={:?}", tokenizer.bos_id());
+  println!("train:  tokenizer: eos={:?}", tokenizer.eos_id());
+  println!("train:  tokenizer: pad={:?}", tokenizer.pad_id());
+
   //let text_str = "Thucydides, an Athenian, wrote the history of";
   //let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its";
   let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its grounds. The preparations of both the combatants were in every department in the last state of perfection; and he could see the rest of the Hellenic race taking sides in the quarrel; those who delayed doing so at once having it in contemplation. Indeed this was the greatest movement yet known in history, not only of the Hellenes, but of a large part of the barbarian world-- I had almost said of mankind. For though the events of remote antiquity, and even those that more immediately preceded the war, could not from lapse of time be clearly ascertained, yet the evidences which an inquiry carried as far back as was practicable leads me to trust, all point to the conclusion that there was nothing on a great scale, either in war or in other matters.";
@@ -54,51 +60,100 @@ fn main() {
   println!("train:  tokenizer: text tok={:?}", text_tok.as_ref());
   println!("train:  tokenizer: text tok.len={}", text_tok.len());
 
+  // `Llama::from` will create a LLaMA model from the
+  // provided config that is suitable for inference.
+  //
+  // `Llama` is implemented in (src/librarium/llama.rs),
+  // which you may also want to read.
   let mut model = Llama::from(cfg);
+
+  // So, we have an in-memory `model`, and we have a
+  // `pickdir` that represents the contents on disk.
+  // We will need to connect the two in order to figure out
+  // which on-disk pickle tensors map to which in-memory
+  // cells and vice versa. To do so, we use a convenience
+  // function, `Llama::match_pickle_dir`, which itself
+  // is implemented using parts from (src/util/cell.rs) and
+  // (src/util/safepickle.rs).
   let inv_matches = model.match_pickle_dir(&pickdir);
-  let in_ = model.fresh_input();
-  let in_tok = in_.in_tok;
-  //println!("train:  matches: {:?}", &matches.mat);
-  for &(ref cel, ref key) in inv_matches.mat.iter() {
+  for (cel, key) in inv_matches.iter() {
     println!("train:  matches: key={:?} cel={:?}", key, cel);
   }
+
+  // Create a fresh `Vec` of language model input cells,
+  // where the length of the `Vec` is the micro-batch size.
+  // The full type of `in_` is `Vec<LanguageModelDeployInput>`;
+  // see (src/librarium/lm.rs).
+  let in_ = model.fresh_input();
+  let in_tok = in_.in_tok;
+
+  // Clone the `Vec` of model parameters.
+  // Note that only _references_ to the parameters are
+  // cloned, so this is a cheap operation.
   let param = model.clone_param();
+
+  // Here we will pre-define the dataflow cells that are the
+  // gradients corresponding to the model parameters.
+  // In particular, these gradient cells will be `StableCell`'s.
+  //
+  // A `StableCell` is a dataflow cell that persists across
+  // `reset`'s. A `StableCell` is also (mostly) left alone by
+  // run-time garbage collection; there will always be at least
+  // one replica of a `StableCell` in GPU VRAM or host CPU RAM,
+  // but not necessarily both at the same time.
   let mut grad = Vec::with_capacity(param.len());
   for p in param.iter().rev() {
-    //let g = StableCell::new();
     let g = StableCell::from(p.type_());
-    //let g = StableCell::from(p.type_().cast(Dtype::Fp32));
+    // In a future release of `cacti`, we would like to support
+    // gradients in a higher precision than the parameters
+    // (e.g. FP16 parameters with FP32 gradients).
+    /*let g = StableCell::from(p.type_().cast(Dtype::Fp32));*/
     grad.push(g);
   }
+  // (It's not strictly necessary to reverse the order of the
+  // gradient cells here; reversing the order is mostly useful
+  // only for debug output.)
   grad.reverse();
   /*for (p, g) in param.iter().zip(grad.iter()) {
     println!("train:  param={:?} grad={:?} ty={:?}", p, g, p.type_());
   }*/
+
+  // We manually set up the AdamW optimizer state.
+  //
+  // The AdamW optimizer state consists of 3 parts:
+  //
+  // 1. the master copy of the parameters;
+  // 2. the 1st moment moving average of the gradients; and
+  // 3. the 2nd moment moving average of the gradients.
   let mut master = Vec::with_capacity(param.len());
   let mut grad_avg = Vec::with_capacity(param.len());
   let mut grad2_avg = Vec::with_capacity(param.len());
   for p in param.iter() {
+    // In this example, we are using 32-bit AdamW (`AdamW32`),
+    // so we up-cast the optimizer state accordingly.
     let p_ = StableCell::from(p.type_().cast(f32::dtype_()));
     let g_ = StableCell::from(p.type_().cast(f32::dtype_()));
     let g2 = StableCell::from(p.type_().cast(f32::dtype_()));
-    println!("train:  master={:?} ty={:?} grad avg={:?} ty={:?} grad2 avg={:?} ty={:?}",
-        p_, p_.type_(), g_, g_.type_(), g2, g2.type_());
+    /*println!("train:  master={:?} ty={:?} grad avg={:?} ty={:?} grad2 avg={:?} ty={:?}",
+        p_, p_.type_(), g_, g_.type_(), g2, g2.type_());*/
     master.push(p_);
     grad_avg.push(g_);
     grad2_avg.push(g2);
   }
-  let mut param_log2_hist = Vec::with_capacity(param.len());
-  let mut param_nan_count = Vec::with_capacity(param.len());
-  let mut grad_log2_hist = Vec::with_capacity(param.len());
-  let mut grad_nan_count = Vec::with_capacity(param.len());
+
+  // Summarize the AdamW hyperparameters, including our
+  // chosen gradient and loss scaling.
   println!("train:  adamw: {:?}", adamw);
   println!("train:  grad scale: {:?}", grad_scale);
-  //let loss_scale = (1.0_f32 / 256.0_f32) * 32.0_f32;
-  //let loss_scale = (1.0_f32 / 256.0_f32) * grad_scale;
   let loss_scale = grad_scale / (text_tok.len() - 1) as f32;
   println!("train:  loss scale: {:?}", loss_scale);
 
-  for cycle_nr in 0 .. 5 {
+  // Each cycle corresponds to one micro-batch.
+  let cycles_per_minibatch = minibatch_sz / cfg.ubat_sz as i32;
+  let fin_cycle = cycles_per_minibatch * num_minibatch_iters;
+
+  // That's enough prep. Time to train!
+  for cycle_nr in 0 ..= fin_cycle {
     println!("train:  start cycle={}", cycle_nr);
 
     reset();
@@ -119,7 +174,12 @@ fn main() {
         }
       });
       model.init_constants();
-    } else {
+    }
+
+    // We perform an AdamW update at the beginning of the
+    // cycle. This allows the condition to appear slightly
+    // simpler.
+    if cycle_nr != 0 && cycle_nr % cycles_per_minibatch == 0 {
       smp_scope().with(|_| {
         for ((((g, g_), g2), p_), p) in
             grad.iter()
@@ -135,11 +195,29 @@ fn main() {
           } else {
             adamw.step(cycle_nr, &p_, &g_, &g2, &g);
             p.set_cast(p_.const_());
-            //p.set_cast(p_);
           }
         }
       });
       model.cache_constants();
+    }
+
+    // If this is the final cycle, quit while we're ahead.
+    if cycle_nr == fin_cycle {
+      println!("train:  fin cycle={}", cycle_nr);
+      break;
+    }
+
+    // When the current cycle is _not_ a minibatch
+    // update, we cache the gradients to enable
+    // micro-batched gradient accumulation.
+    //
+    // (Note that if the minibatch size is the same as
+    // the micro-batch size, then we _never_ accumulate
+    // gradients across micro-batches.)
+    if cycle_nr % cycles_per_minibatch != 0 {
+      for g in grad.iter() {
+        g.cache();
+      }
     }
 
     in_tok.mem_set_yield_();
@@ -167,13 +245,30 @@ fn main() {
     }
     grad_map.vadd_vjp(&src, &sink);
 
-    param_log2_hist.clear();
-    param_nan_count.clear();
-    grad_log2_hist.clear();
-    grad_nan_count.clear();
+    // FP16 training can go off the rails if the gradient or
+    // loss scaling is insufficient.
+    //
+    // To diagnose issues related to gradient or loss scaling,
+    // we calculate, for each pair of parameter and gradient:
+    //
+    // 1. a histogram of the base-2 logarithms of the element-
+    //    wise absolute values (which correctly accounts for
+    //    denormalized floating point values); and
+    // 2. a count of floating point NaNs (including both
+    //    signalling and non-signalling NaNs).
+    //
+    // The resulting output is pretty gory, and I commented
+    // it out below, but it's useful to have this code around
+    // when training, just in case. Anyway it's pretty cheap
+    // to calculate.
+    let mut param_log2_hist = Vec::with_capacity(param.len());
+    let mut param_nan_count = Vec::with_capacity(param.len());
+    let mut grad_log2_hist = Vec::with_capacity(param.len());
+    let mut grad_nan_count = Vec::with_capacity(param.len());
     for (p, g) in param.iter().zip(grad.iter()) {
       if !(grad_map.get(p) == g) {
-        println!("train:  WARNING: grad mismatch");
+        println!("train:  WARNING: uh oh, param-grad mismatch!");
+        panic!()
       }
       let p_log2_hist = p.abs_log2_hist8();
       param_log2_hist.push(p_log2_hist.keep());
@@ -186,45 +281,42 @@ fn main() {
     }
 
     compile();
+
     resume();
 
-    let seq_cap = cfg.seq_cap;
-    let tok_dim = cfg.tok_dim;
     if cycle_nr == 0 {
-      for (cel, key) in inv_matches.iter() {
+      for (cel, _key) in inv_matches.iter() {
         let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
         resume_put(cel, &pickty, pickfile.mmap());
       }
     }
-    resume_put_mem_with(&in_tok, |ty, mem| {
+    resume_put_mem_with(&in_tok, |typed_mem| {
       println!("train:  set in_tok...");
-      let mut tok_buf = Vec::with_capacity(seq_cap as _);
+      let mut tok_buf = Vec::with_capacity(cfg.seq_cap as _);
       tok_buf.push(1_u16);
       tok_buf.extend_from_slice(text_tok.as_ref());
-      // FIXME: put end-of-sentence token.
-      tok_buf.resize(seq_cap as _, 0_u16);
-      let mem = ty.prepare_bytes_mut::<u16>(mem).unwrap();
+      tok_buf.resize(cfg.seq_cap as _, 0_u16);
+      let mem = typed_mem.into_mut_slice::<u16>().unwrap();
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_with(&in_.in_lm_tok, |ty, mem| {
+    resume_put_mem_with(&in_.in_lm_tok, |typed_mem| {
       println!("train:  set in_lm_tok...");
-      let mut tok_buf = Vec::with_capacity(seq_cap as _);
+      let mut tok_buf = Vec::with_capacity(cfg.seq_cap as _);
       tok_buf.extend_from_slice(text_tok.as_ref());
-      // FIXME: put end-of-sentence token.
-      tok_buf.resize(seq_cap as _, 0_u16);
-      let mem = ty.prepare_bytes_mut::<u16>(mem).unwrap();
+      tok_buf.resize(cfg.seq_cap as _, 0_u16);
+      let mem = typed_mem.into_mut_slice::<u16>().unwrap();
       mem.copy_from_slice(&tok_buf);
     });
-    resume_put_mem_with(&in_.in_lm_loss_scale, |ty, mem| {
+    resume_put_mem_with(&in_.in_lm_loss_scale, |typed_mem| {
       println!("train:  set in_lm_loss_scale...");
-      let mut scale_buf = Vec::with_capacity(seq_cap as _);
+      let mut scale_buf = Vec::with_capacity(cfg.seq_cap as _);
       scale_buf.push(0.0_f32);
       scale_buf.resize(text_tok.len(), loss_scale);
-      scale_buf.resize(seq_cap as _, 0.0_f32);
-      let mem = ty.prepare_bytes_mut::<f32>(mem).unwrap();
+      scale_buf.resize(cfg.seq_cap as _, 0.0_f32);
+      let mem = typed_mem.into_mut_slice::<f32>().unwrap();
       mem.copy_from_slice(&scale_buf);
     });
-    for (idx, ((((g, g_), g2), p_), p)) in
+    /*for (idx, ((((g, g_), g2), p_), p)) in
         grad.iter()
         .zip(grad_avg.iter())
         .zip(grad2_avg.iter())
@@ -247,13 +339,14 @@ fn main() {
         let mem = p._get_unsafe_mem();
         mem._debug_dump_f16();
       }
-    }
+    }*/
+
     let out_lm_prob_mem = out.out_lm_prob._get_unsafe_mem();
     let out_lm_loss_mem = out.out_lm_loss._get_unsafe_mem();
     println!("train:  out lm prob type   ={:?}", out.out_lm_prob.type_());
     println!("train:  out lm prob version={:?}", out.out_lm_prob.version());
-    println!("train:  out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);
-    println!("train:  out lm prob mem sz ={}", out_lm_prob_mem.sz);
+    println!("train:  out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.as_ptr() as usize);
+    println!("train:  out lm prob mem sz ={}", out_lm_prob_mem.size_bytes());
     println!("train:  text str=\"{}\"", text_str);
     println!("train:  text str.len={}", text_str.len());
     println!("train:  text tok={:?}", text_tok.as_ref());
@@ -282,7 +375,7 @@ fn main() {
       kv
     }
     let mut loss_sum = 0.0;
-    let ntok = tok_dim as usize;
+    let ntok = cfg.tok_dim as usize;
     for pos in 1 ..= text_tok.len() {
       let prev_pos = pos - 1;
       let prev_tok = text_tok.as_ref()[prev_pos];
@@ -308,6 +401,7 @@ fn main() {
       }
     }
     println!("train:  cycle={} loss sum={:.06}", cycle_nr, loss_sum);
+
     // TODO
     //println!("train:  inspect param");
     for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
@@ -401,4 +495,6 @@ fn main() {
     println!("train:  end cycle={}", cycle_nr);
     //break;
   }
+
+  println!("train:  done");
 }

@@ -82,14 +82,9 @@ fn main() {
   // is implemented using parts from (src/util/cell.rs) and
   // (src/util/safepickle.rs).
   let inv_matches = model.match_pickle_dir(&pickdir);
-  for &(ref cel, ref key) in inv_matches.mat.iter() {
+  for (cel, key) in inv_matches.iter() {
     println!("deploy: matches: key={:?} cel={:?}", key, cel);
   }
-
-  // Clone the `Vec` of model parameters.
-  // Note that only _references_ to the parameters are
-  // cloned, so this is a cheap operation.
-  let param = model.clone_param();
 
   // Create a fresh `Vec` of language model input cells,
   // where the length of the `Vec` is the micro-batch size.
@@ -124,7 +119,7 @@ fn main() {
       // If this is the zero-th cycle, then we need to
       // initialize the model parameters from their on-disk
       // tensors.
-      for (cel, _) in inv_matches.iter() {
+      for (cel, _key) in inv_matches.iter() {
         // The spine coroutine maintains a _computation spine_
         // or simply the _spine_; this is analogous to the
         // "tape" or "Wengert list" if you are familiar with
@@ -264,60 +259,54 @@ fn main() {
         let (pickty, pickfile) = pickdir.get(inv_matches.get(cel));
         resume_put(cel, &pickty, pickfile.mmap());
       }
-      resume_put_mem_with(&in_[0].in_tok, |ty, mem| {
+      resume_put_mem_with(&in_[0].in_tok, |typed_mem| {
         println!("deploy: set in_tok...");
-        let tok_buf = ty.prepare_bytes_mut::<u16>(mem).unwrap();
+        let tok_buf = typed_mem.into_mut_slice::<u16>().unwrap();
+        // Prepend 1 (= BOS token) to the input.
         tok_buf[0] = 1_u16;
+        // Then, copy the tokenized text to the input.
         tok_buf[1 ..= text_tok.len()].copy_from_slice(text_tok.as_ref());
-        // FIXME: put end-of-sentence token.
+        // Last, fill the rest of the input with 0 (= pad token).
         for j in text_tok.len() + 1 .. tok_buf.len() {
           tok_buf[j] = 0;
         }
       });
     }
 
-    let in_tok_mem = in_[0].in_tok._get_unsafe_mem();
-    let out_tok_mem = out[0].out_lm_tok._get_unsafe_mem();
-    let out_lm_prob_mem = out[0].out_lm_prob._get_unsafe_mem();
-    /*//println!("deploy: in tok type   ={:?}", in_[0].in_tok.type_());
-    //println!("deploy: in tok version={:?}", in_[0].in_tok.version());
-    println!("deploy: in tok mem ptr=0x{:016x}", in_tok_mem.ptr as usize);
-    println!("deploy: in tok mem sz ={}", in_tok_mem.sz);
-    println!("deploy: out tok mem ptr=0x{:016x}", out_tok_mem.ptr as usize);
-    println!("deploy: out tok mem sz ={}", out_tok_mem.sz);
-    //println!("deploy: out lm prob type   ={:?}", out[0].out_lm_prob.type_());
-    //println!("deploy: out lm prob version={:?}", out[0].out_lm_prob.version());
-    println!("deploy: out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.ptr as usize);
-    println!("deploy: out lm prob mem sz ={}", out_lm_prob_mem.sz);*/
-    let in_tok_u16 = in_tok_mem._as_slice_u16();
-    let out_tok_u16 = out_tok_mem._as_slice_u16();
-    let out_lm_prob_f32 = out_lm_prob_mem._as_slice_f32();
-    let (start_pos, fin_pos) = if cycle_nr == 0 {
-      (1, 1 + text_tok.len())
-    } else {
-      (1 + text_tok.len() + (cycle_nr) as usize, 1 + text_tok.len() + (cycle_nr) as usize)
-    };
-    for pos in start_pos ..= fin_pos {
-      let prev_pos = pos - 1;
-      let act_prev_tok = if prev_pos >= 1 && prev_pos < text_tok.len() + 1 {
-        text_tok.as_ref()[prev_pos - 1]
+    [ in_[0].in_tok.clone(),
+      out[0].out_lm_tok.clone(),
+      out[0].out_lm_prob.clone(),
+    ].with_mem(|typed_mems| {
+      let in_tok_u16 = typed_mems[0].as_slice::<u16>().unwrap();
+      let out_tok_u16 = typed_mems[1].as_slice::<u16>().unwrap();
+      let out_lm_prob_f32 = typed_mems[2].as_slice::<f32>().unwrap();
+      let (start_pos, fin_pos) = if cycle_nr == 0 {
+        (1, 1 + text_tok.len())
       } else {
-        0
+        (1 + text_tok.len() + (cycle_nr) as usize, 1 + text_tok.len() + (cycle_nr) as usize)
       };
-      let prev_tok = in_tok_u16[prev_pos];
-      let next_tok = out_tok_u16[pos - start_pos];
-      let auto_next_tok = in_tok_u16[pos];
-      if pos >= 1 + text_tok.len() {
-        assert_eq!(next_tok, auto_next_tok);
+      for pos in start_pos ..= fin_pos {
+        let prev_pos = pos - 1;
+        let act_prev_tok = if prev_pos >= 1 && prev_pos < text_tok.len() + 1 {
+          text_tok.as_ref()[prev_pos - 1]
+        } else {
+          0
+        };
+        let prev_tok = in_tok_u16[prev_pos];
+        let next_tok = out_tok_u16[pos - start_pos];
+        let auto_next_tok = in_tok_u16[pos];
+        if pos >= 1 + text_tok.len() {
+          assert_eq!(next_tok, auto_next_tok);
+        }
+        let next_prob = out_lm_prob_f32[(pos - start_pos) * cfg.tok_dim as usize + next_tok as usize];
+        println!("deploy: pos={} prev={} next={} prob={:.06} prev={:?} next={:?}",
+            pos, prev_tok, next_tok, next_prob,
+            //tokenizer.id_to_piece(act_prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
+            tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
+            tokenizer.id_to_piece(next_tok as _).map(|s| safe_ascii(s.as_bytes())),
+        );
       }
-      let next_prob = out_lm_prob_f32[next_tok as usize];
-      println!("deploy: pos={} act prev={} prev={} next={} prob={:.06} act prev={:?} prev={:?} next={:?}",
-          pos, act_prev_tok, prev_tok, next_tok, next_prob,
-          tokenizer.id_to_piece(act_prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(next_tok as _).map(|s| safe_ascii(s.as_bytes())),
-      );
-    }
+    });
 
     println!("deploy: end cycle={}", cycle_nr);
   }

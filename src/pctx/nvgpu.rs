@@ -1,6 +1,7 @@
 use super::*;
 use crate::algo::{BTreeMap, BTreeSet, HashMap, Region, RevSortMap8, StdCellExt};
 use crate::algo::str::*;
+use crate::algo::str::parse_size::*;
 use crate::algo::sync::{SpinWait};
 use crate::cell::*;
 use crate::clock::*;
@@ -695,6 +696,10 @@ impl Drop for NvGpuMemCell {
     if self.ptr.is_null() {
       return;
     }
+    if self.borc._borrowed() {
+      println!("ERROR:  NvGpuMemCell::drop: attempted to free a borrowed mem cell");
+      panic!();
+    }
     match cuda_mem_free_host(self.ptr) {
       Ok(_) => {}
       Err(CUDA_ERROR_DEINITIALIZED) => {}
@@ -731,8 +736,8 @@ impl NvGpuMemCell {
 }
 
 impl InnerCell for NvGpuMemCell {
-  fn as_mem_reg(&self) -> Option<MemReg> {
-    Some(MemReg{ptr: self.ptr, sz: self.sz})
+  unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> {
+    Some(UnsafeMemReg{ptr: self.ptr, sz: self.sz})
   }
 
   fn size(&self) -> usize {
@@ -817,6 +822,14 @@ impl InnerCell for NvGpuMemCell {
       panic!("bug");
     }
     self.pinc.set(c - 1);
+  }
+
+  fn _try_borrow(&self) -> Result<(), BorrowErr> {
+    self.borc._try_borrow()
+  }
+
+  fn _unborrow(&self) {
+    self.borc._unborrow();
   }
 
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
@@ -1222,8 +1235,8 @@ pub struct NvGpuMemPool {
   pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
   pub last_oom:     Cell<Option<(NvGpuMemPoolOom, usize)>>,
-  pub yeet_reset:   Cell<Counter>,
-  pub yeet_scanner: Cell<usize>,
+  pub soft_oom_reset: Cell<Counter>,
+  pub soft_oom_scan: Cell<usize>,
   pub front_tag:    RefCell<Option<u32>>,
   pub tmp_pin_list: RefCell<Vec<PAddr>>,
   pub tmp_freelist: RefCell<Vec<PAddr>>,
@@ -1256,19 +1269,44 @@ impl NvGpuMemPool {
   pub fn new(dev: i32) -> NvGpuMemPool {
     if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::new"); }
     cudart_set_cur_dev(dev).unwrap();
-    let (free_sz, total_sz) = cudart_get_mem_info().unwrap();
-    assert!(free_sz <= total_sz);
+    let (avail_sz, total_sz) = cudart_get_mem_info().unwrap();
+    assert!(avail_sz <= total_sz);
+    if cfg_info() { println!("INFO:   NvGpuMemPool::new: vmem avail={} total={}", avail_sz, total_sz); }
+    // NB: assuming gpu page size is 64 KiB.
     let reserve_bp = ctx_cfg_get_gpu_reserve_mem_per_10k();
     let unrounded_reserve_sz = (total_sz * reserve_bp as usize + 10000 - 1) / 10000;
-    // NB: assuming page size is 64 KiB.
-    let reserve_sz = ((unrounded_reserve_sz + (1 << 16) - 1) >> 16) << 16;
-    assert!(reserve_sz >= unrounded_reserve_sz);
-    if reserve_sz > free_sz {
-      println!("ERROR:  NvGpuMemPool::new: out-of-memory: tried to reserve {} bytes on gpu {}, but only found {} bytes free (out of {} bytes total)",
-          reserve_sz, dev, free_sz, total_sz);
+    let mut reserve_sz = (unrounded_reserve_sz >> 16) << 16;
+    assert!(reserve_sz <= unrounded_reserve_sz);
+    // FIXME
+    TL_CFG_ENV.with(|cfg| {
+      match cfg.vmem_soft_limit.as_ref() {
+        None => {}
+        Some(s) => {
+          let maybe_byte_size: Option<u64> = parse_byte_size(s).ok();
+          let maybe_decimal_frac: Option<f64> = String::from_utf8_lossy(s).parse().ok();
+          match (maybe_byte_size, maybe_decimal_frac) {
+            (None, None) => {}
+            (None, Some(f)) => {
+              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (fraction of total)", f); }
+              let unrounded_sz = (total_sz as f64 * f) as u64;
+              reserve_sz = (unrounded_sz as usize >> 16) << 16;
+            }
+            (Some(unrounded_sz), _) => {
+              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (bytes)", unrounded_sz); }
+              reserve_sz = (unrounded_sz as usize >> 16) << 16;
+            }
+          }
+        }
+      }
+    });
+    if reserve_sz > avail_sz {
+      println!("ERROR:  NvGpuMemPool::new: Tried to reserve {} bytes on gpu {}, but only {} bytes available (out of {} bytes total).",
+          reserve_sz, dev, avail_sz, total_sz);
+      println!("ERROR:  NvGpuMemPool::new: To resolve this, try setting the env var CACTI_VMEM_SOFT_LIMIT to");
+      println!("ERROR:  NvGpuMemPool::new: a smaller value.");
       panic!();
     }
-    if cfg_info() { println!("INFO:   NvGpuMemPool::new: reserve sz={}", reserve_sz); }
+    if cfg_info() { println!("INFO:   NvGpuMemPool::new: reserve size={}", reserve_sz); }
     let reserve_base = cuda_mem_alloc(reserve_sz).unwrap();
     CudartStream::null().sync().unwrap();
     if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::new: reserve base=0x{:016x}", reserve_base); }
@@ -1304,8 +1342,8 @@ impl NvGpuMemPool {
       back_alloc:   Cell::new(false),
       alloc_pin:    Cell::new(false),
       last_oom:     Cell::new(None),
-      yeet_reset:   Cell::new(Counter::default()),
-      yeet_scanner: Cell::new(0),
+      soft_oom_reset: Cell::new(Counter::default()),
+      soft_oom_scan: Cell::new(0),
       front_tag:    RefCell::new(None),
       tmp_pin_list: RefCell::new(Vec::new()),
       tmp_freelist: RefCell::new(Vec::new()),
@@ -1938,7 +1976,7 @@ impl NvGpuMemPool {
         env.unlive.borrow_mut().remove(&x);
         if !yeeted {
           // FIXME: would be helpful for error messages.
-          /*env.unyeet.borrow_mut().insert(x);*/
+          /*env.still_unlive.borrow_mut().insert(x);*/
         } else {
           // FIXME: would be helpful for error messages.
           /*env.yeeted.borrow_mut().insert(x);*/
@@ -1948,11 +1986,11 @@ impl NvGpuMemPool {
         }
       }
       let next_reset = ctx.spine.ctr.get();
-      if self.yeet_reset.get() > next_reset {
+      if self.soft_oom_reset.get() > next_reset {
         panic!("bug");
-      } else if self.yeet_reset.get() < next_reset {
-        self.yeet_reset.set(next_reset);
-        self.yeet_scanner.set(0);
+      } else if self.soft_oom_reset.get() < next_reset {
+        self.soft_oom_reset.set(next_reset);
+        self.soft_oom_scan.set(0);
       }
       let celfront = ctx.ctr.celfront.borrow();
       if _cfg_debug_yeet() {
@@ -1967,13 +2005,13 @@ impl NvGpuMemPool {
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom: query sz={} req sz={} search start={} end={}",
-            query_sz, req_sz, self.yeet_scanner.get(), celfront.len());
+            query_sz, req_sz, self.soft_oom_scan.get(), celfront.len());
       }
       let mut retry = false;
       'retry: loop {
       let mut yeet_ct = 0;
       let env = ctx.env.borrow();
-      for p in self.yeet_scanner.get() .. celfront.len() {
+      for p in self.soft_oom_scan.get() .. celfront.len() {
         let x = celfront[p];
         match env._try_lookup_ref_(x) {
           None | Some(Err(_)) => {}
@@ -2048,7 +2086,7 @@ impl NvGpuMemPool {
                           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
                           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                         }
-                        self.yeet_scanner.set(p + 1);
+                        self.soft_oom_scan.set(p + 1);
                         return Some(());
                       }
                     }
@@ -2084,7 +2122,7 @@ impl NvGpuMemPool {
                             println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
                             println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                           }
-                          self.yeet_scanner.set(p + 1);
+                          self.soft_oom_scan.set(p + 1);
                           return Some(());
                         }
                       }
@@ -2114,11 +2152,11 @@ impl NvGpuMemPool {
           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
         }
-        self.yeet_scanner.set(celfront.len());
+        self.soft_oom_scan.set(celfront.len());
         return None;
       }
       retry = true;
-      self.yeet_scanner.set(0);
+      self.soft_oom_scan.set(0);
       }
       unreachable!();
     })

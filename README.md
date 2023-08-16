@@ -131,6 +131,11 @@ to control its run-time behavior.
   paths at which CUDA is installed.
   If this variable was not specified, the default value is
   `/usr/local/cuda`.
+- `CACTI_VMEM_SOFT_LIMIT`: Set this to either a specific size
+  (bytes/KB/MB/GB/etc.) or a decimal fraction.
+  Then, the GPU subsystem will pretend as if that were the
+  physical limit of GPU VRAM, and make garbage-collection/OOM
+  decisions accordingly.
 - `CACTI_VERBOSE`: Setting this will increase the verbosity
   of the stdout logging.
 

@@ -1753,6 +1753,11 @@ impl CellType {
     CellType{shape: self.shape.clone(), dtype: new_dtype}
   }
 
+  pub fn lossy_cast(&self, new_dtype: Dtype) -> CellType {
+    // FIXME FIXME
+    CellType{shape: self.shape.clone(), dtype: new_dtype}
+  }
+
   pub fn to_dim(&self) -> Dim {
     assert!(self.dtype != Dtype::_Top);
     Dim{ndim: self.ndim(), dtype: self.dtype}
@@ -1936,6 +1941,62 @@ impl CellType {
     unsafe {
       Some(from_raw_parts_mut(buf.as_mut_ptr() as *mut T, dlen))
     }
+  }
+}
+
+#[derive(Clone, Debug)]
+pub struct TypedMem<'a> {
+  pub ty_:  CellType,
+  pub buf:  &'a [u8],
+}
+
+impl<'a> TypedMem<'a> {
+  pub fn type_(&self) -> &CellType {
+    &self.ty_
+  }
+
+  pub fn as_bytes(&self) -> &'a [u8] {
+    self.buf
+  }
+
+  pub fn into_bytes(self) -> &'a [u8] {
+    self.buf
+  }
+
+  pub fn as_slice<T: DtypeConstExt + Copy>(&self) -> Option<&'a [T]> {
+    self.ty_.prepare_bytes::<T>(self.buf)
+  }
+
+  pub fn into_slice<T: DtypeConstExt + Copy>(self) -> Option<&'a [T]> {
+    self.ty_.prepare_bytes::<T>(self.buf)
+  }
+}
+
+#[derive(Debug)]
+pub struct TypedMemMut<'a> {
+  pub ty_:  CellType,
+  pub buf:  &'a mut [u8],
+}
+
+impl<'a> TypedMemMut<'a> {
+  pub fn type_(&self) -> &CellType {
+    &self.ty_
+  }
+
+  pub fn into_bytes(self) -> &'a [u8] {
+    self.buf
+  }
+
+  pub fn into_mut_bytes(self) -> &'a mut [u8] {
+    self.buf
+  }
+
+  pub fn into_slice<T: DtypeConstExt + Copy>(self) -> Option<&'a [T]> {
+    self.ty_.prepare_bytes::<T>(self.buf)
+  }
+
+  pub fn into_mut_slice<T: DtypeConstExt + Copy>(self) -> Option<&'a mut [T]> {
+    self.ty_.prepare_bytes_mut::<T>(self.buf)
   }
 }
 

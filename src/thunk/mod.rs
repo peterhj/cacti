@@ -5,7 +5,7 @@ use crate::algo::str::*;
 use crate::cell::*;
 use crate::clock::*;
 use crate::ctx::{TL_CTX, CtxCtr, CtxEnv, Cell_, CellDerefErr, CellClosure, ctx_lookup_type, ctx_clean_arg, ctx_push_cell_arg, ctx_pop_thunk};
-use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier, MemReg, InnerCell};
+use crate::pctx::{TL_PCTX, PCtxImpl, Locus, PMach, PAddr, TagUnifier, UnsafeMemReg, InnerCell};
 #[cfg(feature = "nvgpu")]
 use crate::pctx::nvgpu::*;
 use crate::pctx::smp::*;
@@ -2481,14 +2481,15 @@ impl FutharkThunkImpl<MulticoreBackend> {
               None => panic!("bug"),
               Some((_, _, addr)) => addr
             };
-            /*let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();*/
-            match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
-              None => panic!("bug"),
-              Some(reg) => {
-                let ptr = (reg.ptr as usize + v_ptroff as usize) as *mut _;
-                let sz = e.ty.span_bytes() as usize;
-                assert!(MemReg{ptr, sz}.is_subregion(&reg));
-                a.set_mem_parts(ptr, sz);
+            unsafe {
+              match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_unsafe_mem_reg()) {
+                None => panic!("bug"),
+                Some(reg) => {
+                  let ptr = (reg.as_ptr() as usize + v_ptroff as usize) as *mut _;
+                  let sz = e.ty.span_bytes() as usize;
+                  assert!(UnsafeMemReg::_from_raw_parts(ptr, sz).is_subregion(&reg));
+                  a.set_mem_parts(ptr, sz);
+                }
               }
             }
           }
@@ -2609,15 +2610,16 @@ impl FutharkThunkImpl<MulticoreBackend> {
                   None => panic!("bug"),
                   Some((_, _, addr)) => addr
                 };
-                /*let (ptr, size) = pctx.lookup_mem_reg(addr).unwrap();*/
-                match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_mem_reg()) {
-                  None => panic!("bug"),
-                  Some(reg) => {
-                    let ptr = (reg.ptr as usize + v_ptroff as usize) as *mut _;
-                    let sz = e.ty.span_bytes() as usize;
-                    assert!(MemReg{ptr, sz}.is_subregion(&reg));
-                    a.set_mem_parts(ptr, sz);
-                    out_org = Some((addr, ptr, sz));
+                unsafe {
+                  match pctx.lookup(addr).and_then(|(_, _, icel)| icel.as_unsafe_mem_reg()) {
+                    None => panic!("bug"),
+                    Some(reg) => {
+                      let ptr = (reg.as_ptr() as usize + v_ptroff as usize) as *mut _;
+                      let sz = e.ty.span_bytes() as usize;
+                      assert!(UnsafeMemReg::_from_raw_parts(ptr, sz).is_subregion(&reg));
+                      a.set_mem_parts(ptr, sz);
+                      out_org = Some((addr, ptr, sz));
+                    }
                   }
                 }
               }

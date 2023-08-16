@@ -715,12 +715,40 @@ pub type MemReg = UnsafeMemReg;
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct UnsafeMemReg {
-  pub ptr:  *mut c_void,
-  pub sz:   usize,
+  ptr:  *mut c_void,
+  sz:   usize,
 }
 
-impl MemReg {
-  pub fn is_subregion(&self, other: &MemReg) -> bool {
+impl UnsafeMemReg {
+  pub unsafe fn _from_raw_parts(ptr: *mut c_void, sz: usize) -> UnsafeMemReg {
+    UnsafeMemReg{ptr, sz}
+  }
+
+  pub unsafe fn _as_bytes<'b>(self) -> &'b [u8] {
+    assert!(!self.ptr.is_null());
+    unsafe { from_raw_parts(self.ptr as *const u8, self.sz) }
+  }
+
+  pub fn slice(self, start_bytes: usize, end_bytes: usize) -> UnsafeMemReg {
+    let base = self.ptr as usize;
+    let end_base = base + self.sz;
+    let slice_base = base + start_bytes;
+    let slice_end_base = base + end_bytes;
+    let slice_sz = slice_end_base - slice_base;
+    let slice = UnsafeMemReg{ptr: slice_base as *mut _, sz: slice_sz};
+    assert!(slice.is_subregion(&self));
+    slice
+  }
+
+  pub fn as_ptr(&self) -> *mut c_void {
+    self.ptr
+  }
+
+  pub fn size_bytes(&self) -> usize {
+    self.sz
+  }
+
+  pub fn is_subregion(&self, other: &UnsafeMemReg) -> bool {
     let src = self.ptr as usize;
     let end_src = src + self.sz;
     assert!(src <= end_src);
@@ -746,8 +774,9 @@ impl MemReg {
     let dst_start = self.ptr as usize;
     let dst_end = dst_start + self.sz;
     if !(src_end <= dst_start || dst_end <= src_start) {
-      panic!("bug: MemReg::_copy_from_slice: overlapping src and dst");
+      panic!("bug: UnsafeMemReg::_copy_from_slice: overlapping src and dst");
     }
+    assert!(!self.ptr.is_null());
     unsafe {
       std::intrinsics::copy_nonoverlapping(src_buf.as_ptr() as *const u8, self.ptr as *mut u8, self.sz);
     }
@@ -766,8 +795,9 @@ impl MemReg {
     let dst_start = self.ptr as usize;
     let dst_end = dst_start + self.sz;
     if !(src_end <= dst_start || dst_end <= src_start) {
-      panic!("bug: MemReg::_copy_from_bytes: overlapping src and dst");
+      panic!("bug: UnsafeMemReg::_copy_from_bytes: overlapping src and dst");
     }
+    assert!(!self.ptr.is_null());
     unsafe {
       std::intrinsics::copy_nonoverlapping(src_buf.as_ptr() as *const u8, self.ptr as *mut u8, self.sz);
     }
@@ -779,6 +809,7 @@ impl MemReg {
   }
 
   pub fn _copy_from_reader<R: Read>(&self, mut src: R) {
+    assert!(!self.ptr.is_null());
     let dst_buf = unsafe { from_raw_parts_mut(self.ptr as *mut u8, self.sz) };
     let mut dst_off = 0;
     loop {
@@ -793,27 +824,30 @@ impl MemReg {
   }
 
   pub fn _as_slice_f32(&self) -> &[f32] {
+    assert!(!self.ptr.is_null());
     assert_eq!(self.ptr as usize % 4, 0);
     unsafe { from_raw_parts(self.ptr as *const f32, self.sz / 4) }
   }
 
   pub fn _as_slice_i64(&self) -> &[i64] {
+    assert!(!self.ptr.is_null());
     assert_eq!(self.ptr as usize % 8, 0);
     unsafe { from_raw_parts(self.ptr as *const i64, self.sz / 8) }
   }
 
   pub fn _as_slice_u16(&self) -> &[u16] {
+    assert!(!self.ptr.is_null());
     assert_eq!(self.ptr as usize % 2, 0);
     unsafe { from_raw_parts(self.ptr as *const u16, self.sz / 2) }
   }
 
-  pub fn _debug_dump_f32(&self) {
+  /*pub fn _debug_dump_f32(&self) {
     let len = self.sz / 4;
     assert_eq!(0, self.sz % 4);
     assert_eq!(0, (self.ptr as usize) % align_of::<f32>());
     let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const f32, len) };
     let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start * 4);
+    print!("DEBUG: UnsafeMemReg: {:08x} :", start * 4);
     for i in start .. min(start + 8, len) {
       let x = buf[i];
       print!(" {:+e}", x);
@@ -823,7 +857,7 @@ impl MemReg {
       return;
     }
     let start = (len - 1) - ((len - 1) & (8 - 1));
-    print!("DEBUG: MemReg: {:08x} :", start * 4);
+    print!("DEBUG: UnsafeMemReg: {:08x} :", start * 4);
     for i in start .. min(start + 8, len) {
       let x = buf[i];
       print!(" {:+e}", x);
@@ -837,7 +871,7 @@ impl MemReg {
     assert_eq!(0, (self.ptr as usize) % align_of::<u16>());
     let buf = unsafe { from_raw_parts(self.ptr as *mut u8 as *const u8 as *const u16, len) };
     let start = 0;
-    print!("DEBUG: MemReg: {:08x} :", start * 2);
+    print!("DEBUG: UnsafeMemReg: {:08x} :", start * 2);
     for i in start .. min(start + 8, len) {
       let x = f16::from_bits(buf[i]);
       print!(" {:+e}", x);
@@ -847,20 +881,20 @@ impl MemReg {
       return;
     }
     let start = (len - 1) - ((len - 1) & (8 - 1));
-    print!("DEBUG: MemReg: {:08x} :", start * 2);
+    print!("DEBUG: UnsafeMemReg: {:08x} :", start * 2);
     for i in start .. min(start + 8, len) {
       let x = f16::from_bits(buf[i]);
       print!(" {:+e}", x);
     }
     println!();
-  }
+  }*/
 }
 
 pub trait InnerCell {
   // TODO
   //fn try_borrow(&self) -> () { unimplemented!(); }
   //fn try_borrow_mut(&self) -> () { unimplemented!(); }
-  fn as_mem_reg(&self) -> Option<MemReg> { None }
+  unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> { None }
   //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
   fn size(&self) -> usize { unimplemented!(); }
   fn root(&self) -> Option<CellPtr> { unimplemented!(); }
@@ -877,6 +911,10 @@ pub trait InnerCell {
   fn pinned(&self) -> bool { unimplemented!(); }
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
+  fn _try_borrow(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
+  fn _unborrow(&self) { unimplemented!(); }
+  fn _try_borrow_mut(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
+  fn _unborrow_mut(&self) { unimplemented!(); }
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> { Err(BorrowErr::NotImpl) }
   fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr> { Err(BorrowErr::NotImpl) }
 }
@@ -884,7 +922,7 @@ pub trait InnerCell {
 pub trait InnerCell_ {
   fn as_any(&self) -> &dyn Any;
   // TODO
-  fn as_mem_reg(&self) -> Option<MemReg>;
+  unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg>;
   //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
   fn size(&self) -> usize;
   fn root(&self) -> Option<CellPtr>;
@@ -901,6 +939,8 @@ pub trait InnerCell_ {
   fn pinned(&self) -> bool;
   fn pin(&self);
   fn unpin(&self);
+  fn _try_borrow(&self) -> Result<(), BorrowErr>;
+  fn _unborrow(&self);
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr>;
   fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr>;
 }
@@ -910,8 +950,8 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     self
   }
 
-  fn as_mem_reg(&self) -> Option<MemReg> {
-    InnerCell::as_mem_reg(self)
+  unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> {
+    InnerCell::as_unsafe_mem_reg(self)
   }
 
   fn size(&self) -> usize {
@@ -974,6 +1014,14 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     InnerCell::unpin(self)
   }
 
+  fn _try_borrow(&self) -> Result<(), BorrowErr> {
+    InnerCell::_try_borrow(self)
+  }
+
+  fn _unborrow(&self) {
+    InnerCell::_unborrow(self)
+  }
+
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
     InnerCell::mem_borrow(self)
   }
@@ -1011,6 +1059,10 @@ impl Drop for BorrowCell {
 impl BorrowCell {
   pub fn new() -> BorrowCell {
     BorrowCell{ctr: Cell::new(0)}
+  }
+
+  pub fn _borrowed(&self) -> bool {
+    self.ctr.get() != 0
   }
 
   pub fn _try_borrow(&self) -> Result<(), BorrowErr> {

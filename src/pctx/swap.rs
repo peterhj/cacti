@@ -32,11 +32,11 @@ impl SwapCowMemCell {
 }
 
 impl InnerCell for SwapCowMemCell {
-  fn as_mem_reg(&self) -> Option<MemReg> {
+  unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> {
     if self.mem.as_ptr().is_null() {
       return None;
     }
-    Some(MemReg{ptr: self.mem.as_ptr(), sz: self.mem.size_bytes()})
+    Some(UnsafeMemReg{ptr: self.mem.as_ptr(), sz: self.mem.size_bytes()})
   }
 
   fn size(&self) -> usize {

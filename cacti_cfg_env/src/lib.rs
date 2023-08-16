@@ -22,9 +22,9 @@ pub enum OomPolicy {
 pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
-  pub mem_soft_limit: Option<()>,
+  pub mem_soft_limit: Option<Vec<u8>>,
   pub mem_oom:    OomPolicy,
-  pub vmem_soft_limit: Option<()>,
+  pub vmem_soft_limit: Option<Vec<u8>>,
   pub vmem_oom:   OomPolicy,
   pub no_kcache:  bool,
   pub futhark_pedantic: bool,
@@ -91,8 +91,7 @@ impl CfgEnv {
     }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
     )));
     let mem_soft_limit = var("CACTI_MEM_SOFT_LIMIT").map(|s| {
-      // FIXME
-      ()
+      s.into_bytes()
     }).ok();
     let mem_oom = var("CACTI_MEM_OOM").ok().and_then(|s| {
       match s.as_str() {
@@ -102,8 +101,7 @@ impl CfgEnv {
       }
     }).unwrap_or_else(|| OomPolicy::Soft);
     let vmem_soft_limit = var("CACTI_VMEM_SOFT_LIMIT").map(|s| {
-      // FIXME
-      ()
+      s.into_bytes()
     }).ok();
     let vmem_oom = var("CACTI_VMEM_OOM").ok().and_then(|s| {
       match s.as_str() {

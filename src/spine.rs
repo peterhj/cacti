@@ -34,8 +34,8 @@ pub enum SpineResume<'a> {
   _Top,
   PutMemV(CellPtr, &'a dyn Any),
   PutMemF(CellPtr, &'a dyn Fn(CellType, MemReg, )),
-  PutMemFun(CellPtr, &'a dyn Fn(&CellType, &[u8])),
-  PutMemMutFun(CellPtr, &'a dyn Fn(&CellType, &mut [u8])),
+  PutMemFun(CellPtr, &'a dyn Fn(TypedMem)),
+  PutMemMutFun(CellPtr, &'a dyn Fn(TypedMemMut)),
   Put(CellPtr, &'a CellType, &'a dyn CellStoreTo),
 }
 
@@ -795,10 +795,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            //assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.up, 0);*/
-            //assert!(state.clk.is_uninit());
-            //state.flag.unset_seal();
             let next_clk = base_clk.init_once();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -824,10 +820,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            //assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.up, 0);*/
-            //assert!(state.clk.is_uninit());
-            //state.flag.unset_seal();
             let next_clk = base_clk.init_once();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -836,7 +828,7 @@ impl SpineEnv {
           }
         }
       }
-      SpineEntry::YieldInit(x, _xclk, _loc) => {
+      /*SpineEntry::YieldInit(x, _xclk, _loc) => {
         let mut self_ = this.borrow_mut();
         let xroot = self_._deref(x);
         match self_._lookup(x) {
@@ -849,10 +841,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            //assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.up, 0);*/
-            // FIXME
-            /*assert!(state.clk.is_uninit());*/
             let next_clk = base_clk.init_once();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -860,7 +848,7 @@ impl SpineEnv {
             log.borrow_mut()[sp as usize] = SpineEntry::YieldInit(x, next_clk, _loc);
           }
         }
-      }
+      }*/
       SpineEntry::Alias(x, og) => {
         let mut self_ = this.borrow_mut();
         match self_.state.get(&x) {
@@ -904,9 +892,6 @@ impl SpineEnv {
             panic!("bug");
           }
           Some((_, state)) => {
-            // NB: late/lazy idempotent seal.
-            /*assert!(!state.flag.seal());*/
-            //state.flag.set_seal();
             let next_clk = state.clk;
             drop(state);
             self_.arg.push((x, next_clk));
@@ -928,11 +913,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((xroot, state)) => {
-            //assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.up, 0);*/
-            // FIXME
-            /*assert!(state.clk.is_uninit());*/
-            //state.flag.unset_seal();
             let next_clk = base_clk.max(state.clk).init_once();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -958,10 +938,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((xroot, state)) => {
-            //assert!(!state.flag.seal());
-            /*assert_eq!(state.clk.up, 0);*/
-            //assert!(state.clk.is_uninit());
-            //state.flag.unset_seal();
             let next_clk = base_clk.max(state.clk).init_once();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -988,8 +964,6 @@ impl SpineEnv {
         match self_._lookup_mut(x) {
           None => panic!("bug"),
           Some((_, state)) => {
-            //assert!(!state.flag.seal());
-            //state.flag.unset_seal();
             let next_clk = base_clk.max(state.clk).update();
             assert!(state.clk < next_clk);
             state.clk = next_clk;
@@ -1004,7 +978,7 @@ impl SpineEnv {
       SpineEntry::UnsafeWrite(x, _xclk, th) => {
         unimplemented!();
       }
-      SpineEntry::Seal(x) => {
+      /*SpineEntry::Seal(x) => {
         let mut self_ = this.borrow_mut();
         match self_._lookup_mut(x) {
           None => panic!("bug"),
@@ -1029,8 +1003,7 @@ impl SpineEnv {
       SpineEntry::Unsync(x) => {
         // FIXME FIXME
         unimplemented!();
-      }
-      // TODO TODO
+      }*/
       _ => unimplemented!()
     }
   }
@@ -1547,7 +1520,6 @@ impl Spine {
     }
     let t0 = Stopwatch::tl_stamp();
     match entry {
-      // TODO
       SpineEntry::_Top => {}
       SpineEntry::Yield_ => {
         ret = SpineRet::Yield_(());
@@ -1716,7 +1688,8 @@ impl Spine {
                               assert_eq!(offset, 0);
                               assert_eq!(sz, mem.len());
                             }
-                            (fun)(&e.ty, &mut *mem);
+                            //(fun)(&e.ty, &mut *mem);
+                            (fun)(TypedMemMut{ty_: e.ty.clone(), buf: &mut *mem});
                           }
                         };
                       });

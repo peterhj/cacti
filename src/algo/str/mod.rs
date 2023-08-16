@@ -1,3 +1,5 @@
+pub mod parse_size;
+
 pub fn sane_ascii(s: &[u8]) -> String {
   safe_ascii(s)
 }
