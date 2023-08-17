@@ -62,9 +62,17 @@ the following:
 Requirements:
 
 - git
+- make
 - ghc and cabal-install (tested with GHC 9.0)
 - rustc and cargo (tested with Rust 1.62; some older versions should also compile)
 - gcc or clang, for Futhark dynamic compilation (tested with gcc)
+
+Additional requirements for
+[sentencepiece](https://github.com/google/sentencepiece)
+support (the default configuration):
+
+- cmake
+- g++ or clang++
 
 GPU support:
 
