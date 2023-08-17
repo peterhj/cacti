@@ -771,7 +771,7 @@ impl LlamaCached {
                       .inner_arg_max()
                       .lossy_cast(u16::dtype_())
                       .keep();
-      in_[idx].in_tok._deref()[(.., next_seq_len .. next_seq_len + 1)]
+      in_[idx].in_tok[(.., next_seq_len .. next_seq_len + 1)]
           += &out_lm_tok[(.., diff_seq_len - 1 .. diff_seq_len)];
       out.push(LanguageModelDeployOut{out_lm_logit, out_lm_prob, out_lm_tok});
     }
