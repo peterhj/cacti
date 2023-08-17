@@ -63,8 +63,8 @@ Requirements:
 
 - git
 - make
-- ghc and cabal-install (tested with GHC 9.0)
-- rustc and cargo (tested with Rust 1.62; some older versions should also compile)
+- ghc and cabal-install (tested with GHC >= 9.0)
+- rustc and cargo (tested with Rust >= 1.62; some older versions should also compile)
 - gcc or clang, for Futhark dynamic compilation (tested with gcc)
 
 Additional requirements for
@@ -78,7 +78,10 @@ GPU support:
 
 - CUDA 11.x (tested with CUDA 11.5 and driver 495)
 
-Thus far we have only tested `cacti` on x86-64 and Linux.
+Thus far we have also built `cacti` on the following system
+configurations:
+
+- Debian Bookworm (x86_64-gnu-linux, GCC 12, GHC 9.0, Rust 1.63)
 
 ### Bootstrapping and installing from source (recommended method)
 

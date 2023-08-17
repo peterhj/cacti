@@ -13,7 +13,7 @@ git clone "${cacti_remote_prefix}/byteorder" ../byteorder
 git clone -b patch "${cacti_remote_prefix}/cc" ../cc
 git clone "${cacti_remote_prefix}/cell_split" ../cell_split
 git clone -b patch "${cacti_remote_prefix}/cfg_if" ../cfg_if
-git clone "${cacti_remote_prefix}/cmake" ../cmake
+git clone -b patch "${cacti_remote_prefix}/cmake" ../cmake
 git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast
 git clone -b patch-0.26 "${cacti_remote_prefix}/futhark" ../futhark
 git clone "${cacti_remote_prefix}/futhark_ffi" ../futhark_ffi
