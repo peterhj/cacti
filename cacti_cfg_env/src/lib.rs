@@ -14,9 +14,9 @@ thread_local! {
 
 #[derive(Clone)]
 pub struct CfgEnv {
-  pub cabalpath:  Vec<PathBuf>,
-  pub cudaprefix: Vec<PathBuf>,
+  pub binpath:    Option<PathBuf>,
   pub cachepath:  Option<PathBuf>,
+  pub cudaprefix: Vec<PathBuf>,
   pub mem_soft_limit: Option<Box<[u8]>>,
   pub mem_oom:    Option<Box<[u8]>>,
   pub nvgpu_mem_alloc: Option<Box<[u8]>>,
@@ -29,6 +29,7 @@ pub struct CfgEnv {
   //pub verbose:    i8,
   pub silent:     bool,
   pub report:     bool,
+  pub debug_timing: bool,
   pub debug_yeet: i8,
   pub debug_mem_pool: i8,
   pub debug_initialize: i8,
@@ -43,7 +44,7 @@ pub struct CfgEnv {
 
 impl CfgEnv {
   pub fn get_once() -> CfgEnv {
-    let cabalpath = var("CACTI_CABAL_BIN_PATH").map(|s| {
+    /*let binpath = var("CACTI_BIN_PATH").map(|s| {
       let mut ps = Vec::new();
       for s in s.split(":") {
         if !s.is_empty() {
@@ -54,6 +55,16 @@ impl CfgEnv {
     }).unwrap_or_else(|_| {
       home_dir().map(|p| vec![p.join(".cabal").join("bin")])
         .unwrap_or_else(|| Vec::new())
+    });*/
+    let binpath = var("CACTI_BIN_PATH").ok().map(|s| {
+      PathBuf::from(s)
+    }).or_else(|| {
+      home_dir().map(|p| p.join(".cabal").join("bin"))
+    });
+    let cachepath = var("CACTI_CACHE_PATH").ok().map(|s| {
+      PathBuf::from(s)
+    }).or_else(|| {
+      home_dir().map(|p| p.join(".cacti").join("cache"))
     });
     let cudaprefix = var("CACTI_CUDA_PREFIX").map(|s| {
       let mut ps = Vec::new();
@@ -86,11 +97,6 @@ impl CfgEnv {
       ps
     }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
     )));
-    let cachepath = var("CACTI_CACHE_PATH").ok().map(|s| {
-      PathBuf::from(s)
-    }).or_else(|| {
-      home_dir().map(|p| p.join(".cacti").join("cache"))
-    });
     let mem_soft_limit = var("CACTI_MEM_SOFT_LIMIT").ok().map(|s| {
       s.into_bytes().into()
     });
@@ -122,6 +128,9 @@ impl CfgEnv {
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let report = var("CACTI_REPORT")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
+    let debug_timing = var("CACTI_DEBUG_TIMING")
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let debug_yeet = var("CACTI_DEBUG_YEET")
@@ -173,23 +182,27 @@ impl CfgEnv {
       .map(|_| true)
       .unwrap_or_else(|_| false);*/
     if !silent && debug >= 0 {
-      for (i, p) in cabalpath.iter().enumerate() {
-        println!("INFO:   cacti_cfg_env: CACTI_CABAL_PATH[{}]={}",
+      /*for (i, p) in binpath.iter().enumerate() {
+        println!("INFO:   cacti_cfg_env: CACTI_BIN_PATH[{}]={}",
             i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
-      }
-      for (i, p) in cudaprefix.iter().enumerate() {
-        println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX[{}]={}",
-            i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      }*/
+      if let Some(p) = binpath.as_ref() {
+        println!("INFO:   cacti_cfg_env: CACTI_BIN_PATH={}",
+            p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
       if let Some(p) = cachepath.as_ref() {
         println!("INFO:   cacti_cfg_env: CACTI_CACHE_PATH={}",
             p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
+      for (i, p) in cudaprefix.iter().enumerate() {
+        println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX[{}]={}",
+            i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      }
     }
     CfgEnv{
-      cabalpath,
-      cudaprefix,
+      binpath,
       cachepath,
+      cudaprefix,
       mem_soft_limit,
       mem_oom,
       nvgpu_mem_alloc,
@@ -201,6 +214,7 @@ impl CfgEnv {
       verbose,
       silent,
       report,
+      debug_timing,
       debug_yeet,
       debug_mem_pool,
       debug_initialize,
@@ -259,6 +273,12 @@ pub fn cfg_trace() -> bool {
 pub fn cfg_debug_(level: i8) -> bool {
   TL_CFG_ENV.with(|cfg| {
     !cfg.silent && cfg.debug >= level
+  })
+}
+
+pub fn cfg_debug_timing() -> bool {
+  TL_CFG_ENV.with(|cfg| {
+    !cfg.silent && (cfg.debug >= 1 || cfg.debug_timing)
   })
 }
 

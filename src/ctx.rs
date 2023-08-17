@@ -113,21 +113,21 @@ pub struct Ctx {
 
 impl Drop for Ctx {
   fn drop(&mut self) {
-    if cfg_verbose_info() {
+    if cfg_debug_timing() {
     let digest = self.timing.digest();
-    println!("INFO:   Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
-    println!("INFO:   Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
-    println!("INFO:   Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
-    println!("INFO:   Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
-    println!("INFO:   Ctx::drop: timing digest: f_build1: {:?}", digest.f_build1);
-    println!("INFO:   Ctx::drop: timing digest: f_setup1: {:?}", digest.f_setup1);
-    println!("INFO:   Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
-    println!("INFO:   Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
-    println!("INFO:   Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
-    println!("INFO:   Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
-    println!("INFO:   Ctx::drop: debug counter: accumulate hashes:       {:?}", self.debugctr.accumulate_hashes.borrow());
-    println!("INFO:   Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
-    println!("INFO:   Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
+    println!("DEBUG:  Ctx::drop: timing digest: pregemm1: {:?}", digest.pregemm1);
+    println!("DEBUG:  Ctx::drop: timing digest: gemm1:    {:?}", digest.gemm1);
+    println!("DEBUG:  Ctx::drop: timing digest: pregemm:  {:?}", digest.pregemm);
+    println!("DEBUG:  Ctx::drop: timing digest: gemm:     {:?}", digest.gemm);
+    println!("DEBUG:  Ctx::drop: timing digest: f_build1: {:?}", digest.f_build1);
+    println!("DEBUG:  Ctx::drop: timing digest: f_setup1: {:?}", digest.f_setup1);
+    println!("DEBUG:  Ctx::drop: timing digest: futhark1: {:?}", digest.futhark1);
+    println!("DEBUG:  Ctx::drop: timing digest: f_build:  {:?}", digest.f_build);
+    println!("DEBUG:  Ctx::drop: timing digest: f_setup:  {:?}", digest.f_setup);
+    println!("DEBUG:  Ctx::drop: timing digest: futhark:  {:?}", digest.futhark);
+    println!("DEBUG:  Ctx::drop: debug counter: accumulate hashes:       {:?}", self.debugctr.accumulate_hashes.borrow());
+    println!("DEBUG:  Ctx::drop: debug counter: accumulate in place:     {:?}", self.debugctr.accumulate_in_place.get());
+    println!("DEBUG:  Ctx::drop: debug counter: accumulate not in place: {:?}", self.debugctr.accumulate_not_in_place.get());
     }
   }
 }
@@ -1352,6 +1352,46 @@ impl CtxEnv {
     }
   }
 
+  pub fn _try_probe_ref(&self, query: CellPtr) -> Option<CellProbePtr> {
+    let mut cursor = query;
+    loop {
+      match self.celtab.get(&cursor) {
+        None => {
+          return Some(Err(CellDerefErr::Missing));
+        }
+        Some(e) => {
+          let cel_ = match e.cel_.try_borrow() {
+            Err(_) => return None,
+            Ok(cel_) => cel_
+          };
+          match &*cel_ {
+            &Cell_::Top(..) |
+            &Cell_::Phy(..) => {
+              return Some(Ok(cursor));
+            }
+            &Cell_::Alias(ref alias, next) => {
+              match alias {
+                &CellAlias::View(_) => {
+                  return Some(Err(CellDerefErr::View));
+                }
+                //&CellAlias::NewType |
+                &CellAlias::NewShape |
+                &CellAlias::BitAlias |
+                &CellAlias::Opaque |
+                &CellAlias::Const_ => {}
+              }
+              cursor = next;
+            }
+            &Cell_::Bot => {
+              return Some(Err(CellDerefErr::Bot));
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+    }
+  }
+
   pub fn _probe_ref(&self, query: CellPtr) -> CellProbePtr {
     let mut cursor = query;
     loop {
@@ -1471,9 +1511,10 @@ impl CtxEnv {
         (&e.ty, e.stablect.get())
       }
     };
-    let root = match self._probe_ref(query) {
-      Err(e) => return Some(Err(e)),
-      Ok(root) => root
+    let root = match self._try_probe_ref(query) {
+      None => return None,
+      Some(Err(e)) => return Some(Err(e)),
+      Some(Ok(root)) => root
     };
     match self.celtab.get(&root) {
       None => return Some(Err(CellDerefErr::MissingRoot)),

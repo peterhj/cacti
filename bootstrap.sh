@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eu -o pipefail
 if [ -e "../.gitmodules" ] ; then
-  exec ../bootstrap.sh
+  exec echo "- cacti: warning: submodule checkout, bailing"
 fi
 cacti_remote_prefix="https://git.sr.ht/~ptrj"
 

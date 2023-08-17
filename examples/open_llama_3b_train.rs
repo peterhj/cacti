@@ -294,6 +294,7 @@ fn main() {
     // cycle. This allows the condition to appear slightly
     // simpler.
     if cycle_nr != 0 && cycle_nr % cycles_per_minibatch == 0 {
+      println!("train:  cycle={} adamw step...", cycle_nr);
       smp_scope().with(|_| {
         for ((((g, g_), g2), p_), p) in
             grad.iter()
@@ -317,9 +318,9 @@ fn main() {
         }
       });
 
-      // For training, we don't need to `cache` the positional
-      // embedding constants, as they remain unchanged on each
-      // cycle.
+      // For training, it's not strictly necessary to `cache`
+      // the positional embedding constants, as they remain
+      // unchanged on each cycle.
       /*model.cache_constants();*/
     }
 
@@ -528,149 +529,163 @@ fn main() {
       }
     });
 
-    let out_lm_prob_mem = out.out_lm_prob._get_unsafe_mem();
-    let out_lm_loss_mem = out.out_lm_loss._get_unsafe_mem();
-    println!("train:  out lm prob type   ={:?}", out.out_lm_prob.type_());
-    println!("train:  out lm prob version={:?}", out.out_lm_prob.version());
-    println!("train:  out lm prob mem ptr=0x{:016x}", out_lm_prob_mem.as_ptr() as usize);
-    println!("train:  out lm prob mem sz ={}", out_lm_prob_mem.size_bytes());
-    println!("train:  text str=\"{}\"", text_str);
-    println!("train:  text str.len={}", text_str.len());
-    println!("train:  text tok={:?}", text_tok.as_ref());
-    println!("train:  text tok.len={}", text_tok.len());
-    let out_lm_prob_f32 = out_lm_prob_mem._as_slice_f32();
-    let out_lm_loss_f32 = out_lm_loss_mem._as_slice_f32();
-    fn argmax(xs: &[f32]) -> Option<(usize, f32)> {
-      let mut kv = None;
-      for (k, &v) in xs.iter().enumerate() {
-        match kv {
-          None => {
-            kv = Some((k, v));
-          }
-          Some((_, ov)) => {
-            if ov < v {
+    // Below, we read out to memory the language modeling
+    // output probabilities and fine-tuning losses.
+    [ out.out_lm_prob.clone(),
+      out.out_lm_loss.clone(),
+    ].with_mem(|typed_mems| {
+      let out_lm_prob_f32 = typed_mems[0].as_slice::<f32>().unwrap();
+      let out_lm_loss_f32 = typed_mems[1].as_slice::<f32>().unwrap();
+      fn argmax(xs: &[f32]) -> Option<(usize, f32)> {
+        let mut kv = None;
+        for (k, &v) in xs.iter().enumerate() {
+          match kv {
+            None => {
               kv = Some((k, v));
+            }
+            Some((_, ov)) => {
+              if ov < v {
+                kv = Some((k, v));
+              }
             }
           }
         }
+        kv
       }
-      kv
-    }
-    let mut loss_sum = 0.0;
-    let ntok = cfg.tok_dim as usize;
-    for pos in 1 ..= text_tok.len() {
-      let prev_pos = pos - 1;
-      let prev_tok = text_tok.as_ref()[prev_pos];
-      let act_next_tok = if pos < text_tok.len() {
-        text_tok.as_ref()[pos]
-      } else {
-        0
-      };
-      let (arg_max, max_prob) = argmax(&out_lm_prob_f32[pos * ntok .. (pos + 1) * ntok]).unwrap();
-      println!("train:  pos={} prev tok={} next tok={} max p={:.06} act p={:.06} loss={:.06} prev str={:?} next str={:?}",
-          pos, prev_tok, arg_max, max_prob,
-          (if (pos * ntok + act_next_tok as usize) < ((pos + 1) * ntok) {
-            out_lm_prob_f32[pos * ntok + act_next_tok as usize]
-          } else {
-            -f32::inf()
-          }),
-          out_lm_loss_f32[pos as usize],
-          tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
-          tokenizer.id_to_piece(arg_max as _).map(|s| safe_ascii(s.as_bytes())),
-      );
-      if pos < text_tok.len() {
-        loss_sum += out_lm_loss_f32[pos as usize];
+      let mut loss_sum = 0.0;
+      let ntok = cfg.tok_dim as usize;
+      for pos in 1 ..= text_tok.len() {
+        let prev_pos = pos - 1;
+        let prev_tok = text_tok.as_ref()[prev_pos];
+        let act_next_tok = if pos < text_tok.len() {
+          text_tok.as_ref()[pos]
+        } else {
+          0
+        };
+        let (arg_max, max_prob) = argmax(&out_lm_prob_f32[pos * ntok .. (pos + 1) * ntok]).unwrap();
+        println!("train:  pos={} prev tok={} next tok={} max p={:.06} act p={:.06} loss={:.06} prev str={:?} next str={:?}",
+            pos, prev_tok, arg_max, max_prob,
+            (if (pos * ntok + act_next_tok as usize) < ((pos + 1) * ntok) {
+              out_lm_prob_f32[pos * ntok + act_next_tok as usize]
+            } else {
+              -f32::inf()
+            }),
+            out_lm_loss_f32[pos as usize],
+            tokenizer.id_to_piece(prev_tok as _).map(|s| safe_ascii(s.as_bytes())),
+            tokenizer.id_to_piece(arg_max as _).map(|s| safe_ascii(s.as_bytes())),
+        );
+        if pos < text_tok.len() {
+          loss_sum += out_lm_loss_f32[pos as usize];
+        }
       }
-    }
-    println!("train:  cycle={} loss sum={:.06}", cycle_nr, loss_sum);
+      let loss_avg = loss_sum / (text_tok.len() - 1) as f32;
+      println!("train:  cycle={} loss sum={:.06} avg={:.06}", cycle_nr, loss_sum, loss_avg);
+    });
 
+    // Below, we summarize the floating point digest that
+    // was computed earlier by `abs_log2_hist8` and
+    // `nan_count` on the model parameters.
+    //
+    // By default, we only display the digest if we observe
+    // a floating point blowup (inf or NaN).
     //println!("train:  inspect param");
     for ((param, p_log2_hist), p_nan_count) in param.iter().zip(param_log2_hist.iter()).zip(param_nan_count.iter()) {
-      let p_log2_hist_mem = p_log2_hist._get_unsafe_mem();
-      if !(p_log2_hist_mem._as_slice_i64().len() == 0x100) {
-        println!("train:  WARNING: param log2 hist: unexpected len: {}", p_log2_hist_mem._as_slice_i64().len());
-        continue;
-      }
-      let p_nan_count_mem = p_nan_count._get_unsafe_mem();
-      if !(p_nan_count_mem._as_slice_i64().len() == 1) {
-        println!("train:  WARNING: param log2 hist: unexpected len: {}", p_nan_count_mem._as_slice_i64().len());
-        continue;
-      }
-      let h = p_log2_hist_mem._as_slice_i64();
-      let nan = p_nan_count_mem._as_slice_i64()[0];
-      let mut total = 0;
-      total += h[0];
-      for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
-        total += x;
-      }
-      for &x in (&h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize]).iter() {
-        total += x;
-      }
-      for &x in (&h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize]).iter() {
-        total += x;
-      }
-      total += h[0xff];
-      if h[0xff] != 0 {
-      println!("train:  param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
-          h[0],
-          &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
-          &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
-          &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
-          h[0xff],
-          nan,
-          total,
-          inv_matches.get(param),
-      );
-        println!("train:  param log2 hist: WARNING: fp blowup: label={:?}",
-            inv_matches.get(param),
-        );
-      }
+      [ p_log2_hist.clone(),
+        p_nan_count.clone(),
+      ].with_mem(|typed_mems| {
+        let h = typed_mems[0].as_slice::<i64>().unwrap();
+        let nan = typed_mems[1].as_slice::<i64>().unwrap();
+        if !(h.len() == 0x100) {
+          println!("train:  WARNING: param log2 hist: unexpected len: {} != 256", h.len());
+        }
+        if !(nan.len() == 1) {
+          println!("train:  WARNING: param nan count: unexpected len: {} != 1", nan.len());
+        }
+        let nan = nan[0];
+        let bias = 0x7f_u8;
+        let mut total = 0;
+        total += h[0];
+        for &x in (&h[(bias - 24) as usize ..= (bias - 15) as usize]).iter() {
+          total += x;
+        }
+        for &x in (&h[(bias - 14) as usize ..= (bias -  0) as usize]).iter() {
+          total += x;
+        }
+        for &x in (&h[(bias +  1) as usize ..= (bias + 15) as usize]).iter() {
+          total += x;
+        }
+        total += h[0xff];
+        if h[0xff] != 0 {
+          println!("train:  param log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
+              h[0],
+              &h[(bias - 24) as usize ..= (bias - 15) as usize],
+              &h[(bias - 14) as usize ..= (bias -  0) as usize],
+              &h[(bias +  1) as usize ..= (bias + 15) as usize],
+              h[0xff],
+              nan,
+              total,
+              inv_matches.get(param),
+          );
+          println!("train:  param log2 hist: WARNING: fp blowup: label={:?}",
+              inv_matches.get(param),
+          );
+        }
+      });
     }
+
+    // Below, we summarize the floating point digest that
+    // was computed earlier by `abs_log2_hist8` and
+    // `nan_count` on the gradients.
+    //
+    // By default, we only display the digest if we observe
+    // a floating point blowup (inf or NaN).
     //println!("train:  inspect gradient");
     for (((p, g), g_log2_hist), g_nan_count) in param.iter().zip(grad.iter()).zip(grad_log2_hist.iter()).zip(grad_nan_count.iter()) {
       if !(grad_map.get(p) == g) {
         println!("train:  WARNING: grad mismatch");
         continue;
       }
-      let g_log2_hist_mem = g_log2_hist._get_unsafe_mem();
-      if !(g_log2_hist_mem._as_slice_i64().len() == 0x100) {
-        println!("train:  WARNING: grad log2 hist: unexpected len: {}", g_log2_hist_mem._as_slice_i64().len());
-        continue;
-      }
-      let g_nan_count_mem = g_nan_count._get_unsafe_mem();
-      if !(g_nan_count_mem._as_slice_i64().len() == 1) {
-        println!("train:  WARNING: grad log2 hist: unexpected len: {}", g_nan_count_mem._as_slice_i64().len());
-        continue;
-      }
-      let h = g_log2_hist_mem._as_slice_i64();
-      let nan = g_nan_count_mem._as_slice_i64()[0];
-      let mut total = 0;
-      total += h[0];
-      for &x in (&h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize]).iter() {
-        total += x;
-      }
-      for &x in (&h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize]).iter() {
-        total += x;
-      }
-      for &x in (&h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize]).iter() {
-        total += x;
-      }
-      total += h[0xff];
-      if h[0xff] != 0 {
-      println!("train:  grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
-          h[0],
-          &h[(0x7f_u8 - 24) as usize ..= (0x7f_u8 - 15) as usize],
-          &h[(0x7f_u8 - 14) as usize ..= (0x7f_u8 -  0) as usize],
-          &h[(0x7f_u8 +  1) as usize ..= (0x7f_u8 + 15) as usize],
-          h[0xff],
-          nan,
-          total,
-          inv_matches.get(p),
-      );
-        println!("train:  param log2 hist: WARNING: fp blowup: label={:?}",
-            inv_matches.get(p),
-        );
-      }
+      [ g_log2_hist.clone(),
+        g_nan_count.clone(),
+      ].with_mem(|typed_mems| {
+        let h = typed_mems[0].as_slice::<i64>().unwrap();
+        let nan = typed_mems[1].as_slice::<i64>().unwrap();
+        if !(h.len() == 0x100) {
+          println!("train:  WARNING: grad log2 hist: unexpected len: {} != 256", h.len());
+        }
+        if !(nan.len() == 1) {
+          println!("train:  WARNING: grad nan count: unexpected len: {} != 1", nan.len());
+        }
+        let nan = nan[0];
+        let bias = 0x7f_u8;
+        let mut total = 0;
+        total += h[0];
+        for &x in (&h[(bias - 24) as usize ..= (bias - 15) as usize]).iter() {
+          total += x;
+        }
+        for &x in (&h[(bias - 14) as usize ..= (bias -  0) as usize]).iter() {
+          total += x;
+        }
+        for &x in (&h[(bias +  1) as usize ..= (bias + 15) as usize]).iter() {
+          total += x;
+        }
+        total += h[0xff];
+        if h[0xff] != 0 {
+          println!("train:  grad log2 hist: zero={:?} sub={:?} -norm={:?} +norm={:?} unfin={:?} nan={:?} total={:?} label={:?}",
+              h[0],
+              &h[(bias - 24) as usize ..= (bias - 15) as usize],
+              &h[(bias - 14) as usize ..= (bias -  0) as usize],
+              &h[(bias +  1) as usize ..= (bias + 15) as usize],
+              h[0xff],
+              nan,
+              total,
+              inv_matches.get(p),
+          );
+          println!("train:  param log2 hist: WARNING: fp blowup: label={:?}",
+              inv_matches.get(p),
+          );
+        }
+      });
     }
 
     println!("train:  end cycle={}", cycle_nr);

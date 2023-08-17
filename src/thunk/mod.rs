@@ -1845,6 +1845,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
       Ok(Some(mut obj)) => {
         let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0); }
+        if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
           if rst.rst <= 0 {
             panic!("bug");
@@ -1854,6 +1855,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
             ctx.timing.f_build.borrow_mut().push(t1 - t0);
           }
         });
+        }
         let t0 = t1;
         // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
@@ -1863,6 +1865,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
         unsafe { FutharkThunkImpl::<MulticoreBackend>::_setup_object(&mut obj); }
         let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0); }
+        if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
           if rst.rst <= 0 {
             panic!("bug");
@@ -1872,6 +1875,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
             ctx.timing.f_setup.borrow_mut().push(t1 - t0);
           }
         });
+        }
         let pfin = TL_PCTX.with(|pctx| {
           pctx.ctr.peek_addr()
         });
@@ -2016,6 +2020,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       Ok(Some(mut obj)) => {
         let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0); }
+        if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
           if rst.rst <= 0 {
             panic!("bug");
@@ -2025,6 +2030,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
             ctx.timing.f_build.borrow_mut().push(t1 - t0);
           }
         });
+        }
         let t0 = t1;
         // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
@@ -2037,6 +2043,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
         let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0); }
+        if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
           if rst.rst <= 0 {
             panic!("bug");
@@ -2046,6 +2053,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
             ctx.timing.f_setup.borrow_mut().push(t1 - t0);
           }
         });
+        }
         let pfin = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
           gpu.mem_pool.borrow().set_back_alloc(false);
@@ -2361,10 +2369,16 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CACHE_PATH");
         panic!();
       }
-      if let Some(path) = cfg.cabalpath.first() {
+      /*if let Some(path) = cfg.cabalpath.first() {
         config.futhark = path.join("cacti-futhark");
       } else {
         println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CABAL_BIN_PATH");
+        panic!();
+      }*/
+      if let Some(path) = cfg.binpath.as_ref() {
+        config.futhark = path.join("cacti-futhark");
+      } else {
+        println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_BIN_PATH");
         panic!();
       }
       if let Some(prefix) = cfg.cudaprefix.first() {
@@ -2705,6 +2719,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
       }
       assert_eq!(spec_ct, param.len());
     }
+    if cfg_debug_timing() {
     match mode {
       ThunkMode::Accumulate => {
         TL_CTX.with(|ctx| {
@@ -2721,9 +2736,10 @@ impl FutharkThunkImpl<MulticoreBackend> {
       }
       _ => {}
     }
-    TL_PCTX.with(|pctx| {
+    }
+    /*TL_PCTX.with(|pctx| {
       // TODO: barrier?
-    });
+    });*/
     let t0 = Stopwatch::tl_stamp();
     obj.reset();
     if _cfg_debug_mode(mode) {
@@ -2757,6 +2773,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
     obj.release();
     let t1 = Stopwatch::tl_stamp();
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
+    if cfg_debug_timing() {
     TL_CTX.with(|ctx| {
       if oclk.rst <= 0 {
         panic!("bug");
@@ -2766,6 +2783,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
         ctx.timing.futhark.borrow_mut().push(t1 - t0);
       }
     });
+    }
     drop(obj);
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: ret={:?}", o_ret); }
     //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out={:?} oclk={:?}", out, oclk);
@@ -2830,13 +2848,17 @@ impl FutharkThunkImpl<MulticoreBackend> {
           println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   new addr={:?}",
               new_addr);*/
           }
+          if cfg_debug_timing() {
           TL_CTX.with(|ctx| {
             ctx.debugctr.accumulate_not_in_place.fetch_add(1);
           });
+          }
         } else {
+          if cfg_debug_timing() {
           TL_CTX.with(|ctx| {
             ctx.debugctr.accumulate_in_place.fetch_add(1);
           });
+          }
         }
         // TODO
       }
@@ -3418,6 +3440,7 @@ impl FutharkThunkImpl<CudaBackend> {
       }
       _ => None
     };*/
+    if cfg_debug_timing() {
     match mode {
       ThunkMode::Accumulate => {
         TL_CTX.with(|ctx| {
@@ -3433,6 +3456,7 @@ impl FutharkThunkImpl<CudaBackend> {
         });
       }
       _ => {}
+    }
     }
     TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -3506,6 +3530,7 @@ impl FutharkThunkImpl<CudaBackend> {
     });
     let t1 = Stopwatch::tl_stamp();
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
+    if cfg_debug_timing() {
     TL_CTX.with(|ctx| {
       if oclk.rst <= 0 {
         panic!("bug");
@@ -3515,6 +3540,7 @@ impl FutharkThunkImpl<CudaBackend> {
         ctx.timing.futhark.borrow_mut().push(t1 - t0);
       }
     });
+    }
     drop(obj);
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: ret={:?}", o_ret); }
     //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?} oclk={:?}", out, oclk);
@@ -3587,13 +3613,17 @@ impl FutharkThunkImpl<CudaBackend> {
           println!("WARNING: FutharkThunkImpl::<CudaBackend>::_enter: out:   new addr={:?}",
               new_addr);
           }
+          if cfg_debug_timing() {
           TL_CTX.with(|ctx| {
             ctx.debugctr.accumulate_not_in_place.fetch_add(1);
           });
+          }
         } else {
+          if cfg_debug_timing() {
           TL_CTX.with(|ctx| {
             ctx.debugctr.accumulate_in_place.fetch_add(1);
           });
+          }
         }
         // TODO
       }

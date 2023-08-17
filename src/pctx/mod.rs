@@ -628,6 +628,17 @@ impl PCtx {
     }
   }
 
+  pub fn try_lookup_cow(&self, addr: PAddr) -> Option<bool> {
+    // FIXME
+    match self.lookup(addr) {
+      None => None,
+      Some((_, _, icel)) => {
+        let ocow = InnerCell_::cow(&*icel);
+        Some(ocow)
+      }
+    }
+  }
+
   pub fn lookup_cow(&self, addr: PAddr) -> bool {
     // FIXME
     match self.lookup(addr) {

@@ -4442,6 +4442,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       }?;
       let t1 = Stopwatch::tl_stamp();
       if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0); }
+      if cfg_debug_timing() {
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -4451,6 +4452,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           ctx.timing.pregemm.borrow_mut().push(t1 - t0);
         }
       });
+      }
       let t0 = t1;
       if cfg_debug() {
       let alpha_ptr = self.alpha.as_ptr() as usize;
@@ -4486,6 +4488,7 @@ impl MatrixMulF16F32GpuThunkImpl {
       }?;
       let t1 = Stopwatch::tl_stamp();
       if cfg_debug() { println!("DEBUG: MatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0); }
+      if cfg_debug_timing() {
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -4495,6 +4498,7 @@ impl MatrixMulF16F32GpuThunkImpl {
           ctx.timing.gemm.borrow_mut().push(t1 - t0);
         }
       });
+      }
       Ok(())
     })
     })
@@ -5135,6 +5139,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       }?;
       let t1 = Stopwatch::tl_stamp();
       if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: pre gemm elapsed: {:.06} s", t1 - t0); }
+      if cfg_debug_timing() {
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -5144,6 +5149,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
           ctx.timing.pregemm.borrow_mut().push(t1 - t0);
         }
       });
+      }
       let t0 = t1;
       if cfg_debug() {
       //let tmp_a = self.tmp_a.borrow();
@@ -5237,6 +5243,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
       //drop(tmp_b);
       //drop(tmp_a);
       if cfg_debug() { println!("DEBUG: BlockMatrixMulF16F32GpuThunkImpl::_enter: gemm OK elapsed: {:.06} s", t1 - t0); }
+      if cfg_debug_timing() {
       TL_CTX.with(|ctx| {
         if oclk.rst <= 0 {
           panic!("bug");
@@ -5246,6 +5253,7 @@ impl BlockMatrixMulF16F32GpuThunkImpl {
           ctx.timing.gemm.borrow_mut().push(t1 - t0);
         }
       });
+      }
       Ok(())
     })
     })

@@ -2016,7 +2016,7 @@ pub trait StableOps: CellDeref {
     panick_wrap(|| self.mem_set_yield_())
   }
 
-  #[track_caller]
+  /*#[track_caller]
   fn _get_unsafe_mem(&self) -> MemReg {
     panick_wrap(|| TL_CTX.with(|ctx| {
       let x = self._deref();
@@ -2057,7 +2057,7 @@ pub trait StableOps: CellDeref {
         }
       }
     }))
-  }
+  }*/
 }
 
 impl StableOps for StableCell {}

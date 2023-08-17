@@ -653,7 +653,7 @@ impl CellStoreTo for MmapFileSlice {
         let root = e.root();
         let v_ty = match e.view().eval_contiguous(e.root_ty) {
           Err(_) => {
-            println!("ERROR:  CellStoreTo: dst={:?} is not a zero-copy (contiguous) view", dst);
+            println!("ERROR:  MmapFileSlice: dst={:?} is not a zero-copy (contiguous) view", dst);
             panic!();
           }
           Ok(ty) => ty
@@ -2267,7 +2267,13 @@ impl PCell {
       let &(loc, pm) = key.as_ref();
       if loc == q_locus && pm == q_pmach {
         let addr = rep.addr.get();
-        if let Some((loc2, pm2, icel)) = TL_PCTX.with(|pctx| pctx.yeet(addr)) {
+        if let Some((loc2, pm2, icel)) = TL_PCTX.with(|pctx| {
+          if pctx.try_lookup_cow(addr).unwrap_or(false) {
+            pctx.release(addr)
+          } else {
+            pctx.yeet(addr)
+          }
+        }) {
           assert_eq!(loc, loc2);
           assert_eq!(pm, pm2);
           ret = Some((rep.clk.get(), addr, icel));

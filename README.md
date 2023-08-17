@@ -132,16 +132,12 @@ to use them as starting points for your own experiments.
 `cacti` will inspect the following environment variables
 to control its run-time behavior.
 
-- `CACTI_CABAL_BIN_PATH`: This is a colon-delimited list of
-  paths in which to search for the `cacti-futhark` binary,
-  which was installed when bootstrapping from source.
+- `CACTI_BIN_PATH`: This is the path to a directory in which
+  to search for the `cacti-futhark` binary, which was
+  installed by cabal-install when bootstrapping from source.
   If this variable was not specified, the default value is
   `${HOME}/.cabal/bin` where `${HOME}` is the current user's
   home directory.
-- `CACTI_CUDA_PREFIX`: This is a colon-delimited list of
-  paths at which CUDA is installed.
-  If this variable was not specified, the default value is
-  `/usr/local/cuda`.
 - `CACTI_CACHE_PATH`: This is the path to a directory in
   which `cacti` will store run-time build artifacts of the
   Futhark compiler, which is used in `cacti` to compile and
@@ -149,6 +145,10 @@ to control its run-time behavior.
   If this variable was not specified, the default value is
   `${HOME}/.cacti/cache` where `${HOME}` is the current
   user's home directory.
+- `CACTI_CUDA_PREFIX`: This is a colon-delimited list of
+  paths to search for a CUDA installation.
+  If this variable was not specified, the default value is
+  `/usr/local/cuda`.
 - `CACTI_VMEM_SOFT_LIMIT`: Set this to either a specific size
   (bytes/GB/GiB/etc.) or a fraction (of the total GPU VRAM).
   Then, the GPU subsystem will pretend as if that were the

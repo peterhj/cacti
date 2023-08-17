@@ -264,7 +264,8 @@ impl NvGpuPCtx {
     let copy_from = CudartStream::create().unwrap();*/
     let page_map = NvGpuPageMap::new();
     let mem_pool = NvGpuMemPool::new(dev);
-    let kernels = NvGpuCopyKernels::new();
+    let capability = (dev_info.capability_major, dev_info.capability_minor);
+    let kernels = NvGpuCopyKernels::new(capability);
     Some(NvGpuPCtx{
       pctx,
       dev_info,
@@ -2164,7 +2165,9 @@ impl NvGpuMemPool {
                       }
                     }
                     match pcel.yeet(Locus::VMem, PMach::NvGpu) {
-                      None => panic!("bug"),
+                      None => {
+                        // FIXME: this could happen for cows.
+                      }
                       Some((prev_clk2, prev_addr2, _)) => {
                         assert_eq!(prev_clk, prev_clk2);
                         assert_eq!(prev_addr, prev_addr2);
@@ -2569,7 +2572,7 @@ pub struct NvGpuCopyKernel {
 }
 
 impl NvGpuCopyKernel {
-  pub fn from_source(fname_buf: &[u8], src_buf: &[u8]) -> NvGpuCopyKernel {
+  pub fn from_source(capability: (i32, i32), fname_buf: &[u8], src_buf: &[u8]) -> NvGpuCopyKernel {
     assert_eq!(fname_buf[fname_buf.len() - 1], 0);
     if cfg_devel_dump() {
       println!("DEBUG: NvGpuCopyKernel: src sz={}", src_buf.len());
@@ -2579,10 +2582,33 @@ impl NvGpuCopyKernel {
       //tmp.write_all(src_buf).unwrap();
     }
     let prog = NvrtcProgram::create(src_buf).unwrap();
-    // FIXME
+    // FIXME: nvrtc options.
     let mut opts = Vec::new();
     opts.push(b"-arch\0" as &[_]);
-    opts.push(b"compute_75\0" as &[_]);
+    let cap_str = match capability {
+      (3, 0) => b"compute_30\0",
+      (3, 2) => b"compute_32\0",
+      (3, 5) => b"compute_35\0",
+      (3, 7) => b"compute_37\0",
+      (5, 0) => b"compute_50\0",
+      (5, 2) => b"compute_52\0",
+      (5, 3) => b"compute_53\0",
+      (6, 0) => b"compute_60\0",
+      (6, 1) => b"compute_61\0",
+      (6, 2) => b"compute_62\0",
+      (7, 0) => b"compute_70\0",
+      (7, 2) => b"compute_72\0",
+      (7, 5) => b"compute_75\0",
+      (7, _) => b"compute_70\0",
+      (8, 0) => b"compute_80\0",
+      (8, 6) => b"compute_86\0",
+      (8, 7) => b"compute_87\0",
+      (8, 9) => b"compute_89\0",
+      (9, 0) => b"compute_90\0",
+      // TODO
+      _ => b"compute_70\0"
+    };
+    opts.push(cap_str as &[_]);
     opts.push(b"-default-device\0" as &[_]);
     opts.push(b"--disable-warnings\0" as &[_]);
     opts.push(b"-I/usr/local/cuda/include\0" as &[_]);
@@ -2645,17 +2671,20 @@ pub struct NvGpuCopyKernels {
 }
 
 impl NvGpuCopyKernels {
-  pub fn new() -> NvGpuCopyKernels {
+  pub fn new(capability: (i32, i32)) -> NvGpuCopyKernels {
     NvGpuCopyKernels{
       accumulate_1d_f32_idx32:  Some(NvGpuCopyKernel::from_source(
+          capability,
           ACCUMULATE_1D_F32_FUNCTIONNAME,
           ACCUMULATE_1D_F32_IDX32_SOURCE
       )),
       accumulate_1d_f16_idx32:  Some(NvGpuCopyKernel::from_source(
+          capability,
           ACCUMULATE_1D_F16_FUNCTIONNAME,
           ACCUMULATE_1D_F16_IDX32_SOURCE
       )),
       accumulate_1d_u16_idx32:  Some(NvGpuCopyKernel::from_source(
+          capability,
           ACCUMULATE_1D_U16_FUNCTIONNAME,
           ACCUMULATE_1D_U16_IDX32_SOURCE
       )),
