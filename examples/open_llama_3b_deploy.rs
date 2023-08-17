@@ -32,7 +32,7 @@ fn main() {
   //
   // You will need to increase this if you would like a longer
   // prompt or completion.
-  cfg.seq_cap = 256;
+  cfg.seq_cap = 512;
 
   println!("deploy: llama config: {:?}", cfg);
 
@@ -56,13 +56,13 @@ fn main() {
   // And this will be our toy example for inference.
   // A real classic. (A 19th century translation by
   // Richard Crawley, via Project Gutenberg.)
-  let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its grounds. The preparations of both the combatants were in every department in the last state of perfection; and he could see the rest of the Hellenic race taking sides in the quarrel; those who delayed doing so at once having it in contemplation. Indeed this was the greatest movement yet known in history, not only of the";
-  //let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its grounds. The preparations of both the combatants were in every department in the last state of perfection; and he could see the rest of the Hellenic race taking sides in the quarrel; those who delayed doing so at once having it in contemplation. Indeed this was the greatest movement yet known in history, not only of the Hellenes, but of a large part of the barbarian world-- I had almost said of mankind. For though the events of remote antiquity, and even those that more immediately preceded the war, could not from lapse of time be clearly ascertained, yet the evidences which an inquiry carried as far back as was practicable leads me to trust, all point to the conclusion that there was nothing on a great scale, either in war or in other matters.";
+  //let text_str = "Thucydides, an Athenian, wrote the history of the war between the Peloponnesians and the Athenians, beginning at the moment that it broke out, and believing that it would be a great war and more worthy of relation than any that had preceded it. This belief was not without its grounds. The preparations of both the combatants were in every department in the last state of perfection; and he could see the rest of the Hellenic race taking sides in the quarrel; those who delayed doing so at once having it in contemplation. Indeed this was the greatest movement yet known in history, not only of the";
+  let text_str = "Athenians. Since the negotiations are not to go on before the people, in order that we may not be able to speak straight on without interruption, and deceive the ears of the multitude by seductive arguments which would pass without refutation (for we know that this is the meaning of our being brought before the few), what if you who sit there were to pursue a method more cautious still? Make no set speech yourselves, but take us up at whatever you do not like, and settle that before going any farther. And first tell us if this proposition of ours suits you.\n\nThe Melian commissioners answered:\n\nMelians. To the fairness of quietly instructing each other as you propose there is nothing to object; but your military preparations are too far advanced to agree with what you say, as we see you are come to be judges in your own cause, and that all we can reasonably expect from this negotiation is war, if we prove to have right on our side and refuse to submit, and in the contrary case, slavery.\n\nAthenians. If you have met to reason about presentiments of the future, or for anything else than to consult for the safety of your state upon the facts that you see before you, we will give over; otherwise we will go on.\n\nMelians. It is natural and excusable for men in our position to turn";
   println!("deploy: data: text str=\"{}\"", text_str);
   println!("deploy: data: text str.len={}", text_str.len());
 
   // Now let's tokenize that string!
-  // We should get roughly 130 16-bit tokens.
+  // We should get roughly 300 16-bit tokens.
   let text_tok = tokenizer.encode16(text_str).unwrap();
   println!("deploy: data: text tok={:?}", text_tok.as_ref());
   println!("deploy: data: text tok.len={}", text_tok.len());
@@ -93,8 +93,8 @@ fn main() {
   // see (src/librarium/lm.rs).
   let mut in_ = model.fresh_input();
 
-  // We'll run this example for 100 cycles.
-  for cycle_nr in 0 .. 100 {
+  // We'll run this example for 50 cycles.
+  for cycle_nr in 0 .. 50 {
     //println!("deploy: start cycle={}", cycle_nr);
 
     // Up to now (before the `for` loop), we have been doing
@@ -306,13 +306,17 @@ fn main() {
             println!("Prompt:");
           }
           let s = tokenizer.id_to_piece(prev_tok as _).unwrap();
-          for c in s.chars() {
-            // This sentencepiece tokenizer uses unicode scalar
-            // value 9601 for the initial space in a token string.
-            if c as u32 == 9601 {
-              print!(" ");
-            } else {
-              print!("{}", c);
+          if s == "<0x0A>" {
+            println!();
+          } else {
+            for c in s.chars() {
+              // This sentencepiece tokenizer uses unicode scalar
+              // value 9601 for the initial space in a token string.
+              if c as u32 == 9601 {
+                print!(" ");
+              } else {
+                print!("{}", c);
+              }
             }
           }
         }
@@ -323,13 +327,17 @@ fn main() {
             println!("Completion:");
           }
           let s = tokenizer.id_to_piece(next_tok as _).unwrap();
-          for c in s.chars() {
-            // This sentencepiece tokenizer uses unicode scalar
-            // value 9601 for the initial space in a token string.
-            if c as u32 == 9601 {
-              print!(" ");
-            } else {
-              print!("{}", c);
+          if s == "<0x0A>" {
+            println!();
+          } else {
+            for c in s.chars() {
+              // This sentencepiece tokenizer uses unicode scalar
+              // value 9601 for the initial space in a token string.
+              if c as u32 == 9601 {
+                print!(" ");
+              } else {
+                print!("{}", c);
+              }
             }
           }
         }
