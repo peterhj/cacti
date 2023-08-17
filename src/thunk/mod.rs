@@ -1928,7 +1928,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
     assert!(!obj.cfg.is_null());
     TL_CFG_ENV.with(|cfg| {
       // FIXME: debugging.
-      if false && !cfg.no_kcache {
+      if cfg.futhark_kcache {
         if let Some(kcache_path) = obj.kcache_path() {
           if cfg_debug() {
           println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_setup_object: kcache path={:?}",

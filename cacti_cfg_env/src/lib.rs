@@ -22,7 +22,7 @@ pub struct CfgEnv {
   pub nvgpu_mem_alloc: Option<Box<[u8]>>,
   pub vmem_soft_limit: Option<Box<[u8]>>,
   pub vmem_oom:   Option<Box<[u8]>>,
-  pub no_kcache:  bool,
+  pub futhark_kcache: bool,
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
   pub verbose:    bool,
@@ -112,7 +112,7 @@ impl CfgEnv {
     let vmem_oom = var("CACTI_VMEM_OOM").ok().map(|s| {
       s.into_bytes().into()
     });
-    let no_kcache = var("CACTI_NO_KCACHE")
+    let futhark_kcache = var("CACTI_FUTHARK_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
     let futhark_pedantic = var("CACTI_FUTHARK_PEDANTIC")
@@ -208,7 +208,7 @@ impl CfgEnv {
       nvgpu_mem_alloc,
       vmem_soft_limit,
       vmem_oom,
-      no_kcache,
+      futhark_kcache,
       futhark_pedantic,
       futhark_trace,
       verbose,
