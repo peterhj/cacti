@@ -111,6 +111,16 @@ directory.
 In the "examples" directory, you will find provided code for
 both fine-tuning and inference based on
 [OpenLLaMA-3B](https://huggingface.co/openlm-research/open_llama_3b_v2).
+The two example files, "open_llama_3b_deploy.rs" and
+"open_llama_3b_train.rs", use `cacti` as a library and are
+otherwise self-contained examples;
+the first an example of inference, and the second an example
+of full-precision, full-gradient fine-tuning.
+
+Please note that the fine-tuning example
+("open_llama_3b_train.rs") may require 64 GB of host CPU RAM
+to run using the `malloc` allocator, and up to 96-128 GB when
+using the `pagelocked` allocator.
 
 It is recommended to read and understand the examples, and
 to use them as starting points for your own experiments.
@@ -132,18 +142,27 @@ to control its run-time behavior.
   paths at which CUDA is installed.
   If this variable was not specified, the default value is
   `/usr/local/cuda`.
+- `CACTI_CACHE_PATH`: This is the path to a directory in
+  which `cacti` will store run-time build artifacts of the
+  Futhark compiler, which is used in `cacti` to compile and
+  run computation kernels.
+  If this variable was not specified, the default value is
+  `${HOME}/.cacti/cache` where `${HOME}` is the current
+  user's home directory.
 - `CACTI_VMEM_SOFT_LIMIT`: Set this to either a specific size
-  (bytes/KB/MB/GB/etc.) or a decimal fraction.
+  (bytes/GB/GiB/etc.) or a fraction (of the total GPU VRAM).
   Then, the GPU subsystem will pretend as if that were the
   physical limit of GPU VRAM, and make garbage-collection/OOM
   decisions accordingly.
+- `CACTI_NVGPU_MEM_ALLOC`: This specifies which CUDA-aware
+  allocator is used for host CPU memory. Allowed values are
+  `malloc` and `pagelocked` (the latter corresponding to
+  `cuMemAllocHost`).
+  Note that the CUDA page-locked memory limit seems to be
+  capped at a percentage of the total system memory capacity,
+  so using it may cause surprising host CPU memory OOMs.
 - `CACTI_VERBOSE`: Setting this will increase the verbosity
   of the stdout logging.
-
-There are other environment variables defined though not
-yet documented, some of which are for debugging or internal
-development usage.
-Please see "cacti_cfg_env/src/lib.rs" for further details.
 
 ### Reference (todo)
 

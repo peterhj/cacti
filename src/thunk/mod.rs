@@ -2354,13 +2354,24 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
     let (genabi, source) = self.code.gen_source(self.lar, self.rar, self.param_ct, &self.spec_dim, mode, gencfg, self.code.abi.clone()).unwrap();
     let mut config = FutConfig::default();
     // FIXME: os-specific paths.
-    config.cachedir = home_dir().unwrap().join(".cacti").join("cache");
     TL_CFG_ENV.with(|cfg| {
+      if let Some(path) = cfg.cachepath.as_ref() {
+        config.cachedir = path.clone();
+      } else {
+        println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CACHE_PATH");
+        panic!();
+      }
       if let Some(path) = cfg.cabalpath.first() {
         config.futhark = path.join("cacti-futhark");
+      } else {
+        println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CABAL_BIN_PATH");
+        panic!();
       }
       if let Some(prefix) = cfg.cudaprefix.first() {
         config.include = prefix.join("include");
+      } else {
+        println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CUDA_PREFIX");
+        panic!();
       }
       if cfg.debug >= 3 {
         config.verbose = true;

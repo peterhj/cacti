@@ -12,20 +12,16 @@ thread_local! {
   pub static TL_CFG_ENV: CfgEnv = CFG_ENV.clone();
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum OomPolicy {
-  Soft,
-  Hard,
-}
-
 #[derive(Clone)]
 pub struct CfgEnv {
   pub cabalpath:  Vec<PathBuf>,
   pub cudaprefix: Vec<PathBuf>,
-  pub mem_soft_limit: Option<Vec<u8>>,
-  pub mem_oom:    OomPolicy,
-  pub vmem_soft_limit: Option<Vec<u8>>,
-  pub vmem_oom:   OomPolicy,
+  pub cachepath:  Option<PathBuf>,
+  pub mem_soft_limit: Option<Box<[u8]>>,
+  pub mem_oom:    Option<Box<[u8]>>,
+  pub nvgpu_mem_alloc: Option<Box<[u8]>>,
+  pub vmem_soft_limit: Option<Box<[u8]>>,
+  pub vmem_oom:   Option<Box<[u8]>>,
   pub no_kcache:  bool,
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
@@ -90,26 +86,26 @@ impl CfgEnv {
       ps
     }).unwrap_or_else(|_| vec![PathBuf::from("/usr/local/cuda")])
     )));
-    let mem_soft_limit = var("CACTI_MEM_SOFT_LIMIT").map(|s| {
-      s.into_bytes()
-    }).ok();
-    let mem_oom = var("CACTI_MEM_OOM").ok().and_then(|s| {
-      match s.as_str() {
-        "soft" => Some(OomPolicy::Soft),
-        "hard" => Some(OomPolicy::Hard),
-        _ => None
-      }
-    }).unwrap_or_else(|| OomPolicy::Soft);
-    let vmem_soft_limit = var("CACTI_VMEM_SOFT_LIMIT").map(|s| {
-      s.into_bytes()
-    }).ok();
-    let vmem_oom = var("CACTI_VMEM_OOM").ok().and_then(|s| {
-      match s.as_str() {
-        "soft" => Some(OomPolicy::Soft),
-        "hard" => Some(OomPolicy::Hard),
-        _ => None
-      }
-    }).unwrap_or_else(|| OomPolicy::Soft);
+    let cachepath = var("CACTI_CACHE_PATH").ok().map(|s| {
+      PathBuf::from(s)
+    }).or_else(|| {
+      home_dir().map(|p| p.join(".cacti").join("cache"))
+    });
+    let mem_soft_limit = var("CACTI_MEM_SOFT_LIMIT").ok().map(|s| {
+      s.into_bytes().into()
+    });
+    let mem_oom = var("CACTI_MEM_OOM").ok().map(|s| {
+      s.into_bytes().into()
+    });
+    let nvgpu_mem_alloc = var("CACTI_NVGPU_MEM_ALLOC").ok().map(|s| {
+      s.into_bytes().into()
+    });
+    let vmem_soft_limit = var("CACTI_VMEM_SOFT_LIMIT").ok().map(|s| {
+      s.into_bytes().into()
+    });
+    let vmem_oom = var("CACTI_VMEM_OOM").ok().map(|s| {
+      s.into_bytes().into()
+    });
     let no_kcache = var("CACTI_NO_KCACHE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -185,14 +181,18 @@ impl CfgEnv {
         println!("INFO:   cacti_cfg_env: CACTI_CUDA_PREFIX[{}]={}",
             i, p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
       }
-      // FIXME: format.
-      //println!("INFO:   cacti_cfg_env: CACTI_VMEM_LIMIT={}", _);
+      if let Some(p) = cachepath.as_ref() {
+        println!("INFO:   cacti_cfg_env: CACTI_CACHE_PATH={}",
+            p.to_str().map(|s| _safe_ascii(s.as_bytes())).unwrap());
+      }
     }
     CfgEnv{
       cabalpath,
       cudaprefix,
+      cachepath,
       mem_soft_limit,
       mem_oom,
+      nvgpu_mem_alloc,
       vmem_soft_limit,
       vmem_oom,
       no_kcache,

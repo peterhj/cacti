@@ -10,7 +10,11 @@ use cacti_cfg_env::*;
 use cacti_gpu_cu_ffi::*;
 use cacti_gpu_cu_ffi::types::*;
 
-use libc::{c_char, c_int, c_void};
+#[cfg(target_os = "linux")]
+use libc::{__errno_location};
+#[cfg(not(target_os = "linux"))]
+use libc::{__errno as __errno_location};
+use libc::{c_char, c_int, c_void, malloc, free, ENOMEM};
 
 use std::cell::{Cell, RefCell, UnsafeCell};
 use std::convert::{TryInto};
@@ -645,7 +649,8 @@ impl NvGpuPCtx {
   }
 
   pub fn _dump_usage(&self) {
-    println!("INFO:   NvGpuPCtx::_dump_usage: pagelock: mem  used={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: {}: mem  used={}",
+        self.page_map.alloc._usage_str(),
         self.page_map.usage.get(),
         //self.page_map.pg_usage.get(),
     );
@@ -700,24 +705,55 @@ impl Drop for NvGpuMemCell {
       println!("ERROR:  NvGpuMemCell::drop: attempted to free a borrowed mem cell");
       panic!();
     }
-    match cuda_mem_free_host(self.ptr) {
-      Ok(_) => {}
-      Err(CUDA_ERROR_DEINITIALIZED) => {}
-      Err(_) => panic!("bug"),
+    match self.flag.get() & 3 {
+      1 => {
+        unsafe {
+          free(self.ptr);
+        }
+      }
+      2 => {
+        match cuda_mem_free_host(self.ptr) {
+          Ok(_) |
+          Err(CUDA_ERROR_DEINITIALIZED) => {}
+          Err(_) => panic!("bug"),
+        }
+      }
+      bits => {
+        println!("ERROR:  NvGpuMemCell::drop: invalid allocator (bits={})", bits);
+        panic!();
+      }
     }
   }
 }
 
 impl NvGpuMemCell {
-  pub fn _try_alloc(sz: usize) -> Result<NvGpuMemCell, PMemErr> {
-    let ptr = match cuda_mem_alloc_host(sz) {
-      Err(CUDA_ERROR_OUT_OF_MEMORY) => {
-        return Err(PMemErr::Oom);
+  pub fn _try_alloc(alloc: NvGpuMemAllocator, sz: usize) -> Result<NvGpuMemCell, PMemErr> {
+    let (flag, ptr) = match alloc {
+      NvGpuMemAllocator::Malloc => {
+        unsafe {
+          let ptr = malloc(sz);
+          if ptr.is_null() {
+            let e = *(__errno_location)();
+            if e == ENOMEM {
+              return Err(PMemErr::Oom);
+            } else {
+              return Err(PMemErr::Bot);
+            }
+          }
+          (1, ptr)
+        }
       }
-      Err(_) => {
-        return Err(PMemErr::Bot);
+      NvGpuMemAllocator::Pagelocked => {
+        match cuda_mem_alloc_host(sz) {
+          Err(CUDA_ERROR_OUT_OF_MEMORY) => {
+            return Err(PMemErr::Oom);
+          }
+          Err(_) => {
+            return Err(PMemErr::Bot);
+          }
+          Ok(ptr) => (2, ptr)
+        }
       }
-      Ok(ptr) => ptr
     };
     if ptr.is_null() {
       return Err(PMemErr::Bot);
@@ -727,7 +763,7 @@ impl NvGpuMemCell {
       root: Cell::new(CellPtr::nil()),
       refc: Cell::new(1),
       pinc: Cell::new(0),
-      flag: Cell::new(0),
+      flag: Cell::new(flag),
       borc: BorrowCell::new(),
       ptr,
       sz,
@@ -859,7 +895,23 @@ impl InnerCell for NvGpuMemCell {
   }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum NvGpuMemAllocator {
+  Malloc,
+  Pagelocked,
+}
+
+impl NvGpuMemAllocator {
+  pub fn _usage_str(&self) -> &'static str {
+    match self {
+      &NvGpuMemAllocator::Malloc => "malloc  ",
+      &NvGpuMemAllocator::Pagelocked => "pagelock",
+    }
+  }
+}
+
 pub struct NvGpuPageMap {
+  pub alloc:    NvGpuMemAllocator,
   pub page_tab: RefCell<HashMap<PAddr, Rc<NvGpuMemCell>>>,
   pub page_idx: RefCell<HashMap<*mut c_void, PAddr>>,
   pub extrabuf: Rc<NvGpuMemCell>,
@@ -869,8 +921,18 @@ pub struct NvGpuPageMap {
 
 impl NvGpuPageMap {
   pub fn new() -> NvGpuPageMap {
+    let alloc = TL_CFG_ENV.with(|cfg| {
+      if Some(b"pagelocked" as &[_]) == cfg.nvgpu_mem_alloc.as_ref().map(|s| &**s) {
+        NvGpuMemAllocator::Pagelocked
+      } else {
+        NvGpuMemAllocator::Malloc
+      }
+    });
+    if cfg_info() {
+      println!("INFO:   NvGpuPageMap::new: mem alloc={:?}", alloc);
+    }
     let extra_sz = 1 << 16;
-    let mem = match NvGpuMemCell::_try_alloc(extra_sz) {
+    let mem = match NvGpuMemCell::_try_alloc(alloc, extra_sz) {
       Err(_) => {
         println!("ERROR: NvGpuPageMap: failed to allocate shadow back buffer");
         panic!();
@@ -878,6 +940,7 @@ impl NvGpuPageMap {
       Ok(mem) => mem
     };
     NvGpuPageMap{
+      alloc,
       page_idx: RefCell::new(HashMap::new()),
       page_tab: RefCell::new(HashMap::new()),
       extrabuf: Rc::new(mem),
@@ -898,7 +961,7 @@ impl NvGpuPageMap {
     if cfg_debug() {
       println!("DEBUG: NvGpuPageMap::try_alloc: addr={:?} sz={:?}", addr, sz);
     }
-    let cel = Rc::new(NvGpuMemCell::_try_alloc(sz)?);
+    let cel = Rc::new(NvGpuMemCell::_try_alloc(self.alloc, sz)?);
     assert!(self.page_tab.borrow_mut().insert(addr, cel.clone()).is_none());
     assert!(self.page_idx.borrow_mut().insert(cel.ptr, addr).is_none());
     self.usage.fetch_add(sz);
