@@ -179,13 +179,15 @@ impl Ctx {
                   &Cell_::Phy(.., ref pcel) => {
                     for (_, rep) in pcel.replicas.iter() {
                       let addr = rep.addr.get();
-                      if !pctx.pinned(addr) {
-                        match pctx.yeet(addr) {
-                          None => {}
-                          Some(icel) => {
-                            //assert_eq!(icel.root(), Some(xroot));
-                            f = true;
-                          }
+                      match if pctx.pinned(addr) {
+                        pctx.release(addr)
+                      } else {
+                        pctx.yeet(addr)
+                      } {
+                        None => {}
+                        Some(icel) => {
+                          //assert_eq!(icel.root(), Some(xroot));
+                          f = true;
                         }
                       }
                     }
