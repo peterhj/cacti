@@ -3,6 +3,7 @@ name = "cacti"
 version = "0.1.0-devel"
 edition = "2018"
 authors = ["Peter Jin"]
+license = "ISC OR Apache-2.0"
 
 [workspace]
 members = [
