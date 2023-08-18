@@ -89,7 +89,7 @@ configurations:
 ### Bootstrapping and installing from source (recommended method)
 
 It is recommended to use the
-[cacti-bootstrap](https://git.sr.ht/~ptrj/cacti-bootstrap)
+[cacti-bootstrap](https://github.com/peterhj/cacti-bootstrap)
 git repository to bootstrap sources, as that repo vendors
 git submodules of all Rust dependencies, as well as our patched
 branch of the Futhark compiler.
@@ -97,7 +97,7 @@ However, please note that Futhark itself depends on many
 Haskell packages which we do _not_ vendor, and are instead
 downloaded by cabal during bootstrapping.
 
-    git clone 'https://git.sr.ht/~ptrj/cacti-bootstrap'
+    git clone 'https://github.com/peterhj/cacti-bootstrap'
     cd cacti-bootstrap
     ./bootstrap.sh
     cd cacti
@@ -115,7 +115,7 @@ directory.
 
     mkdir <your-workspace-dir>
     cd <your-workspace-dir>
-    git clone 'https://git.sr.ht/~ptrj/cacti'
+    git clone 'https://github.com/peterhj/cacti'
     cd cacti
     ./bootstrap.sh
     make
