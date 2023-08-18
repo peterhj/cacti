@@ -3,7 +3,7 @@ set -eu -o pipefail
 if [ -e "../.gitmodules" ] ; then
   exec echo "- cacti: warning: submodule checkout, bailing"
 fi
-cacti_remote_prefix="https://git.sr.ht/~ptrj"
+cacti_remote_prefix="https://github.com/peterhj"
 
 echo "- cacti: Bootstrapping from git HEAD..."
 echo "- cacti: Cloning recursive dependencies via remote url ${cacti_remote_prefix}..."
