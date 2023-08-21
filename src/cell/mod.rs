@@ -1489,12 +1489,22 @@ impl TryFrom<TensorDtype> for Dtype {
 
   fn try_from(t: TensorDtype) -> Result<Dtype, SmolStr> {
     Ok(match t {
-      // TODO
       TensorDtype::F64 => Dtype::F64,
       TensorDtype::F32 => Dtype::F32,
+      TensorDtype::I64 => Dtype::I64,
+      TensorDtype::I32 => Dtype::I32,
+      TensorDtype::I16 => Dtype::I16,
+      TensorDtype::I8 => Dtype::I8,
+      TensorDtype::U64 => Dtype::U64,
+      TensorDtype::U32 => Dtype::U32,
+      TensorDtype::U16 => Dtype::U16,
       TensorDtype::U8 => Dtype::U8,
       TensorDtype::Bool => Dtype::U8,
       TensorDtype::F16 => Dtype::F16,
+      TensorDtype::Bf16 => {
+        println!("ERROR:  <Dtype as TryFrom<TensorDtype>>::try_from: unimplemented: bfloat16 is not currently supported by Futhark");
+        panic!();
+      }
       _ => unimplemented!()
     })
   }
@@ -1592,7 +1602,7 @@ impl Dtype {
       Dtype::F32    => "f32",
       Dtype::F16    => "f16",
       Dtype::Bf16   => {
-        println!("DEBUG: Dtype::format_futhark: unimplemented: bfloat16 is not currently supported by Futhark");
+        println!("ERROR:  Dtype::format_futhark: unimplemented: bfloat16 is not currently supported by Futhark");
         panic!();
       }
       Dtype::I64    => "i64",
