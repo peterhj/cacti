@@ -10,6 +10,7 @@ use crate::thunk::*;
 use crate::thunk::op::{SetScalarFutThunkSpec};
 use crate::util::mmap::{MmapFileSlice};
 use crate::util::pickle::{TorchDtype};
+use crate::util::safetensor::{TensorDtype};
 use cacti_cfg_env::*;
 
 use futhark_ffi::{AbiScalar as FutAbiScalar};
@@ -1481,6 +1482,22 @@ pub enum Dtype {
   U16,
   U8,
   _Bot,
+}
+
+impl TryFrom<TensorDtype> for Dtype {
+  type Error = SmolStr;
+
+  fn try_from(t: TensorDtype) -> Result<Dtype, SmolStr> {
+    Ok(match t {
+      // TODO
+      TensorDtype::F64 => Dtype::F64,
+      TensorDtype::F32 => Dtype::F32,
+      TensorDtype::U8 => Dtype::U8,
+      TensorDtype::Bool => Dtype::U8,
+      TensorDtype::F16 => Dtype::F16,
+      _ => unimplemented!()
+    })
+  }
 }
 
 impl TryFrom<TorchDtype> for Dtype {

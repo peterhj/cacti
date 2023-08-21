@@ -154,6 +154,10 @@ fn main() {
   // run-time garbage collection; there will always be at least
   // one replica of a `StableCell` in GPU VRAM or host CPU RAM,
   // but not necessarily both at the same time.
+  //
+  // (It's not strictly necessary to reverse the order of the
+  // gradient cells here; reversing the order is mostly useful
+  // only for debug output.)
   let mut grad = Vec::with_capacity(param.len());
   for p in param.iter().rev() {
     let g = StableCell::from(p.type_());
@@ -163,9 +167,6 @@ fn main() {
     /*let g = StableCell::from(p.type_().cast(Dtype::Fp32));*/
     grad.push(g);
   }
-  // (It's not strictly necessary to reverse the order of the
-  // gradient cells here; reversing the order is mostly useful
-  // only for debug output.)
   grad.reverse();
   /*for (p, g) in param.iter().zip(grad.iter()) {
     println!("train:  param={:?} grad={:?} ty={:?}", p, g, p.type_());

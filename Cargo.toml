@@ -66,6 +66,10 @@ path = "tools/inspect_pickle_bin.rs"
 name = "inspect_pickle_dir"
 path = "tools/inspect_pickle_dir.rs"
 
+[[bin]]
+name = "inspect_tensors_dir"
+path = "tools/inspect_tensors_dir.rs"
+
 # For internal development:
 
 #[[bin]]

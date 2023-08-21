@@ -1,6 +1,7 @@
 use crate::algo::{HashMap, HashSet};
 use crate::algo::str::*;
 use crate::cell::{CellType, Dtype};
+use crate::util::{FileOrPath};
 use crate::util::mmap::*;
 use cacti_cfg_env::*;
 
@@ -22,41 +23,6 @@ use std::io::{Error as IoError};
 use std::ops::{Deref};
 use std::path::{PathBuf, Path};
 use std::sync::{Arc};
-
-pub enum FileOrPath {
-  Path(PathBuf),
-  File(PathBuf, File),
-}
-
-impl From<PathBuf> for FileOrPath {
-  fn from(p: PathBuf) -> FileOrPath {
-    FileOrPath::Path(p)
-  }
-}
-
-impl From<(PathBuf, File)> for FileOrPath {
-  fn from((p, f): (PathBuf, File)) -> FileOrPath {
-    FileOrPath::File(p, f)
-  }
-}
-
-impl FileOrPath {
-  pub fn try_open(self) -> Result<(PathBuf, File), IoError> {
-    match self {
-      FileOrPath::Path(p) => {
-        File::open(&p).map(|f| (p, f))
-      }
-      FileOrPath::File(p, f) => Ok((p, f))
-    }
-  }
-
-  pub fn as_path(&self) -> &Path {
-    match self {
-      &FileOrPath::Path(ref p) => p,
-      &FileOrPath::File(ref p, _) => p,
-    }
-  }
-}
 
 #[derive(Debug)]
 pub enum PickleDirErr {

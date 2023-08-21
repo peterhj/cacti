@@ -277,6 +277,7 @@ fn main() {
     // Below, we read out the input and output tokens from
     // running the language model, and display them in the
     // format of "Prompt: ... Completion: ...".
+    let mut early_stop = false;
     [ in_[0].in_tok.clone(),
       out[0].out_lm_tok.clone(),
     ].with_mem(|typed_mems| {
@@ -340,12 +341,20 @@ fn main() {
               }
             }
           }
+          // Early stopping on observing the EOS token.
+          if next_tok == 2 {
+            early_stop = true;
+            break;
+          }
         }
         // Flush stdout to prevent the appearance of
         // batching.
         stdout().lock().flush().unwrap();
       }
     });
+    if early_stop {
+      break;
+    }
 
     //println!("deploy: end cycle={}", cycle_nr);
   }
