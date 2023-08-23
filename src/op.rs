@@ -573,7 +573,7 @@ impl<'l, R: CellDeref> Sub<R> for &'l CellPtr {
   #[track_caller]
   fn sub(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
-      let x0 = *self.borrow();
+      let x0 = *self;
       let x1 = rhs._deref();
       let x0_ty = x0.type_();
       let x1_ty = x1.type_();
@@ -669,7 +669,7 @@ impl<'l, R: CellDeref> Mul<R> for &'l CellPtr {
   #[track_caller]
   fn mul(self, rhs: R) -> CellPtr {
     panick_wrap(|| {
-      let x0 = *self.borrow();
+      let x0 = *self;
       let x1 = rhs._deref();
       let x0_ty = x0.type_();
       let x1_ty = x1.type_();
@@ -767,7 +767,7 @@ impl<'l> Div<ScalarVal_> for &'l CellPtr {
     panick_wrap(|| {
       let op = RDivScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
     })
   }
@@ -790,7 +790,7 @@ impl<'l> Div<f32> for &'l CellPtr {
     panick_wrap(|| {
       let op = RDivScalarFutThunkSpec{val: rhs.into_scalar_val_()};
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(*self.borrow());
+      ctx_push_cell_arg(*self);
       ctx_pop_thunk(op)
     })
   }
@@ -860,22 +860,9 @@ impl<'l> Neg for &'l CellPtr {
   #[track_caller]
   fn neg(self) -> CellPtr {
     panick_wrap(|| {
-      let x = *self.borrow();
-      let x_dtype = ctx_lookup_dtype(x);
-      match x_dtype {
-        Dtype::F16 => {
-          let op = NegF16FutThunkSpec;
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
-        }
-        _ => {
-          let op = NegFutThunkSpec;
-          assert!(ctx_clean_arg());
-          ctx_push_cell_arg(x);
-          ctx_pop_thunk(op)
-        }
-      }
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(NegFutThunkSpec)
     })
   }
 }
