@@ -1,5 +1,5 @@
 pub use sentencepiece_ffi::{
-  CBuf,
   SentencePieceError,
+  SentencePieceBuffer,
   SentencePieceProcessor as SentencePieceTokenizer,
 };
