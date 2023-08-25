@@ -1,5 +1,5 @@
 use super::*;
-use crate::algo::{RevSortMap8};
+use crate::algo::{HashSet, RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
 use cacti_cfg_env::*;
@@ -14,9 +14,139 @@ use libc::{
   free, malloc, sysconf,
   c_char, c_int, c_void,
 };
+use once_cell::sync::{Lazy};
 
 use std::cell::{Cell};
+use std::io::{Error as IoError};
+use std::process::{Command, Stdio};
 //use std::rc::{Rc};
+use std::str::{from_utf8};
+
+pub static ONCE_SMP: Lazy<SmpOnce> = Lazy::new(|| SmpOnce::new());
+thread_local! {
+  pub static TL_SMP: SmpTl = SmpTl::new();
+}
+
+pub struct SmpOnce {
+  pub lscpu: Option<LscpuParse>,
+}
+
+impl SmpOnce {
+  pub fn new() -> SmpOnce {
+    SmpOnce{lscpu: LscpuParse::open().ok()}
+  }
+}
+
+pub struct SmpTl {
+  pub lscpu: Option<LscpuParse>,
+}
+
+impl SmpTl {
+  pub fn new() -> SmpTl {
+    SmpTl{lscpu: ONCE_SMP.lscpu.clone()}
+  }
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct LscpuEntry {
+  pub cpu:  u16,
+  pub core: u16,
+  pub sock: u8,
+  pub node: u8,
+}
+
+#[derive(Clone, Debug)]
+pub struct LscpuParse {
+  pub entries: Vec<LscpuEntry>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum LscpuParseState {
+  Field(u8),
+  Skip,
+}
+
+impl LscpuParse {
+  pub fn open() -> Result<LscpuParse, ()> {
+    let out = Command::new("lscpu")
+        .arg("-p")
+        .stdout(Stdio::piped())
+        .output()
+        .map_err(|_| ())?;
+    if !out.status.success() {
+      return Err(());
+    }
+    LscpuParse::parse(out.stdout)
+  }
+
+  pub fn parse<O: AsRef<[u8]>>(out: O) -> Result<LscpuParse, ()> {
+    let out = out.as_ref();
+    let mut entries = Vec::new();
+    let mut e = LscpuEntry::default();
+    let mut save = 0;
+    let mut cursor = 0;
+    let mut state = LscpuParseState::Field(0);
+    loop {
+      match state {
+        LscpuParseState::Field(col) => {
+          if save == cursor && col == 0 && cursor >= out.len() {
+            break;
+          }
+          let x = out[cursor];
+          if save == cursor && col == 0 && x == b'#' {
+            cursor += 1;
+            save = usize::max_value();
+            state = LscpuParseState::Skip;
+          } else if x >= b'0' && x <= b'9' {
+            cursor += 1;
+          } else if x == b',' {
+            let s = from_utf8(&out[save .. cursor]).map_err(|_| ())?;
+            match col {
+              0 => e.cpu  = s.parse().map_err(|_| ())?,
+              1 => e.core = s.parse().map_err(|_| ())?,
+              2 => e.sock = s.parse().map_err(|_| ())?,
+              3 => e.node = s.parse().map_err(|_| ())?,
+              _ => unreachable!()
+            }
+            cursor += 1;
+            if col < 3 {
+              save = cursor;
+              state = LscpuParseState::Field(col + 1);
+            } else {
+              entries.push(e);
+              e = LscpuEntry::default();
+              save = usize::max_value();
+              state = LscpuParseState::Skip;
+            }
+          } else {
+            return Err(());
+          }
+        }
+        LscpuParseState::Skip => {
+          if cursor >= out.len() {
+            break;
+          }
+          let x = out[cursor];
+          cursor += 1;
+          if x == b'\n' {
+            save = cursor;
+            state = LscpuParseState::Field(0);
+          }
+        }
+      }
+    }
+    Ok(LscpuParse{entries})
+  }
+
+  pub fn physical_core_count(&self) -> u16 {
+    let mut core = HashSet::new();
+    for e in self.entries.iter() {
+      core.insert(e.core);
+    }
+    assert!(core.len() <= u16::max_value() as _);
+    core.len() as _
+  }
+}
 
 #[repr(C)]
 pub struct MemCell {
@@ -86,8 +216,8 @@ impl InnerCell for SmpInnerCell {}*/
 
 pub struct SmpPCtx {
   pub page_sz:  usize,
-  pub lcore_ct: u32,
-  pub pcore_ct: u32,
+  //pub lcore_ct: u16,
+  pub pcore_ct: u16,
 }
 
 impl PCtxImpl for SmpPCtx {
@@ -122,14 +252,24 @@ impl SmpPCtx {
     }
     let page_sz = ret.try_into().unwrap();
     if cfg_info() { println!("INFO:   SmpPCtx::new: page size={}", page_sz); }
-    let ret = unsafe { sysconf(_SC_NPROCESSORS_ONLN) };
-    if ret < 0 {
-      println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
-      panic!();
-    }
-    // FIXME: lscpu log/phy core counts.
-    let lcore_ct = ret.try_into().unwrap();
-    if cfg_info() { println!("INFO:   SmpPCtx::new: core count={}", lcore_ct); }
+    let pcore_ct = TL_SMP.with(|smp| {
+      match smp.lscpu.as_ref() {
+        Some(parse) => {
+          //if cfg_info() { println!("INFO:   SmpPCtx::new: lscpu={:?}", parse); }
+          parse.physical_core_count()
+        }
+        None => {
+          if cfg_info() { println!("WARNING:SmpPCtx::new: lscpu failure, try fallback"); }
+          let ret = unsafe { sysconf(_SC_NPROCESSORS_ONLN) };
+          if ret < 0 {
+            println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
+            panic!();
+          }
+          ret.try_into().unwrap()
+        }
+      }
+    });
+    if cfg_info() { println!("INFO:   SmpPCtx::new: core count={}", pcore_ct); }
     /*let n: u32 = if LIBCBLAS.openblas.get_num_threads.is_some() {
       let n = (LIBCBLAS.openblas.get_num_threads.as_ref().unwrap())();
       if cfg_info() { println!("INFO:   SmpPCtx::new: blas num threads={}", n); }
@@ -146,9 +286,8 @@ impl SmpPCtx {
     };*/
     SmpPCtx{
       page_sz,
-      lcore_ct,
-      // FIXME
-      pcore_ct: lcore_ct,
+      //lcore_ct,
+      pcore_ct,
     }
   }
 
@@ -156,15 +295,15 @@ impl SmpPCtx {
     self.page_sz
   }
 
-  pub fn logical_core_count(&self) -> u32 {
+  /*pub fn logical_core_count(&self) -> u16 {
     self.lcore_ct
-  }
+  }*/
 
-  pub fn phy_core_ct(&self) -> u32 {
+  pub fn phy_core_ct(&self) -> u16 {
     self.physical_core_count()
   }
 
-  pub fn physical_core_count(&self) -> u32 {
+  pub fn physical_core_count(&self) -> u16 {
     self.pcore_ct
   }
 
