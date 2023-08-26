@@ -1,5 +1,5 @@
 use super::*;
-use crate::algo::{HashSet, RevSortMap8};
+use crate::algo::{BTreeSet, RevSortMap8};
 use crate::cell::*;
 use crate::clock::*;
 use cacti_cfg_env::*;
@@ -21,29 +21,36 @@ use std::io::{Error as IoError};
 use std::process::{Command, Stdio};
 //use std::rc::{Rc};
 use std::str::{from_utf8};
+use std::sync::{Arc};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
-pub static ONCE_SMP: Lazy<SmpOnce> = Lazy::new(|| SmpOnce::new());
+pub static ONCE_SMP_INFO: Lazy<SmpInfo> = Lazy::new(|| SmpInfo::new());
 thread_local! {
-  pub static TL_SMP: SmpTl = SmpTl::new();
+  pub static TL_SMP_INFO: SmpInfo = SmpInfo::tl_clone();
 }
 
-pub struct SmpOnce {
-  pub lscpu: Option<LscpuParse>,
+#[derive(Clone)]
+pub struct SmpInfo {
+  pub sc_page_sz: Option<usize>,
+  pub lscpu: Option<Arc<LscpuParse>>,
 }
 
-impl SmpOnce {
-  pub fn new() -> SmpOnce {
-    SmpOnce{lscpu: LscpuParse::open().ok()}
+impl SmpInfo {
+  pub fn new() -> SmpInfo {
+    let ret = unsafe { sysconf(_SC_PAGESIZE) };
+    let sc_page_sz = if ret <= 0 {
+      None
+    } else {
+      ret.try_into().ok()
+    };
+    SmpInfo{
+      sc_page_sz,
+      lscpu: LscpuParse::open().ok().map(|inner| inner.into()),
+    }
   }
-}
 
-pub struct SmpTl {
-  pub lscpu: Option<LscpuParse>,
-}
-
-impl SmpTl {
-  pub fn new() -> SmpTl {
-    SmpTl{lscpu: ONCE_SMP.lscpu.clone()}
+  pub fn tl_clone() -> SmpInfo {
+    ONCE_SMP_INFO.clone()
   }
 }
 
@@ -55,9 +62,10 @@ pub struct LscpuEntry {
   pub node: u8,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct LscpuParse {
   pub entries: Vec<LscpuEntry>,
+  pub core_ct: AtomicUsize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -89,11 +97,15 @@ impl LscpuParse {
     loop {
       match state {
         LscpuParseState::Field(col) => {
-          if save == cursor && col == 0 && cursor >= out.len() {
-            break;
+          if cursor >= out.len() {
+            if save == cursor && col == 0 {
+              break;
+            } else {
+              return Err(());
+            }
           }
           let x = out[cursor];
-          if save == cursor && col == 0 && x == b'#' {
+          if x == b'#' && save == cursor && col == 0 {
             cursor += 1;
             save = usize::max_value();
             state = LscpuParseState::Skip;
@@ -135,16 +147,35 @@ impl LscpuParse {
         }
       }
     }
-    Ok(LscpuParse{entries})
+    Ok(LscpuParse{
+      entries,
+      core_ct: AtomicUsize::new(0),
+    })
   }
 
-  pub fn physical_core_count(&self) -> u16 {
-    let mut core = HashSet::new();
+  pub fn physical_core_count(&self) -> Option<u16> {
+    match self.core_ct.load(AtomicOrdering::Relaxed) {
+      0 => {}
+      c => {
+        assert!(c <= u16::max_value() as _);
+        return Some(c as _);
+      }
+    }
+    let mut core = BTreeSet::new();
     for e in self.entries.iter() {
       core.insert(e.core);
     }
+    if core.len() == 0 {
+      return None;
+    }
     assert!(core.len() <= u16::max_value() as _);
-    core.len() as _
+    match self.core_ct.compare_exchange(0, core.len(), AtomicOrdering::Relaxed, AtomicOrdering::Relaxed) {
+      Ok(0) | Err(0) => {}
+      Ok(c) | Err(c) => {
+        assert_eq!(c, core.len());
+      }
+    }
+    Some(core.len() as _)
   }
 }
 
@@ -245,29 +276,27 @@ impl PCtxImpl for SmpPCtx {
 
 impl SmpPCtx {
   pub fn new() -> SmpPCtx {
-    let ret = unsafe { sysconf(_SC_PAGESIZE) };
-    if ret < 0 {
-      println!("ERROR:  SmpPCtx::new: failed to get the page size");
-      panic!();
-    }
-    let page_sz = ret.try_into().unwrap();
-    if cfg_info() { println!("INFO:   SmpPCtx::new: page size={}", page_sz); }
-    let pcore_ct = TL_SMP.with(|smp| {
-      match smp.lscpu.as_ref() {
-        Some(parse) => {
-          //if cfg_info() { println!("INFO:   SmpPCtx::new: lscpu={:?}", parse); }
-          parse.physical_core_count()
-        }
-        None => {
-          if cfg_info() { println!("WARNING:SmpPCtx::new: lscpu failure, try fallback"); }
-          let ret = unsafe { sysconf(_SC_NPROCESSORS_ONLN) };
-          if ret < 0 {
-            println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
-            panic!();
-          }
-          ret.try_into().unwrap()
-        }
+    let page_sz = TL_SMP_INFO.with(|smp| {
+      if smp.sc_page_sz.is_none() {
+        println!("ERROR:  SmpPCtx::new: failed to get the page size");
+        panic!();
       }
+      smp.sc_page_sz.unwrap()
+    });
+    if cfg_info() { println!("INFO:   SmpPCtx::new: page size={}", page_sz); }
+    let pcore_ct = TL_SMP_INFO.with(|smp| {
+      smp.lscpu.as_ref().and_then(|parse| {
+        //if cfg_info() { println!("INFO:   SmpPCtx::new: lscpu={:?}", parse); }
+        parse.physical_core_count()
+      })
+    }).unwrap_or_else(|| {
+      if cfg_info() { println!("WARNING:SmpPCtx::new: lscpu failure, try fallback"); }
+      let ret = unsafe { sysconf(_SC_NPROCESSORS_ONLN) };
+      if ret <= 0 {
+        println!("ERROR:  SmpPCtx::new: failed to get the logical core count");
+        panic!();
+      }
+      ret.try_into().unwrap()
     });
     if cfg_info() { println!("INFO:   SmpPCtx::new: core count={}", pcore_ct); }
     /*let n: u32 = if LIBCBLAS.openblas.get_num_threads.is_some() {
