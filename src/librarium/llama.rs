@@ -437,7 +437,8 @@ impl Llama {
     let out_lm_prob = logit32.inner_softmax().keep();
     let in_lm_tok = in_lm_tok.const_();
     let out_lm_loss = logit32.inner_softmax_categorical_nll(in_lm_tok).keep();
-    LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss}
+    let out_lm_tok = logit32.inner_arg_max().lossy_cast(u16::dtype_()).keep();
+    LanguageModelOut{out_lm_logit, out_lm_prob, out_lm_loss, out_lm_tok}
   }
 }
 

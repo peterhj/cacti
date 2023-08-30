@@ -24,6 +24,7 @@ pub struct LanguageModelOutput {
   pub out_lm_logit: StableCell,
   pub out_lm_prob: StableCell,
   pub out_lm_loss: StableCell,
+  pub out_lm_tok: StableCell,
 }
 
 /*impl LanguageModelOut {
