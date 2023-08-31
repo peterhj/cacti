@@ -179,11 +179,7 @@ impl Ctx {
                   &Cell_::Phy(.., ref pcel) => {
                     for (_, rep) in pcel.replicas.iter() {
                       let addr = rep.addr.get();
-                      match if pctx.pinned(addr) {
-                        pctx.release(addr)
-                      } else {
-                        pctx.yeet(addr)
-                      } {
+                      match pctx.yeet(addr) {
                         None => {}
                         Some(icel) => {
                           //assert_eq!(icel.root(), Some(xroot));
@@ -354,14 +350,15 @@ pub fn resume_put<K: CellDeref, V: CellStoreTo>(key: K, ty: &CellType, val: &V) 
   }))
 }
 
-/*#[track_caller]
+#[track_caller]
 pub fn yield_() {
   panick_wrap(|| TL_CTX.with(|ctx| {
-    unimplemented!();
+    let spine = ctx.spine.borrow();
+    spine.yield_();
   }))
 }
 
-#[track_caller]
+/*#[track_caller]
 pub fn break_() {
   panick_wrap(|| TL_CTX.with(|ctx| {
     unimplemented!();

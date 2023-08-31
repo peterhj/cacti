@@ -4,6 +4,7 @@ pub use crate::cell::{
   TypedMem, TypedMemMut, CellType, Dtype, DtypeConstExt, dtype_of,
 };
 pub use crate::ctx::{
+  yield_,
   reset, compile, resume,
   resume_put_mem_with, resume_put,
   default_scope, no_scope, smp_scope,

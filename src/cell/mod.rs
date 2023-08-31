@@ -2295,11 +2295,7 @@ impl PCell {
       if loc == q_locus && pm == q_pmach {
         let addr = rep.addr.get();
         if let Some((loc2, pm2, icel)) = TL_PCTX.with(|pctx| {
-          if pctx.pinned(addr) {
-            pctx.release(addr)
-          } else {
-            pctx.yeet(addr)
-          }
+          pctx.yeet(addr)
         }) {
           assert_eq!(loc, loc2);
           assert_eq!(pm, pm2);

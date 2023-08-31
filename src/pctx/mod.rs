@@ -492,6 +492,13 @@ impl PCtx {
   }
 
   pub fn yeet(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
+    if self.pinned(addr) {
+      return self.release(addr);
+    }
+    self.force_yeet(addr)
+  }
+
+  pub fn force_yeet(&self, addr: PAddr) -> Option<(Locus, PMach, Rc<dyn InnerCell_>)> {
     {
       let pm = PMach::Swap;
       match self.swap.yeet(addr) {

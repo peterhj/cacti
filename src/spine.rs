@@ -471,6 +471,7 @@ impl SpineEnv {
             SpineEntry::Cache(..) |
             //SpineEntry::Intro(..) |
             //SpineEntry::Uninit(..) |
+            SpineEntry::Yield_ |
             SpineEntry::YieldSet(..) |
             SpineEntry::YieldInit(..) |
             SpineEntry::Alias(..) |
@@ -807,6 +808,7 @@ impl SpineEnv {
         // FIXME FIXME
         unimplemented!();
       }*/
+      SpineEntry::Yield_ => {}
       SpineEntry::YieldSet(x, _xclk, _loc) => {
         let mut self_ = this.borrow_mut();
         let xroot = self_._deref(x);
@@ -1248,6 +1250,14 @@ impl Spine {
   pub fn cache(&self, x: CellPtr) {
     let sp = self.curp.fetch_add(1);
     let e = SpineEntry::Cache(x, Clock::default());
+    self.log.borrow_mut().push(e);
+    SpineEnv::step(&self.cur_env, sp, &self.curp, &self.log, None, None);
+    assert_eq!(self.curp.get(), self.log.borrow().len() as _);
+  }
+
+  pub fn yield_(&self) {
+    let sp = self.curp.fetch_add(1);
+    let e = SpineEntry::Yield_;
     self.log.borrow_mut().push(e);
     SpineEnv::step(&self.cur_env, sp, &self.curp, &self.log, None, None);
     assert_eq!(self.curp.get(), self.log.borrow().len() as _);
