@@ -2691,7 +2691,3 @@ impl NvGpuCopyKernels {
     }
   }
 }
-
-/*pub struct GpuDryCtx {
-  // FIXME
-}*/

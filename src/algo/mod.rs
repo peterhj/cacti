@@ -554,6 +554,22 @@ pub trait StdCellExt<T> {
   fn fetch_sub(&self, val: T) -> T;
 }
 
+impl StdCellExt<isize> for Cell<isize> {
+  fn fetch_add(&self, val: isize) -> isize {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: isize) -> isize {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
 impl StdCellExt<i64> for Cell<i64> {
   fn fetch_add(&self, val: i64) -> i64 {
     let old_val = self.get();
@@ -563,6 +579,54 @@ impl StdCellExt<i64> for Cell<i64> {
   }
 
   fn fetch_sub(&self, val: i64) -> i64 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<i32> for Cell<i32> {
+  fn fetch_add(&self, val: i32) -> i32 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: i32) -> i32 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<i16> for Cell<i16> {
+  fn fetch_add(&self, val: i16) -> i16 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: i16) -> i16 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<i8> for Cell<i8> {
+  fn fetch_add(&self, val: i8) -> i8 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: i8) -> i8 {
     let old_val = self.get();
     let new_val = old_val - val;
     self.set(new_val);
@@ -586,6 +650,22 @@ impl StdCellExt<usize> for Cell<usize> {
   }
 }
 
+impl StdCellExt<u64> for Cell<u64> {
+  fn fetch_add(&self, val: u64) -> u64 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: u64) -> u64 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
 impl StdCellExt<u32> for Cell<u32> {
   fn fetch_add(&self, val: u32) -> u32 {
     let old_val = self.get();
@@ -595,6 +675,38 @@ impl StdCellExt<u32> for Cell<u32> {
   }
 
   fn fetch_sub(&self, val: u32) -> u32 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<u16> for Cell<u16> {
+  fn fetch_add(&self, val: u16) -> u16 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: u16) -> u16 {
+    let old_val = self.get();
+    let new_val = old_val - val;
+    self.set(new_val);
+    old_val
+  }
+}
+
+impl StdCellExt<u8> for Cell<u8> {
+  fn fetch_add(&self, val: u8) -> u8 {
+    let old_val = self.get();
+    let new_val = old_val + val;
+    self.set(new_val);
+    old_val
+  }
+
+  fn fetch_sub(&self, val: u8) -> u8 {
     let old_val = self.get();
     let new_val = old_val - val;
     self.set(new_val);
