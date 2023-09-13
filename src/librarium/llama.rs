@@ -265,15 +265,15 @@ impl Llama {
     let mut matcher = CellMatcher::new();
     matcher.insert("embed", self.embed.clone());
     for i in 0 .. self.layers.len() {
+      matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
       matcher.insert((i, "attn", "q_proj"), self.layers[i].q.clone());
       matcher.insert((i, "attn", "k_proj"), self.layers[i].k.clone());
       matcher.insert((i, "attn", "v_proj"), self.layers[i].v.clone());
       matcher.insert((i, "attn", "o_proj"), self.layers[i].o.clone());
+      matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
       matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
       matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
       matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
-      matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
-      matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
     }
     matcher.insert("norm", self.head_norm.clone());
     matcher.insert("lm_head", self.lm_head.clone());
@@ -534,6 +534,29 @@ impl From<Llama> for LlamaCached {
 }
 
 impl LlamaCached {
+  pub fn from_train(ubat_sz: i64, seq_cap: i64, model: Llama) -> LlamaCached {
+    let mut cfg = model.cfg;
+    cfg.ubat_sz = ubat_sz;
+    cfg.seq_cap = seq_cap;
+    let num_head = cfg.num_head;
+    let head_dim = cfg.head_dim;
+    let num_layers = cfg.num_layer as usize;
+    let dtype = cfg.dtype;
+    let cos = model.cos;
+    let sin = model.sin;
+    let embed = model.embed;
+    let layers = model.layers;
+    let mut states = Vec::with_capacity(num_layers);
+    for _ in 0 .. num_layers {
+      let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
+      let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
+      states.push(LlamaCachedState{k_cache, v_cache});
+    }
+    let head_norm = model.head_norm;
+    let lm_head = model.lm_head;
+    LlamaCached{cfg, cos, sin, embed, layers, states, head_norm, lm_head}
+  }
+
   /// `match_pickle_dir` will match the `Cell`s corresponding
   /// to model parameters to the appropriate tensor labels in
   /// the pickle/torch files located in the given directory.
@@ -544,15 +567,15 @@ impl LlamaCached {
     let mut matcher = CellMatcher::new();
     matcher.insert("embed", self.embed.clone());
     for i in 0 .. self.layers.len() {
+      matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
       matcher.insert((i, "attn", "q_proj"), self.layers[i].q.clone());
       matcher.insert((i, "attn", "k_proj"), self.layers[i].k.clone());
       matcher.insert((i, "attn", "v_proj"), self.layers[i].v.clone());
       matcher.insert((i, "attn", "o_proj"), self.layers[i].o.clone());
+      matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
       matcher.insert((i, "mlp", "gate"), self.layers[i].gate.clone());
       matcher.insert((i, "mlp", "up"), self.layers[i].up.clone());
       matcher.insert((i, "mlp", "down"), self.layers[i].down.clone());
-      matcher.insert((i, "input_layernorm"), self.layers[i].pre_norm.clone());
-      matcher.insert((i, "post_attention_layernorm"), self.layers[i].post_norm.clone());
     }
     matcher.insert("norm", self.head_norm.clone());
     matcher.insert("lm_head", self.lm_head.clone());

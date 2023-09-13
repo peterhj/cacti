@@ -123,6 +123,18 @@ impl InnerCell for SwapCowMemCell {
     self.pinc.set(c - 1);
   }
 
+  fn _try_borrow(&self) -> Result<(), BorrowErr> {
+    Err(BorrowErr::Unsafe)
+  }
+
+  fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr> {
+    self.borc._try_borrow()
+  }
+
+  fn _unborrow(&self) {
+    self.borc._unborrow();
+  }
+
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr> {
     println!("WARNING:SwapCowMemCell::mem_borrow: it is _always_ unsafe to use a mmap byte slice");
     Err(BorrowErr::Unsafe)

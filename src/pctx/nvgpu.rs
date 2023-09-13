@@ -865,6 +865,10 @@ impl InnerCell for NvGpuMemCell {
     self.borc._try_borrow()
   }
 
+  fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr> {
+    self.borc._try_borrow()
+  }
+
   fn _unborrow(&self) {
     self.borc._unborrow();
   }

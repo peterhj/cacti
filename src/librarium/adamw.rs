@@ -44,7 +44,9 @@ impl AdamW32 {
   pub fn step(&self, iter_nr: i32, master: &StableCell, grad1_avg: &StableCell, grad2_avg: &StableCell, grad: &StableCell) {
     grad1_avg.init_online_average_scale(grad, self.grad_unscale, self.a1);
     grad2_avg.init_online_average_square_scale(grad, self.grad_unscale, self.a2);
-    master.init_online_adamw_update32(grad1_avg, grad2_avg,
+    master.init_online_adamw_update32(
+        grad1_avg,
+        grad2_avg,
         iter_nr,
         self.lr,
         self.wd,
@@ -56,12 +58,28 @@ impl AdamW32 {
 
 #[derive(Clone, Copy, Debug)]
 pub struct ScaledAdamW16 {
-  pub grad_unscale: f16,
-  //pub loss_upscale: f16,
-  //pub loss_grad_scale_prod: f16,
+  pub grad_scale: f16,
   pub lr: f16,
   pub wd: f16,
   pub a1: f16,
   pub a2: f16,
   pub eps: f16,
+}
+
+impl ScaledAdamW16 {
+  pub fn step(&self, iter_nr: i32, grad: &StableCell, scaled_grad1_avg: &StableCell, scaled_grad2_avg: &StableCell, master: &StableCell) {
+    // FIXME: fixup for grad rescale.
+    scaled_grad1_avg.init_online_add_scale2(grad, self.a1, f16::from_f32(1.0));
+    // NB: the scaling here is different from non-scaled adamw.
+    scaled_grad2_avg.init_online_add_square_scale2(grad, self.a2, f16::from_f32(1.0));
+    master.init_online_adamw_update16(
+        scaled_grad1_avg,
+        scaled_grad2_avg,
+        iter_nr,
+        self.lr,
+        self.wd,
+        self.a1,
+        self.a2,
+        self.grad_scale * self.eps);
+  }
 }

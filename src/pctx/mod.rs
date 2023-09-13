@@ -930,6 +930,7 @@ pub trait InnerCell {
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
   fn _try_borrow(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
+  fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
   fn _unborrow(&self) { unimplemented!(); }
   fn _try_borrow_mut(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
   fn _unborrow_mut(&self) { unimplemented!(); }
@@ -958,6 +959,7 @@ pub trait InnerCell_ {
   fn pin(&self);
   fn unpin(&self);
   fn _try_borrow(&self) -> Result<(), BorrowErr>;
+  fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr>;
   fn _unborrow(&self);
   fn mem_borrow(&self) -> Result<BorrowRef<[u8]>, BorrowErr>;
   fn mem_borrow_mut(&self) -> Result<BorrowRefMut<[u8]>, BorrowErr>;
@@ -1034,6 +1036,10 @@ impl<C: InnerCell + Any> InnerCell_ for C {
 
   fn _try_borrow(&self) -> Result<(), BorrowErr> {
     InnerCell::_try_borrow(self)
+  }
+
+  fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr> {
+    InnerCell::_try_borrow_unsafe(self)
   }
 
   fn _unborrow(&self) {

@@ -910,6 +910,20 @@ pub trait MathInitOps: CellDeref {
   }
 
   #[track_caller]
+  fn init_online_add_square_scale2<V: CellDeref, T: IntoScalarValExt>(&self, val: V, src_scale: T, dst_scale: T) {
+    panick_wrap(|| {
+      let this = self._deref();
+      let val = val._deref();
+      let src_scale = src_scale.into_scalar_val_();
+      let dst_scale = dst_scale.into_scalar_val_();
+      let ty = ctx_lookup_type(this);
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(val);
+      ctx_pop_initialize_thunk_(OnlineAddSquareScale2InitFutThunkSpec{src_scale, dst_scale}, this, ty)
+    })
+  }
+
+  #[track_caller]
   fn init_online_average_scale<V: CellDeref, T: IntoScalarValExt>(&self, val: V, src_scale: T, rate: T) {
     panick_wrap(|| {
       let this = self._deref();
@@ -965,6 +979,47 @@ pub trait MathInitOps: CellDeref {
       let eps = (eps * unbias2).into_scalar_val_();
       if cfg_debug() {
       println!("DEBUG: init_online_adamw_update32: signed lr={:?} lamda={:?} eps={:?}",
+          signed_lr, lamda, eps);
+      }
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(grad1_avg);
+      ctx_push_cell_arg(grad2_avg);
+      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)
+    })
+  }
+
+  #[track_caller]
+  fn init_online_adamw_update16<V: CellDeref>(&self, grad1_avg: V, grad2_avg: V, iter_nr: i32, lr: f16, wd: f16, a1: f16, a2: f16, eps: f16) {
+    let a1: f32 = a1.into();
+    let unbias1 = if iter_nr <= 0 {
+      println!("ERROR: init_online_adamw_update16: invalid iter_nr={} (should be positive)", iter_nr);
+      panic!();
+    } else if iter_nr == 1 {
+      a1
+    } else {
+      1.0 - (1.0 - a1).powi(iter_nr)
+    };
+    let a2: f32 = a2.into();
+    let unbias2 = if iter_nr <= 0 {
+      println!("ERROR: init_online_adamw_update16: invalid iter_nr={} (should be positive)", iter_nr);
+      panic!();
+    } else if iter_nr == 1 {
+      a2.sqrt()
+    } else {
+      (1.0 - (1.0 - a2).powi(iter_nr)).sqrt()
+    };
+    let unbias2_fp16 = f16::from_f32(unbias2);
+    let unbias_ratio_fp16 = f16::from_f32(unbias2 / unbias1);
+    panick_wrap(|| {
+      let this = self._deref();
+      let grad1_avg = grad1_avg._deref();
+      let grad2_avg = grad2_avg._deref();
+      let signed_lr = (-lr).into_scalar_val_();
+      let lr_unbias = (unbias_ratio_fp16).into_scalar_val_();
+      let lamda = (wd).into_scalar_val_();
+      let eps = (eps * unbias2_fp16).into_scalar_val_();
+      if cfg_debug() {
+      println!("DEBUG: init_online_adamw_update16: signed lr={:?} lamda={:?} eps={:?}",
           signed_lr, lamda, eps);
       }
       assert!(ctx_clean_arg());
@@ -2083,8 +2138,8 @@ pub trait VStableOps: Borrow<[StableCell]> {
                   icel
                 });
                 match icel._try_borrow() {
-                  Err(_) => {
-                    println!("ERROR:  VStableOps::with_mem: failed to borrow mem");
+                  Err(e) => {
+                    println!("ERROR:  VStableOps::with_mem: failed to borrow mem: {:?}", e);
                     panic!();
                   }
                   Ok(()) => {}
@@ -2134,6 +2189,92 @@ pub trait VStableOps: Borrow<[StableCell]> {
 impl VStableOps for [StableCell] {}
 impl<'a> VStableOps for &'a [StableCell] {}
 impl VStableOps for Vec<StableCell> {}
+
+pub trait VStableUnsafeOps: Borrow<[StableCell]> {
+  fn with_mem_unsafe<V, F: FnMut(&[TypedMem]) -> V>(&self, mut f: F) -> V {
+    panick_wrap(|| TL_CTX.with(|ctx| {
+      let cel_buf: &[StableCell] = self.borrow();
+      let mut buf = Vec::with_capacity(cel_buf.len());
+      for x in cel_buf.iter() {
+        let xclk = ctx_lookup_clk(x._deref());
+        match ctx.env.borrow_mut().pread_view(x._deref(), xclk, Locus::Mem) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let v_ty = match e.view().eval_contiguous(&e.root_ty) {
+              Err(_) => {
+                println!("ERROR:  CtlOps::_get_mem: arg ({:?}) is not a zero-copy (contiguous) view", x);
+                panic!();
+              }
+              Ok(ty) => ty
+            };
+            assert_eq!(e.ty, v_ty.as_ref());
+            let off: usize = v_ty.pointer_offset().try_into().unwrap();
+            let sz: usize = e.ty.packed_span_bytes().try_into().unwrap();
+            let start = off;
+            let end = off + sz;
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
+              &mut Cell_::Phy(.., ref mut pcel) => {
+                let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                  None => panic!("bug"),
+                  Some((_, pm, addr)) => (pm, addr)
+                };
+                let icel = TL_PCTX.with(|pctx| {
+                  let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                  icel
+                });
+                match icel._try_borrow_unsafe() {
+                  Err(e) => {
+                    println!("ERROR:  VStableOps::with_mem: failed to borrow mem: {:?}", e);
+                    panic!();
+                  }
+                  Ok(()) => {}
+                }
+                // SAFETY: This is safe because the `_try_borrow`
+                // above succeeded.
+                unsafe {
+                  let base_reg = icel.as_unsafe_mem_reg().unwrap();
+                  let slice_reg = base_reg.slice(off, off + sz);
+                  buf.push(TypedMem{ty_: e.ty.clone(), buf: slice_reg._as_bytes()});
+                }
+              }
+              _ => panic!("bug")
+            }
+          }
+        }
+      }
+      let val = (f)(&buf);
+      for x in cel_buf.iter() {
+        let xclk = ctx_lookup_clk(x._deref());
+        match ctx.env.borrow_mut().pread_view(x._deref(), xclk, Locus::Mem) {
+          Err(_) => panic!("bug"),
+          Ok(e) => {
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
+              &mut Cell_::Phy(.., ref mut pcel) => {
+                let (pm, addr) = match pcel.lookup_loc(Locus::Mem) {
+                  None => panic!("bug"),
+                  Some((_, pm, addr)) => (pm, addr)
+                };
+                let icel = TL_PCTX.with(|pctx| {
+                  let (_, icel) = pctx.lookup_pm(pm, addr).unwrap();
+                  icel
+                });
+                icel._unborrow();
+              }
+              _ => panic!("bug")
+            }
+          }
+        }
+      }
+      val
+    }))
+  }
+}
+
+impl VStableUnsafeOps for [StableCell] {}
+impl<'a> VStableUnsafeOps for &'a [StableCell] {}
+impl VStableUnsafeOps for Vec<StableCell> {}
 
 impl CellType {
   #[track_caller]

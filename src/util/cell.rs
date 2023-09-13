@@ -1,6 +1,8 @@
 use crate::algo::{HashMap, HashSet};
-use crate::cell::{StableCell};
+use crate::cell::{StableCell, CellType, Dtype};
 
+pub use cell_split::{CellSplit, CellRepr};
+use cell_split::{CellType as ExtCellType, Dtype as ExtDtype};
 use smol_str::{SmolStr};
 
 //use std::borrow::{Borrow};
@@ -214,6 +216,31 @@ impl CellInvertedMatches {
       Some(&idx) => {
         &self.mat[idx].1
       }
+    }
+  }
+}
+
+impl From<CellType> for ExtCellType {
+  fn from(ty: CellType) -> ExtCellType {
+    ExtCellType{shape: ty.shape, dtype: ty.dtype.into()}
+  }
+}
+
+impl From<Dtype> for ExtDtype {
+  fn from(ty: Dtype) -> ExtDtype {
+    match ty {
+      Dtype::F64 => ExtDtype::F64,
+      Dtype::F32 => ExtDtype::F32,
+      Dtype::F16 => ExtDtype::F16,
+      Dtype::I64 => ExtDtype::I64,
+      Dtype::I32 => ExtDtype::I32,
+      Dtype::I16 => ExtDtype::I16,
+      Dtype::I8 => ExtDtype::I8,
+      Dtype::U64 => ExtDtype::U64,
+      Dtype::U32 => ExtDtype::U32,
+      Dtype::U16 => ExtDtype::U16,
+      Dtype::U8 => ExtDtype::U8,
+      _ => unimplemented!()
     }
   }
 }

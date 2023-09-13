@@ -3720,12 +3720,20 @@ impl FutharkThunkSpec for OnlineAddSquareScale2InitFutThunkSpec {
       return Err(ThunkDimErr::_Bot.into_gen());
     }
     FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
-        format!(r"\u v -> {} * v + ({} * ({}.{} u)) * ({} * ({}.{} u))",
+        /*format!(r"\u v -> {} * v + ({} * ({}.{} u)) * ({} * ({}.{} u))",
             self.dst_scale.format_futhark(),
             self.src_scale.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
             self.src_scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )*/
+        format!(r"\u v -> {} * v + {} * (({}.{} u) * ({}.{} u))",
+            self.dst_scale.format_futhark(),
+            self.src_scale.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         )
