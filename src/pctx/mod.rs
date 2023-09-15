@@ -582,6 +582,19 @@ impl PCtx {
   pub fn hard_copy(&self, dst_loc: Locus, dst_pm: PMach, dst: PAddr, src_loc: Locus, src_pm: PMach, src: PAddr, sz: usize) {
     match (dst_loc, dst_pm, src_loc, src_pm) {
       #[cfg(feature = "nvgpu")]
+      (Locus::Mem, PMach::NvGpu, Locus::Mem, PMach::Swap) => {
+        let gpu = self.nvgpu.as_ref().unwrap();
+        let dst_reg = gpu.lookup_mem_reg(dst).unwrap();
+        assert!(sz <= dst_reg.sz);
+        let src_reg = self.swap.lookup_mem_reg(src).unwrap();
+        assert!(sz <= src_reg.sz);
+        // FIXME: parallel memcpy.
+        // FIXME: check we can copy nonoverlapping here.
+        unsafe {
+          std::intrinsics::copy_nonoverlapping(src_reg.ptr as *const u8, dst_reg.ptr as *mut u8, sz);
+        }
+      }
+      #[cfg(feature = "nvgpu")]
       (Locus::VMem, PMach::NvGpu, Locus::Mem, PMach::Swap) => {
         let gpu = self.nvgpu.as_ref().unwrap();
         let (dst_dptr, dst_sz) = gpu.lookup_dev(dst).unwrap();

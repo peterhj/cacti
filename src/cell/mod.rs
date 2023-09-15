@@ -1392,7 +1392,7 @@ impl ScalarVal_ {
       }
       ScalarVal_::F16(x) => {
         // FIXME FIXME
-        if x.0.to_bits() == 0 {
+        /*if x.0.to_bits() == 0 {
           "0.0f16".into()
         } else if x.0.to_bits() == 0x3c00 {
           "1.0f16".into()
@@ -1402,6 +1402,17 @@ impl ScalarVal_ {
           "-1.0f16".into()
         } else {
           unimplemented!();
+        }*/
+        if x.0.is_nan() {
+          unimplemented!();
+        } else if x.0.is_infinite() {
+          if x.0 < f16::from_bits(0) {
+            format!("-f16.inf").into()
+          } else {
+            format!("f16.inf").into()
+          }
+        } else {
+          format!("{}f16", x.0).into()
         }
       }
       ScalarVal_::Bot => {
@@ -2587,7 +2598,9 @@ impl PCell {
               retry = true;
               continue 'retry;
             }
-            if prev_clk >= q_clk {
+            if prev_clk > q_clk || (!retry && prev_clk == q_clk) {
+              println!("DEBUG:  PCell::write_loc: root={:?} prev clk={:?} q clk={:?} ty={:?} q loc={:?} pmach={:?} addr={:?}",
+                  root, prev_clk, q_clk, ty, q_locus, f_pmach, addr);
               panic!("bug");
             } else /*if prev_clk < q_clk */{
               rep.clk.set(q_clk);

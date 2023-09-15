@@ -649,6 +649,15 @@ impl NvGpuPCtx {
     None
   }
 
+  pub fn lookup_mem_reg(&self, addr: PAddr) -> Option<MemReg> {
+    match self.lookup_reg(addr) {
+      Some(NvGpuInnerReg::Mem{ptr, size}) => {
+        Some(MemReg{ptr, sz: size})
+      }
+      _ => None
+    }
+  }
+
   pub fn _dump_usage(&self) {
     println!("INFO:   NvGpuPCtx::_dump_usage: {}: mem  used={}",
         self.page_map.alloc._usage_str(),
