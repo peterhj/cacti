@@ -23,6 +23,8 @@ use std::process::{Command, Stdio};
 use std::str::{from_utf8};
 use std::sync::{Arc};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::mpsc::{SyncSender, Receiver, sync_channel};
+use std::thread::{JoinHandle, Thread, park, spawn};
 
 pub static ONCE_SMP_INFO: Lazy<SmpInfo> = Lazy::new(|| SmpInfo::new());
 thread_local! {
@@ -245,10 +247,110 @@ impl SmpInnerCell {
 
 impl InnerCell for SmpInnerCell {}*/
 
+#[derive(Clone, Copy)]
+pub enum SmpCtl2Thread {
+  Shutdown,
+  Memcpy(usize, usize, usize),
+}
+
+#[derive(Clone, Copy)]
+pub enum SmpThread2Ctl {
+  Complete(u16),
+}
+
+pub struct SmpThreadPool {
+  ctl2th:   Vec<(SyncSender<SmpCtl2Thread>, JoinHandle<()>, )>,
+  th2ctl:   Receiver<SmpThread2Ctl>,
+}
+
+impl Drop for SmpThreadPool {
+  fn drop(&mut self) {
+    for &(ref ctl2th, ref h) in self.ctl2th.iter() {
+      ctl2th.send(SmpCtl2Thread::Shutdown).unwrap();
+      h.thread().unpark();
+    }
+    for (_, h) in self.ctl2th.drain(..) {
+      h.join().unwrap();
+    }
+  }
+}
+
+impl SmpThreadPool {
+  pub fn new(thct: u16) -> SmpThreadPool {
+    if cfg_info() { println!("INFO:   SmpThreadPool::new: thread count={}", thct); }
+    let mut ctl2th = Vec::with_capacity(thct as _);
+    let (th2ctl_tx, th2ctl) = sync_channel(2 * thct as usize);
+    for rank in 0 .. thct {
+      let (ctl2th_tx, ctl2th_rx) = sync_channel(4);
+      let th2ctl_tx = th2ctl_tx.clone();
+      let h = spawn(move || {
+        loop {
+          park();
+          match ctl2th_rx.recv() {
+            Ok(SmpCtl2Thread::Shutdown) => {
+              break;
+            }
+            Ok(SmpCtl2Thread::Memcpy(dst_ptr, src_ptr, sz)) => {
+              unsafe {
+                let dst_ptr = dst_ptr as *mut u8;
+                let src_ptr = src_ptr as *const u8;
+                std::intrinsics::copy_nonoverlapping(src_ptr, dst_ptr, sz);
+              }
+              th2ctl_tx.send(SmpThread2Ctl::Complete(rank)).unwrap();
+            }
+            _ => break
+          }
+        }
+      });
+      ctl2th.push((ctl2th_tx, h));
+    }
+    SmpThreadPool{
+      ctl2th,
+      th2ctl,
+    }
+  }
+
+  #[inline]
+  pub fn num_threads(&self) -> usize {
+    self.ctl2th.len()
+  }
+
+  pub fn memcpy(&self, dst_ptr: *mut u8, src_ptr: *const u8, sz: usize) {
+    let thsz = self.num_threads();
+    let mut chunks = Vec::with_capacity(thsz);
+    for r in 0 .. thsz {
+      // FIXME: try to align on dst cacheline.
+      let start = (sz * r) / thsz;
+      let end = (sz * (r + 1)) / thsz;
+      let ch_sz = end - start;
+      let ch_src = unsafe { src_ptr.offset(start as _) as usize };
+      let ch_dst = unsafe { dst_ptr.offset(start as _) as usize };
+      chunks.push((ch_dst, ch_src, ch_sz));
+    }
+    for (r, &(ref ctl2th, ref h)) in self.ctl2th.iter().enumerate() {
+      let (dst_ptr, src_ptr, sz) = chunks[r];
+      ctl2th.send(SmpCtl2Thread::Memcpy(dst_ptr, src_ptr, sz)).unwrap();
+      h.thread().unpark();
+    }
+    // FIXME: bitset.
+    let mut recv = BTreeSet::new();
+    for _ in 0 .. thsz {
+      match self.th2ctl.recv() {
+        Ok(SmpThread2Ctl::Complete(rank)) => {
+          recv.insert(rank);
+        }
+        _ => panic!("bug")
+      }
+    }
+    assert_eq!(recv.len(), thsz);
+  }
+}
+
 pub struct SmpPCtx {
   pub page_sz:  usize,
   //pub lcore_ct: u16,
   pub pcore_ct: u16,
+  pub th_pool:  SmpThreadPool,
 }
 
 impl PCtxImpl for SmpPCtx {
@@ -313,10 +415,12 @@ impl SmpPCtx {
     } else {
       1
     };*/
+    let th_pool = SmpThreadPool::new(pcore_ct);
     SmpPCtx{
       page_sz,
       //lcore_ct,
       pcore_ct,
+      th_pool,
     }
   }
 

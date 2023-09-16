@@ -41,7 +41,7 @@ impl Default for AdamW32 {
 }
 
 impl AdamW32 {
-  pub fn step(&self, iter_nr: i32, master: &StableCell, grad1_avg: &StableCell, grad2_avg: &StableCell, grad: &StableCell) {
+  pub fn step(&self, iter_nr: i32, grad: &StableCell, grad1_avg: &StableCell, grad2_avg: &StableCell, master: &StableCell) {
     grad1_avg.init_online_average_scale(grad, self.grad_unscale, self.a1);
     grad2_avg.init_online_average_square_scale(grad, self.grad_unscale, self.a2);
     master.init_online_adamw_update32(

@@ -230,15 +230,15 @@ impl From<LlamaConfig> for Llama {
     let embed = StableCell::array([tok_dim, inner_dim], dtype);
     let mut layers = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
+      let pre_norm = StableCell::array([inner_dim], dtype);
       let q = StableCell::array([inner_dim, inner_dim], dtype);
       let k = StableCell::array([inner_dim, inner_dim], dtype);
       let v = StableCell::array([inner_dim, inner_dim], dtype);
       let o = StableCell::array([inner_dim, inner_dim], dtype);
+      let post_norm = StableCell::array([inner_dim], dtype);
       let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
       let up = StableCell::array([mlp_inner_dim, inner_dim], dtype);
       let down = StableCell::array([inner_dim, mlp_inner_dim], dtype);
-      let pre_norm = StableCell::array([inner_dim], dtype);
-      let post_norm = StableCell::array([inner_dim], dtype);
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, pre_norm, post_norm});
     }
     let head_norm = StableCell::array([inner_dim], dtype);
@@ -488,15 +488,15 @@ impl From<LlamaConfig> for LlamaCached {
     let mut layers = Vec::with_capacity(num_layers);
     let mut states = Vec::with_capacity(num_layers);
     for _ in 0 .. num_layers {
+      let pre_norm = StableCell::array([inner_dim], dtype);
       let q = StableCell::array([inner_dim, inner_dim], dtype);
       let k = StableCell::array([inner_dim, inner_dim], dtype);
       let v = StableCell::array([inner_dim, inner_dim], dtype);
       let o = StableCell::array([inner_dim, inner_dim], dtype);
+      let post_norm = StableCell::array([inner_dim], dtype);
       let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
       let up = StableCell::array([mlp_inner_dim, inner_dim], dtype);
       let down = StableCell::array([inner_dim, mlp_inner_dim], dtype);
-      let pre_norm = StableCell::array([inner_dim], dtype);
-      let post_norm = StableCell::array([inner_dim], dtype);
       layers.push(LlamaLayer{q, k, v, o, gate, down, up, pre_norm, post_norm});
       let k_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);
       let v_cache = StableCell::array([ubat_sz, seq_cap, num_head, head_dim], dtype);

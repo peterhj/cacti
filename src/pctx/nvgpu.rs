@@ -1219,6 +1219,10 @@ impl InnerCell for NvGpuInnerCell {
     c > 0
   }
 
+  fn get_ref(&self) -> u32 {
+    self.refc.get()
+  }
+
   fn retain(&self) {
     let c = self.refc.get();
     if c >= u32::max_value() {
@@ -1230,9 +1234,15 @@ impl InnerCell for NvGpuInnerCell {
   fn release(&self) {
     let c = self.refc.get();
     if c <= 0 {
+      println!("DEBUG:  NvGpuInnerCell::release: root={:?} sz={} c={}",
+          self.root.get(), self.sz, c);
       panic!("bug");
     }
     self.refc.set(c - 1);
+  }
+
+  fn get_pin(&self) -> u16 {
+    self.pinc.get()
   }
 
   fn pinned(&self) -> bool {
@@ -1363,13 +1373,13 @@ impl NvGpuMemPool {
           let maybe_decimal_frac: Option<f64> = String::from_utf8_lossy(s).parse().ok();
           match (maybe_byte_size, maybe_decimal_frac) {
             (None, None) => {}
-            (None, Some(f)) => {
-              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (fraction of total)", f); }
-              let unrounded_sz = (total_sz as f64 * f) as u64;
+            (Some(unrounded_sz), None) => {
+              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (bytes)", unrounded_sz); }
               reserve_sz = (unrounded_sz as usize >> 16) << 16;
             }
-            (Some(unrounded_sz), _) => {
-              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (bytes)", unrounded_sz); }
+            (_, Some(f)) => {
+              if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (fraction of total)", f); }
+              let unrounded_sz = (total_sz as f64 * f.max(0.0).min(1.0)) as u64;
               reserve_sz = (unrounded_sz as usize >> 16) << 16;
             }
           }

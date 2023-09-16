@@ -311,7 +311,7 @@ fn main() {
             // update the embedding at all.
             p.cache();
           } else {
-            adamw.step(cycle_nr, &p_, &g_, &g2, &g);
+            adamw.step(cycle_nr, &g, &g_, &g2, &p_);
             // We use `set_lossy_cast` here as we are downcasting
             // from the FP32 master copy to the FP16 working copy.
             p.set_lossy_cast(p_.const_());

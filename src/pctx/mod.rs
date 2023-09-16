@@ -411,6 +411,13 @@ impl PCtx {
     }
   }
 
+  pub fn get_ref(&self, addr: PAddr) -> Option<u32> {
+    match self.lookup(addr) {
+      Some((_, _, icel)) => Some(icel.get_ref()),
+      _ => None
+    }
+  }
+
   pub fn retain(&self, addr: PAddr) {
     self.swap.retain(addr);
     #[cfg(feature = "nvgpu")]
@@ -418,6 +425,13 @@ impl PCtx {
       gpu.retain(addr);
     }
     // TODO
+  }
+
+  pub fn get_pin(&self, addr: PAddr) -> Option<u16> {
+    match self.lookup(addr) {
+      Some((_, _, icel)) => Some(icel.get_pin()),
+      _ => None
+    }
   }
 
   pub fn pin(&self, addr: PAddr) {
@@ -588,11 +602,11 @@ impl PCtx {
         assert!(sz <= dst_reg.sz);
         let src_reg = self.swap.lookup_mem_reg(src).unwrap();
         assert!(sz <= src_reg.sz);
-        // FIXME: parallel memcpy.
         // FIXME: check we can copy nonoverlapping here.
-        unsafe {
+        /*unsafe {
           std::intrinsics::copy_nonoverlapping(src_reg.ptr as *const u8, dst_reg.ptr as *mut u8, sz);
-        }
+        }*/
+        self.smp.th_pool.memcpy(dst_reg.ptr as *mut u8, src_reg.ptr as *const u8, sz);
       }
       #[cfg(feature = "nvgpu")]
       (Locus::VMem, PMach::NvGpu, Locus::Mem, PMach::Swap) => {
@@ -937,8 +951,10 @@ pub trait InnerCell {
   fn tag(&self) -> Option<u32> { unimplemented!(); }
   fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
   fn live(&self) -> bool { unimplemented!(); }
+  fn get_ref(&self) -> u32 { unimplemented!(); }
   fn retain(&self) { unimplemented!(); }
   fn release(&self) { unimplemented!(); }
+  fn get_pin(&self) -> u16 { unimplemented!(); }
   fn pinned(&self) -> bool { unimplemented!(); }
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
@@ -966,8 +982,10 @@ pub trait InnerCell_ {
   fn tag(&self) -> Option<u32>;
   fn set_tag(&self, _tag: Option<u32>);
   fn live(&self) -> bool;
+  fn get_ref(&self) -> u32;
   fn retain(&self);
   fn release(&self);
+  fn get_pin(&self) -> u16;
   fn pinned(&self) -> bool;
   fn pin(&self);
   fn unpin(&self);
@@ -1027,12 +1045,20 @@ impl<C: InnerCell + Any> InnerCell_ for C {
     InnerCell::live(self)
   }
 
+  fn get_ref(&self) -> u32 {
+    InnerCell::get_ref(self)
+  }
+
   fn retain(&self) {
     InnerCell::retain(self)
   }
 
   fn release(&self) {
     InnerCell::release(self)
+  }
+
+  fn get_pin(&self) -> u16 {
+    InnerCell::get_pin(self)
   }
 
   fn pinned(&self) -> bool {
