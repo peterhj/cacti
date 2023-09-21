@@ -295,7 +295,7 @@ pub struct SpineFlowEnv {
 }
 
 impl SpineFlowEnv {
-  pub fn reset(&mut self) {
+  pub fn _reset(&mut self) {
     self.live_cur = 0;
     self.liveness.clear();
     self.liveinit.clear();
@@ -338,7 +338,7 @@ pub struct SpineEnv {
 }
 
 impl SpineEnv {
-  pub fn reset(&mut self, ctr: Counter) {
+  pub fn _reset(&mut self, ctr: Counter) {
     if cfg_debug() { println!("DEBUG: SpineEnv::reset: ctr={:?}", ctr); }
     self.ctr = ctr;
     // FIXME: during ctx reset, need to manually clear gc'd state.
@@ -348,7 +348,7 @@ impl SpineEnv {
     self.arg.clear();
     //self.out.clear();
     self.update.clear();
-    self.flow.reset();
+    self.flow._reset();
   }
 
   pub fn _deref(&self, query: CellPtr) -> CellPtr {
@@ -1202,7 +1202,7 @@ impl Spine {
     self.curp.set(0);
     self.retp.set(u32::max_value());
     self.log.borrow_mut().clear();
-    self.cur_env.borrow_mut().reset(self.ctr.get());
+    self.cur_env.borrow_mut()._reset(self.ctr.get());
     if cfg_debug() {
     let retp = if self.retp.get() == u32::max_value() { None } else { Some(self.retp.get()) };
     println!("DEBUG: Spine::_reset: post: ctr={:?} ctlp={} hltp={} curp={} retp={:?}",
@@ -1469,7 +1469,7 @@ impl Spine {
           next_log.push(SpineEntry::Unlive(x));
         }
       }
-      //cur_env.flow.reset();
+      //cur_env.flow._reset();
       let next_curp: u32 = next_log.len().try_into().unwrap();
       // FIXME: we can save rather than drop the prev log.
       swap(&mut *prev_log, &mut next_log);

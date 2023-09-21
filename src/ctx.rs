@@ -214,10 +214,10 @@ impl Ctx {
       println!("INFO:   Ctx::reset: gc:   next {} cells", next_celfront.len());
     }
     swap(&mut *self.ctr.celfront.borrow_mut(), &mut next_celfront);
-    let rst = self.spine._reset();
     env._reset();
-    //self.ctr.reset.set(rst);
-    rst
+    drop(env);
+    self.thunkenv.borrow_mut()._reset();
+    self.spine._reset()
   }
 }
 
@@ -1018,10 +1018,9 @@ pub struct CtxThunkEnv {
 }
 
 impl CtxThunkEnv {
-  /*pub fn reset(&mut self) {
-    // FIXME FIXME
-    //self.update.clear();
-  }*/
+  pub fn _reset(&mut self) {
+    self.update.clear();
+  }
 
   pub fn update(&mut self, yroot: CellPtr, y: CellPtr, yclk: Clock, tp: ThunkPtr, arg: Vec<(CellPtr, Clock)>, param: Vec<ScalarVal_>) {
     match self.thunktab.get(&tp) {
