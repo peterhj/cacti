@@ -677,12 +677,10 @@ impl NvGpuPCtx {
     println!("INFO:   NvGpuPCtx::_dump_usage: mem pool: vmem used={}",
         self.mem_pool.front_cursor.get()
           - self.mem_pool.free_size.get()
-          + self.mem_pool.back_cursor.get(),
     );
-    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:     front={} free={} back={} total={}",
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:     front={} free={} total={}",
         self.mem_pool.front_cursor.get(),
         self.mem_pool.free_size.get(),
-        self.mem_pool.back_cursor.get(),
         self.mem_pool.reserve_sz,
     );
   }
@@ -1162,7 +1160,7 @@ impl NvGpuInnerCell {
     }
   }
 
-  pub fn back(&self) -> bool {
+  /*pub fn back(&self) -> bool {
     (self.flag.get() & 2) != 0
   }
 
@@ -1172,7 +1170,7 @@ impl NvGpuInnerCell {
     } else {
       self.flag.set(self.flag.get() & !2);
     }
-  }
+  }*/
 }
 
 impl InnerCell for NvGpuInnerCell {
@@ -1340,8 +1338,6 @@ pub struct NvGpuMemPool {
   pub extra_pad:    usize,
   pub front_cursor: Cell<usize>,
   pub free_size:    Cell<usize>,
-  pub back_cursor:  Cell<usize>,
-  pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
   pub last_oom:     Cell<Option<(NvGpuMemPoolOom, usize)>>,
   pub soft_oom_reset: Cell<Counter>,
@@ -1433,7 +1429,6 @@ impl NvGpuMemPool {
     let extra_base = reserve_base + (front_pad + front_sz + boundary_pad) as u64;
     assert!(front_sz >= (1 << 26));
     if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::new: front sz={}", front_sz); }
-    if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::new: back sz={}", extra_sz); }
     NvGpuMemPool{
       dev,
       reserve_base,
@@ -1447,8 +1442,6 @@ impl NvGpuMemPool {
       extra_pad,
       front_cursor: Cell::new(0),
       free_size:    Cell::new(0),
-      back_cursor:  Cell::new(0),
-      back_alloc:   Cell::new(false),
       alloc_pin:    Cell::new(false),
       last_oom:     Cell::new(None),
       soft_oom_reset: Cell::new(Counter::default()),
@@ -1467,22 +1460,6 @@ impl NvGpuMemPool {
 
   pub fn front_dptr(&self) -> u64 {
     self.front_base + self.front_cursor.get() as u64
-  }
-
-  /*pub fn front_offset(&self) -> usize {
-    self.front_cursor.get()
-  }
-
-  pub fn back_offset(&self) -> usize {
-    self.back_cursor.get()
-  }
-
-  pub fn set_back_offset(&self, off: usize) {
-    self.back_cursor.set(off);
-  }*/
-
-  pub fn set_back_alloc(&self, flag: bool) {
-    self.back_alloc.set(flag);
   }
 
   pub fn set_alloc_pin(&self, flag: bool) {
@@ -1540,31 +1517,14 @@ impl NvGpuMemPool {
   pub fn try_pre_alloc_with_tag(&self, query_sz: usize, query_tag: u32, unify: &mut TagUnifier) -> NvGpuMemPoolReq {
     if let Some(&tag) = self.front_tag.borrow().as_ref() {
       if unify.find(query_tag) == unify.find(tag) {
-        return self._try_front_pre_alloc(query_sz);
+        //return self._try_front_pre_alloc(query_sz);
       }
     }
-    self.try_pre_alloc(query_sz)
+    self._try_front_pre_alloc(query_sz)
   }
 
   pub fn try_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
-    if self.back_alloc.get() {
-      self._try_back_pre_alloc(query_sz)
-    } else {
-      self._try_front_pre_alloc(query_sz)
-    }
-  }
-
-  pub fn _try_back_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
-    let req_sz = ((query_sz + ALLOC_ALIGN - 1) / ALLOC_ALIGN) * ALLOC_ALIGN;
-    assert!(query_sz <= req_sz);
-    let offset = self.back_cursor.get();
-    let next_offset = offset + req_sz;
-    if next_offset + self.front_cursor.get() > self.front_sz {
-      let oom = NvGpuMemPoolOom::Back;
-      self.last_oom.set(Some((oom, query_sz)));
-      return NvGpuMemPoolReq::Oom(oom);
-    }
-    NvGpuMemPoolReq::Back{offset, next_offset}
+    self._try_front_pre_alloc(query_sz)
   }
 
   pub fn _try_front_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
@@ -1583,7 +1543,7 @@ impl NvGpuMemPool {
     }
     let offset = self.front_cursor.get();
     let next_offset = offset + req_sz;
-    if next_offset + self.back_cursor.get() > self.front_sz {
+    if next_offset > self.front_sz {
       let oom = NvGpuMemPoolOom::Front;
       self.last_oom.set(Some((oom, query_sz)));
       return NvGpuMemPoolReq::Oom(oom);
@@ -1599,57 +1559,9 @@ impl NvGpuMemPool {
         self._front_alloc(addr, offset, req_sz, next_offset)
       }
       NvGpuMemPoolReq::Back{offset, next_offset} => {
-        let req_sz = next_offset - offset;
-        self._back_alloc(addr, offset, req_sz, next_offset)
+        unimplemented!();
       }
     }
-  }
-
-  pub fn _back_alloc(&self, addr: PAddr, backoffset: usize, req_sz: usize, next_backoffset: usize) -> Rc<NvGpuInnerCell> {
-    let offset = self.front_sz - next_backoffset;
-    /*let next_offset = self.front_sz - backoffset;*/
-    let reg = Region{off: offset, sz: req_sz};
-    let a = NvGpuAlloc{reg};
-    self.alloc_map.borrow_mut().insert(addr, a);
-    self.back_cursor.set(next_backoffset);
-    let dptr = self.front_base + offset as u64;
-    let cel = Rc::new(NvGpuInnerCell{
-      //addr,
-      root: Cell::new(CellPtr::nil()),
-      refc: Cell::new(1),
-      pinc: Cell::new(0),
-      flag: Cell::new(0),
-      tag:  Cell::new(0),
-      dev:  self.dev,
-      dptr: Cell::new(dptr),
-      sz:   req_sz,
-    });
-    cel.set_back(true);
-    if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::_back_alloc: addr={:?} dptr=0x{:016x} size={} off={}", addr, dptr, req_sz, offset); }
-    let mut size_index = self.size_index.borrow_mut();
-    match size_index.get_mut(&req_sz) {
-      None => {
-        let mut addr_set = BTreeSet::new();
-        addr_set.insert(addr);
-        //println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
-        size_index.insert(req_sz, addr_set);
-      }
-      Some(addr_set) => {
-        addr_set.insert(addr);
-        //println!("DEBUG: NvGpuMemPool::_back_alloc:   sz set={:?}", &addr_set);
-      }
-    }
-    assert!(self.alloc_index.borrow_mut().insert(Region{off: offset, sz: req_sz}, addr).is_none());
-    assert!(self.cel_map.borrow_mut().insert(addr, cel.clone()).is_none());
-    if _cfg_debug_mem_pool() {
-      println!("DEBUG:  NvGpuMemPool::_back_alloc: addr={:?} off=0x{:016x} sz={}",
-          addr, offset, req_sz);
-      println!("DEBUG:  NvGpuMemPool::_back_alloc:   front prefix=0x{:016x}", self.front_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_back_alloc:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_back_alloc:   back  suffix=0x{:016x}", self.back_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_back_alloc:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
-    }
-    cel
   }
 
   pub fn _front_alloc(&self, addr: PAddr, offset: usize, req_sz: usize, next_offset: usize) -> Rc<NvGpuInnerCell> {
@@ -1723,122 +1635,15 @@ impl NvGpuMemPool {
       println!("DEBUG:  NvGpuMemPool::_front_alloc: addr={:?} off=0x{:016x} sz={}",
           addr, offset, req_sz);
       println!("DEBUG:  NvGpuMemPool::_front_alloc:   front prefix=0x{:016x}", self.front_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_front_alloc:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_front_alloc:   back  suffix=0x{:016x}", self.back_cursor.get());
       println!("DEBUG:  NvGpuMemPool::_front_alloc:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
     }
     cel
   }
 
-  /*//pub fn find_front_lru_match(&self, query_sz: usize) -> Option<GpuInnerRef> {}
-  //pub fn find_front_lru_match(&self, query_sz: usize) -> Option<CellPtr> {}
-  pub fn find_front_lru_match(&self, query_sz: usize) -> Option<PAddr> {
-    let mut mat = None;
-    for (&r, desc) in self.alloc_map.borrow().iter() {
-      if query_sz == desc.sz {
-        return Some(r);
-      }
-      if query_sz <= desc.sz {
-        match mat {
-          None => {
-            mat = Some((r, desc.sz));
-          }
-          Some((_, prev_sz)) => if desc.sz < prev_sz {
-            mat = Some((r, desc.sz));
-          }
-        }
-      }
-    }
-    mat.map(|(r, _)| r)
-  }*/
-
-  /*pub fn _try_front_relocate(&self, addr: PAddr, new_dptr: u64) -> Option<u64> {
-    let old_reg = match self.alloc_map.borrow().get(&addr) {
-      None => return None,
-      Some(a) => a.reg
-    };
-    assert_eq!(self.alloc_index.borrow_mut().remove(&old_reg), Some(addr));
-    let new_off = (new_dptr - self.front_base) as usize;
-    let new_reg = Region{off: new_off, sz: old_reg.sz};
-    if !(self.front_cursor.get() == new_reg.off) {
-      println!("DEBUG: NvGpuMemPool::_try_front_relocate: front cursor=0x{:016x}", self.front_cursor.get());
-      println!("DEBUG: NvGpuMemPool::_try_front_relocate: old reg off =0x{:016x}", old_reg.off);
-      println!("DEBUG: NvGpuMemPool::_try_front_relocate: old reg sz  =0x{:016x}", old_reg.sz);
-      println!("DEBUG: NvGpuMemPool::_try_front_relocate: new reg off =0x{:016x}", new_reg.off);
-      println!("DEBUG: NvGpuMemPool::_try_front_relocate: new reg sz  =0x{:016x}", new_reg.sz);
-    }
-    assert_eq!(self.front_cursor.get(), new_reg.off);
-    /*assert_eq!(new_reg.off <= self.front_cursor.get());*/
-    //assert!(self.alloc_index.borrow_mut().insert(new_reg, addr).is_none());
-    if let Some(addr2) = self.alloc_index.borrow_mut().insert(new_reg, addr) {
-      println!("DEBUG:  NvGpuMemPool::_try_front_relocate: addr={:?} new dptr=0x{:016x} old reg={:?} new reg={:?} addr2={:?}",
-          addr, new_dptr, old_reg, new_reg, addr2);
-      panic!("bug");
-    }
-    match self.cel_map.borrow().get(&addr) {
-      None => panic!("bug"),
-      Some(icel) => {
-        assert!(icel.back());
-        assert!(!icel.front());
-        icel.set_back(false);
-        icel.set_front(true);
-        icel.dptr.set(new_dptr);
-      }
-    }
-    match self.alloc_map.borrow_mut().get_mut(&addr) {
-      None => panic!("bug"),
-      Some(a) => {
-        a.reg.off = new_reg.off;
-      }
-    }
-    // FIXME: note that we do not check the back cursor here;
-    // currently we bulk reset it in the thunk.
-    /*self.front_cursor.set(min(self.front_cursor.get(), new_reg.off + new_reg.sz));*/
-    self.front_cursor.set(new_reg.off + new_reg.sz);
-    let old_dptr = self.front_base + old_reg.off as u64;
-    Some(old_dptr)
-  }
-
-  pub fn front_relocate(&self, src: PAddr, dst_dptr: u64, stream: &CudartStream) {
-    /*let (src_dptr, src_sz) = match self.lookup_reg(src) {
-      Some(NvGpuInnerReg::VMem{dptr, size}) => (dptr, size),
-      _ => panic!("bug")
-    };*/
-    let (src_dptr, src_sz) = match self.cel_map.borrow().get(&src) {
-      None => panic!("bug"),
-      Some(icel) => {
-        (icel.dptr.get(), icel.sz)
-      }
-    };
-    assert_eq!(self._try_front_relocate(src, dst_dptr), Some(src_dptr));
-    if dst_dptr == src_dptr {
-    } else if (dst_dptr + src_sz as u64 <= src_dptr) ||
-              (src_dptr + src_sz as u64 <= dst_dptr)
-    {
-      stream.sync().unwrap();
-      cuda_memcpy_async(dst_dptr, src_dptr, src_sz, stream).unwrap();
-      stream.sync().unwrap();
-    } else {
-      // FIXME FIXME: overlapping copy.
-      unimplemented!();
-    }
-    if _cfg_debug_mem_pool() {
-      println!("DEBUG:  NvGpuMemPool::front_relocate: addr={:?} new dst dptr=0x{:016x} old src dptr=0x{:016x} sz={}",
-          src, dst_dptr, src_dptr, src_sz);
-    }
-  }*/
-
   pub fn is_front(&self, addr: PAddr) -> bool {
     match self.cel_map.borrow().get(&addr) {
       None => panic!("bug"),
       Some(icel) => icel.front()
-    }
-  }
-
-  pub fn is_back(&self, addr: PAddr) -> bool {
-    match self.cel_map.borrow().get(&addr) {
-      None => panic!("bug"),
-      Some(icel) => icel.back()
     }
   }
 
@@ -1894,7 +1699,6 @@ impl NvGpuMemPool {
     if _cfg_debug_mem_pool() {
       println!("DEBUG:  NvGpuMemPool::_yeet: addr={:?}", addr);
       println!("DEBUG:  NvGpuMemPool::_yeet:   old front prefix=0x{:016x}", self.front_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_yeet:   old back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
     }
     let mut front_prefix = self.front_cursor.get();
     let old_alloc = match self.alloc_map.borrow_mut().remove(&addr) {
@@ -1910,8 +1714,6 @@ impl NvGpuMemPool {
       println!("DEBUG:  NvGpuMemPool::_yeet: reg.off=0x{:016x} sz={}", old_reg.off, old_reg.sz);
       println!("DEBUG:  NvGpuMemPool::_yeet: reg.end=0x{:016x}", old_reg.off + old_reg.sz);
       println!("DEBUG:  NvGpuMemPool::_yeet: front p=0x{:016x}", front_prefix);
-      let back_suffix = self.back_cursor.get();
-      println!("DEBUG:  NvGpuMemPool::_yeet: back  p=0x{:016x} suf=0x{:016x}", self.front_sz - back_suffix, back_suffix);
       println!("DEBUG:  NvGpuMemPool::_yeet: frontsz={}", self.front_sz);
       panic!("bug");
     } else if old_reg.off + old_reg.sz == front_prefix {
@@ -1980,7 +1782,6 @@ impl NvGpuMemPool {
     if _cfg_debug_mem_pool() {
       println!("DEBUG:  NvGpuMemPool::_yeet: success");
       println!("DEBUG:  NvGpuMemPool::_yeet:   new front prefix=0x{:016x}", self.front_cursor.get());
-      println!("DEBUG:  NvGpuMemPool::_yeet:   new back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
     }
     Some(icel)
   }
@@ -2158,15 +1959,12 @@ impl NvGpuMemPool {
       }
       let celfront = ctx.ctr.celfront.borrow();
       if _cfg_debug_yeet() {
-        println!("DEBUG:  NvGpuMemPool::_try_soft_oom: old usage: front={} free={} back={} total={}",
+        println!("DEBUG:  NvGpuMemPool::_try_soft_oom: old usage: front={} free={} total={}",
             self.front_cursor.get(),
             self.free_size.get(),
-            self.back_cursor.get(),
             self.front_sz,
         );
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
-        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-        println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
         println!("DEBUG:  NvGpuMemPool::_try_soft_oom: query sz={} req sz={} search start={} end={}",
             query_sz, req_sz, self.soft_oom_scan.get(), celfront.len());
@@ -2238,16 +2036,13 @@ impl NvGpuMemPool {
                       if !self.try_pre_alloc(query_sz).is_oom() {
                         if _cfg_debug_yeet() {
                           println!("DEBUG:  NvGpuMemPool::_try_soft_oom: success 1");
-                          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
+                          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} total={}",
                               self.front_cursor.get(),
                               self.free_size.get(),
-                              self.back_cursor.get(),
                               self.front_sz,
                           );
                           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
                           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
-                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-                          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
                           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                         }
                         self.soft_oom_scan.set(p + 1);
@@ -2276,16 +2071,13 @@ impl NvGpuMemPool {
                         if !self.try_pre_alloc(query_sz).is_oom() {
                           if _cfg_debug_yeet() {
                             println!("DEBUG:  NvGpuMemPool::_try_soft_oom: success 2");
-                            println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
+                            println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} total={}",
                                 self.front_cursor.get(),
                                 self.free_size.get(),
-                                self.back_cursor.get(),
                                 self.front_sz,
                             );
                             println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
                             println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
-                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-                            println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
                             println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
                           }
                           self.soft_oom_scan.set(p + 1);
@@ -2306,16 +2098,13 @@ impl NvGpuMemPool {
       if retry && yeet_ct == 0 {
         if _cfg_debug_yeet() {
           println!("DEBUG:  NvGpuMemPool::_try_soft_oom: failure 1");
-          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} back={} total={}",
+          println!("DEBUG:  NvGpuMemPool::_try_soft_oom: new usage: front={} free={} total={}",
               self.front_cursor.get(),
               self.free_size.get(),
-              self.back_cursor.get(),
               self.front_sz,
           );
           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front prefix=0x{:016x}", self.front_cursor.get());
           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   front free  ={}", self.free_size.get());
-          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  prefix=0x{:016x}", self.front_sz - self.back_cursor.get());
-          println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   back  suffix=0x{:016x}", self.back_cursor.get());
           println!("DEBUG:  NvGpuMemPool::__try_soft_oom:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
         }
         self.soft_oom_scan.set(celfront.len());
