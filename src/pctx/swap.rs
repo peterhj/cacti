@@ -241,6 +241,18 @@ impl SwapPCtx {
     Ok(cel)
   }
 
+  pub fn live(&self, addr: PAddr) -> bool {
+    match self.page_tab.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if InnerCell::live(&**icel) {
+          return true;
+        }
+      }
+    }
+    false
+  }
+
   pub fn retain(&self, addr: PAddr) {
     match self.page_tab.borrow().get(&addr) {
       None => {}

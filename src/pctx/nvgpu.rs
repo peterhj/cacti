@@ -413,6 +413,16 @@ impl NvGpuPCtx {
     cuda_memcpy_h2d_async(dst_dptr, src_ptr, sz, &self.compute).unwrap();
   }
 
+  pub fn live(&self, addr: PAddr) -> bool {
+    if self.page_map.live(addr) {
+      return true;
+    }
+    if self.mem_pool.live(addr) {
+      return true;
+    }
+    false
+  }
+
   pub fn retain(&self, addr: PAddr) {
     self.page_map.retain(addr);
     self.mem_pool.retain(addr);
@@ -981,6 +991,18 @@ impl NvGpuPageMap {
     self.usage.fetch_add(sz);
     self.pg_usage.fetch_add((sz + 0x1000 - 1) / 0x1000 * 0x1000);
     Ok(cel)
+  }
+
+  pub fn live(&self, addr: PAddr) -> bool {
+    match self.page_tab.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if InnerCell::live(&**icel) {
+          return true;
+        }
+      }
+    }
+    false
   }
 
   pub fn retain(&self, addr: PAddr) {
@@ -1820,6 +1842,18 @@ impl NvGpuMemPool {
     }
   }
 
+  pub fn live(&self, addr: PAddr) -> bool {
+    match self.cel_map.borrow().get(&addr) {
+      None => {}
+      Some(icel) => {
+        if InnerCell::live(&**icel) {
+          return true;
+        }
+      }
+    }
+    false
+  }
+
   pub fn retain(&self, addr: PAddr) {
     match self.cel_map.borrow().get(&addr) {
       None => {}
@@ -2040,19 +2074,62 @@ impl NvGpuMemPool {
               }*/
               let mut cel_ = e.cel_.borrow_mut();
               match &mut *cel_ {
-                &mut Cell_::Phy(.., ref mut pcel) => {
+                &mut Cell_::Phy(ref state, .., ref mut pcel) => {
                   if pcel.ogty.is_top() {
                     break 'inner;
                   }
-                  let mut keys = Vec::new();
-                  for (key, _) in pcel.replicas.iter() {
+                  if e.stablect >= 1 {
+                    let cur_clk = state.borrow().clk;
+                    match pcel.find_any_other(cur_clk, Locus::VMem, PMach::NvGpu) {
+                      None => {}
+                      Some((o_loc, _, _)) => {
+                        // FIXME: other loci.
+                        assert_eq!(o_loc, Locus::Mem);
+                        pcel.read_loc(root, cur_clk, e.root_ty, Locus::Mem);
+                        pcel.yeet(Locus::VMem, PMach::NvGpu);
+                        yeeted = true;
+                      }
+                    }
+                  } else {
+                    let mut keys = Vec::new();
+                    for (key, rep) in pcel.replicas.iter() {
+                      let &(loc, pm) = key.as_ref();
+                      keys.push((loc, pm));
+                    }
+                    for (loc, pm) in keys.into_iter() {
+                      pcel.yeet(loc, pm);
+                    }
+                    yeeted = true;
+                  }
+                  /*let mut keys = Vec::new();
+                  let mut exgpu_keys = Vec::new();
+                  for (key, rep) in pcel.replicas.iter() {
                     let &(loc, pm) = key.as_ref();
-                    keys.push((loc, pm));
+                    if loc == Locus::VMem && pm == PMach::NvGpu {
+                      keys.push((loc, pm));
+                    } else {
+                      exgpu_keys.push((loc, pm, rep.addr.get()));
+                    }
+                  }
+                  if e.stablect >= 1 {
+                    if exgpu_keys.is_empty() {
+                      break 'inner;
+                    }
+                    for &(loc, pm, addr) in exgpu_keys.iter() {
+                      let live = TL_PCTX.with(|pctx| { pctx.pinned(addr) || pctx.live(addr) });
+                      if !live {
+                        break 'inner;
+                      }
+                    }
+                  } else {
+                    for (loc, pm, _) in exgpu_keys.into_iter() {
+                      pcel.yeet(loc, pm);
+                    }
                   }
                   for (loc, pm) in keys.into_iter() {
                     pcel.yeet(loc, pm);
                   }
-                  yeeted = true;
+                  yeeted = true;*/
                 }
                 _ => {}
               }
@@ -2385,10 +2462,12 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
         NvGpuMemPoolReq::Oom(_) => {
           if retry {
             println!("ERROR:  tl_pctx_nvgpu_alloc_hook: unrecoverable out-of-memory failure (device memory)");
+            println!("ERROR:  tl_pctx_nvgpu_alloc_hook:   sz={} req={:?} tag={:?}", sz, req, tag);
             panic!();
           }
           if gpu.mem_pool._try_soft_oom(sz).is_none() {
             println!("ERROR:  tl_pctx_nvgpu_alloc_hook: out-of-memory, soft oom failure (device memory)");
+            println!("ERROR:  tl_pctx_nvgpu_alloc_hook:   sz={} req={:?} tag={:?}", sz, req, tag);
             panic!();
           }
           retry = true;

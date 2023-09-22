@@ -411,6 +411,20 @@ impl PCtx {
     }
   }
 
+  pub fn live(&self, addr: PAddr) -> bool {
+    if self.swap.live(addr) {
+      return true;
+    }
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      if gpu.live(addr) {
+        return true;
+      }
+    }
+    // TODO
+    false
+  }
+
   pub fn get_ref(&self, addr: PAddr) -> Option<u32> {
     match self.lookup(addr) {
       Some((_, _, icel)) => Some(icel.get_ref()),
