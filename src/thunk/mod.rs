@@ -2036,7 +2036,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         let mut consts = Vec::new();
         let pstart = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
-          gpu.mem_pool.borrow().set_back_alloc(true);
+          //gpu.mem_pool.borrow().set_back_alloc(true);
           gpu.mem_pool.borrow().set_alloc_pin(true);
           pctx.ctr.next_addr()
         });
@@ -2056,7 +2056,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         }
         let pfin = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
-          gpu.mem_pool.borrow().set_back_alloc(false);
+          //gpu.mem_pool.borrow().set_back_alloc(false);
           gpu.mem_pool.borrow().set_alloc_pin(false);
           pctx.ctr.peek_addr()
         });
@@ -3481,7 +3481,8 @@ impl FutharkThunkImpl<CudaBackend> {
       } else {
         pctx.tagunify.borrow_mut().reset();
       }
-      gpu.mem_pool.set_back_alloc(true);
+      //gpu.mem_pool.set_back_alloc(true);
+      //gpu.mem_pool.borrow().set_alloc_pin(true);
       //assert!(gpu.mem_pool.tmp_pin_list.borrow().is_empty());
       //assert!(gpu.mem_pool.tmp_freelist.borrow().is_empty());
       gpu.mem_pool.tmp_pin_list.borrow_mut().clear();
@@ -3522,7 +3523,8 @@ impl FutharkThunkImpl<CudaBackend> {
         swap(&mut *pctx.tagunify.borrow_mut(), unify);
         gpu.mem_pool.set_front_tag(None);
       }
-      gpu.mem_pool.set_back_alloc(false);
+      //gpu.mem_pool.set_back_alloc(false);
+      //gpu.mem_pool.borrow().set_alloc_pin(false);
       if !gpu.mem_pool.tmp_freelist.borrow().is_empty() {
         if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: free={:?}", &*gpu.mem_pool.tmp_freelist.borrow()); }
       }
@@ -3986,7 +3988,7 @@ impl FutharkThunkImpl<CudaBackend> {
               assert!(p != oaddr);
               let icel = gpu.mem_pool.release(p).unwrap();
               assert!(InnerCell::root(&*icel).is_none());
-              assert!(icel.back());
+              //assert!(icel.back());
             }
             if _cfg_debug_mem_pool() {
               println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: addr={:?} case={:?}", oaddr, ocase);
@@ -3995,6 +3997,7 @@ impl FutharkThunkImpl<CudaBackend> {
                   gpu.mem_pool.front_sz - gpu.mem_pool.back_cursor.get());
             }
             // FIXME: ensure that oaddr is no longer coincident w/ back alloc.
+            assert_eq!(gpu.mem_pool.back_cursor.get(), pre_backoffset);
             gpu.mem_pool.back_cursor.set(pre_backoffset);
             if _cfg_debug_mem_pool() {
               println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter:   new back  prefix=0x{:016x}",
