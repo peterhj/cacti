@@ -3470,7 +3470,7 @@ impl FutharkThunkImpl<CudaBackend> {
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   reset elapsed: {:.09} s", tmp_t1 - t0);
     }
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: enter kernel..."); }
-    let (pre_front_dptr, pre_backoffset) = TL_PCTX.with(|pctx| {
+    let pre_front_dptr = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       //gpu.compute.sync().unwrap();
       if let Some(&mut (tag, ref mut unify)) = out0_tag.as_mut() {
@@ -3487,7 +3487,7 @@ impl FutharkThunkImpl<CudaBackend> {
       //assert!(gpu.mem_pool.tmp_freelist.borrow().is_empty());
       gpu.mem_pool.tmp_pin_list.borrow_mut().clear();
       gpu.mem_pool.tmp_freelist.borrow_mut().clear();
-      (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_cursor.get())
+      gpu.mem_pool.front_dptr()
     });
     /*obj.unify_abi(self.abi).unwrap();*/
     let eabi = genabi.to_eabi(FutAbiSpace::Device);
@@ -3514,7 +3514,7 @@ impl FutharkThunkImpl<CudaBackend> {
       }
     }
     obj.release();
-    let (post_front_dptr, post_backoffset) = TL_PCTX.with(|pctx| {
+    let post_front_dptr = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
       gpu.compute.sync().unwrap();
       if let Some(&mut (_, ref mut unify)) = out0_tag.as_mut() {
@@ -3528,7 +3528,7 @@ impl FutharkThunkImpl<CudaBackend> {
       if !gpu.mem_pool.tmp_freelist.borrow().is_empty() {
         if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: free={:?}", &*gpu.mem_pool.tmp_freelist.borrow()); }
       }
-      (gpu.mem_pool.front_dptr(), gpu.mem_pool.back_cursor.get())
+      gpu.mem_pool.front_dptr()
     });
     let t1 = Stopwatch::tl_stamp();
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
@@ -3879,96 +3879,10 @@ impl FutharkThunkImpl<CudaBackend> {
                 post_front_dptr);
             println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: postfront p   =0x{:016x}",
                 post_front_dptr - gpu.mem_pool.front_base);
-            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: pre back p    =0x{:016x}",
-                gpu.mem_pool.front_sz - pre_backoffset);
-            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: pre backoffset=0x{:016x}",
-                pre_backoffset);
-            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: postback p    =0x{:016x}",
-                gpu.mem_pool.front_sz - post_backoffset);
-            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: postbackoffset=0x{:016x}",
-                post_backoffset);
             }
-            /*if pre_front_dptr == post_front_dptr &&
-               out_dptr > pre_front_dptr*/
             match ocase {
               OutCase::View => {}
               OutCase::Phy | OutCase::Swap => {
-            if gpu.mem_pool.is_back(oaddr) {
-              let o_query_sz: usize = out_ty_[0].packed_span_bytes().try_into().unwrap();
-              {
-                let req = gpu.mem_pool._try_front_pre_alloc(o_query_sz);
-                match req {
-                  NvGpuMemPoolReq::Front{..} => {
-                    /*let tmp = pctx.ctr.fresh_addr();
-                    gpu.mem_pool.alloc(tmp, req);
-                    tmp*/
-                  }
-                  NvGpuMemPoolReq::Oom(_) => {
-                    match gpu.mem_pool._try_soft_oom(o_query_sz) {
-                      None => {
-                        println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: oom");
-                        panic!();
-                      }
-                      Some(_) => {
-                        let req = gpu.mem_pool._try_front_pre_alloc(o_query_sz);
-                        match req {
-                          NvGpuMemPoolReq::Front{..} => {
-                            /*let tmp = pctx.ctr.fresh_addr();
-                            gpu.mem_pool.alloc(tmp, req);
-                            tmp*/
-                          }
-                          _ => panic!("bug")
-                        }
-                      }
-                    }
-                  }
-                  _ => panic!("bug")
-                };
-                //gpu.mem_pool.release(tmp);
-              }
-              let req = gpu.mem_pool._try_front_pre_alloc(o_query_sz);
-              match req {
-                NvGpuMemPoolReq::Front{offset, next_offset} => {
-                  // NB: safe to unpin and release oaddr, as its region
-                  // is protected by the back alloc cursor.
-                  let req_sz = next_offset - offset;
-                  assert!(gpu.mem_pool.pinned(oaddr));
-                  assert!(gpu.mem_pool.unpin(oaddr).is_none());
-                  let oicel = gpu.mem_pool.release(oaddr).unwrap();
-                  assert_eq!(out_dptr, oicel.dptr.get());
-                  let nicel = gpu.mem_pool._front_alloc(oaddr, offset, req_sz, next_offset);
-                  let new_dptr = nicel.dptr.get();
-                  if (new_dptr + req_sz as u64 <= out_dptr) ||
-                     (out_dptr + req_sz as u64 <= new_dptr)
-                  {
-                    gpu.hard_copy_raw_vmem_to_vmem(new_dptr, out_dptr, o_query_sz);
-                  } else {
-                    // FIXME: overlapping copy.
-                    unimplemented!();
-                  }
-                  assert_eq!(oicel.root(), Some(oroot));
-                  assert_eq!(nicel.root(), None);
-                  assert!(!nicel.pinned());
-                  oicel.set_root(None);
-                  nicel.set_root(Some(oroot));
-                  nicel.pin();
-                  if _cfg_debug_mode(mode) || _cfg_debug_mem_pool() {
-                  println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: relocate src=0x{:016x} dst=0x{:016x}",
-                      out_dptr, new_dptr);
-                  }
-                }
-                _ => panic!("bug")
-              };
-              // TODO
-              /*let new_offset = gpu.mem_pool.front_cursor.get();
-              let new_dptr = gpu.mem_pool.front_base + new_offset as u64;
-              assert!(new_dptr <= pre_front_dptr);
-              gpu.mem_pool.front_relocate(oaddr, new_dptr, &gpu.compute);
-              if _cfg_debug_mode(mode) || _cfg_debug_mem_pool() {
-              println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: relocate src=0x{:016x} dst=0x{:016x}",
-                  out_dptr, new_dptr);
-              }*/
-            }
               }
               _ => panic!("bug")
             }
@@ -3988,20 +3902,9 @@ impl FutharkThunkImpl<CudaBackend> {
               assert!(p != oaddr);
               let icel = gpu.mem_pool.release(p).unwrap();
               assert!(InnerCell::root(&*icel).is_none());
-              //assert!(icel.back());
             }
             if _cfg_debug_mem_pool() {
               println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: addr={:?} case={:?}", oaddr, ocase);
-              println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: reset back alloc");
-              println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter:   old back  prefix=0x{:016x}",
-                  gpu.mem_pool.front_sz - gpu.mem_pool.back_cursor.get());
-            }
-            // FIXME: ensure that oaddr is no longer coincident w/ back alloc.
-            assert_eq!(gpu.mem_pool.back_cursor.get(), pre_backoffset);
-            gpu.mem_pool.back_cursor.set(pre_backoffset);
-            if _cfg_debug_mem_pool() {
-              println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter:   new back  prefix=0x{:016x}",
-                  gpu.mem_pool.front_sz - gpu.mem_pool.back_cursor.get());
             }
           }
           /*if !f && mode == ThunkMode::Accumulate {
