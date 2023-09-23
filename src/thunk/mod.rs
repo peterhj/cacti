@@ -1835,7 +1835,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
 
   fn _build_object(ctr: &CtxCtr, /*env: &CtxEnv,*/ config: &FutConfig, name: Option<&str>, source: &[String], rst: Counter) -> Option<(FutObject<MulticoreBackend>, Vec<(PAddr, StableCell)>)> {
     // FIXME FIXME
-    let t0 = Stopwatch::tl_stamp();
+    /*let t0 = Stopwatch::tl_stamp();*/
     match config.build::<MulticoreBackend>(FutStage::Dylib, name, source) {
       Err(e) => {
         println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_build_object: build error: {:?}", e);
@@ -1843,7 +1843,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
       }
       Ok(None) => panic!("bug"),
       Ok(Some(mut obj)) => {
-        let t1 = Stopwatch::tl_stamp();
+        /*let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0); }
         if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
@@ -1856,14 +1856,14 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
           }
         });
         }
-        let t0 = t1;
+        let t0 = t1;*/
         // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
         let pstart = TL_PCTX.with(|pctx| {
           pctx.ctr.next_addr()
         });
         unsafe { FutharkThunkImpl::<MulticoreBackend>::_setup_object(&mut obj); }
-        let t1 = Stopwatch::tl_stamp();
+        /*let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0); }
         if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
@@ -1875,7 +1875,7 @@ impl FutharkThunkImpl_<MulticoreBackend> for FutharkThunkImpl<MulticoreBackend> 
             ctx.timing.f_setup.borrow_mut().push(t1 - t0);
           }
         });
-        }
+        }*/
         let pfin = TL_PCTX.with(|pctx| {
           pctx.ctr.peek_addr()
         });
@@ -2010,7 +2010,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       let dev = pctx.nvgpu.as_ref().unwrap().dev();
       cudart_set_cur_dev(dev).unwrap();
     });
-    let t0 = Stopwatch::tl_stamp();
+    /*let t0 = Stopwatch::tl_stamp();*/
     match config.build::<CudaBackend>(FutStage::Dylib, name, source) {
       Err(e) => {
         println!("WARNING: FutharkThunkImpl::<CudaBackend>::_build_object: build error: {:?}", e);
@@ -2018,7 +2018,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
       }
       Ok(None) => panic!("bug"),
       Ok(Some(mut obj)) => {
-        let t1 = Stopwatch::tl_stamp();
+        /*let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   build elapsed: {:.09} s", t1 - t0); }
         if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
@@ -2031,7 +2031,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           }
         });
         }
-        let t0 = t1;
+        let t0 = t1;*/
         // NB: futhark object ctx may create constants that need to be tracked.
         let mut consts = Vec::new();
         let pstart = TL_PCTX.with(|pctx| {
@@ -2041,7 +2041,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           pctx.ctr.next_addr()
         });
         unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
-        let t1 = Stopwatch::tl_stamp();
+        /*let t1 = Stopwatch::tl_stamp();
         if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object:   setup elapsed: {:.09} s", t1 - t0); }
         if cfg_debug_timing() {
         TL_CTX.with(|ctx| {
@@ -2053,7 +2053,7 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
             ctx.timing.f_setup.borrow_mut().push(t1 - t0);
           }
         });
-        }
+        }*/
         let pfin = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
           //gpu.mem_pool.borrow().set_back_alloc(false);
@@ -2440,44 +2440,38 @@ impl FutharkThunkImpl<MulticoreBackend> {
     let mut arg_ty_: Vec<CellType> = Vec::with_capacity(genabi.arityin as usize);
     let mut arg_arr: Vec<UnsafeCell<FutArray>> = Vec::with_capacity(genabi.arityin as usize);
     'for_k: for k in 0 .. lar {
-      let xroot = match ctx.env.borrow()._lookup_view(arg[k as usize].0) {
-        Err(_) => panic!("bug"),
-        Ok(e) => e.root()
-      };
-      for j in 0 .. k as usize {
-        match ctx.env.borrow()._lookup_view(arg[j].0) {
-          Err(_) => panic!("bug"),
-          Ok(e_j) => {
-            let xroot_j = e_j.root();
-            if xroot_j == xroot {
-              if _cfg_debug_mode(mode) {
-              println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xroot[{}]={:?} xroot[{}]={:?}",
-                  j, xroot_j, k, xroot);
-              }
-              match ctx.env.borrow()._lookup_view(arg[k as usize].0) {
-                Err(_) => panic!("bug"),
-                Ok(e) => {
-                  if &arg_ty_[j] == e.ty {
-                    arg_ty_.push(arg_ty_[j].clone());
-                    let a = arg_arr[j].get_mut().clone();
-                    arg_arr.push(a.into());
-                  } else {
-                    println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xty[{}]={:?} xty[{}]={:?}",
-                        j, &arg_ty_[j], k, e.ty);
-                    unimplemented!();
-                  }
-                  continue 'for_k;
-                }
-              }
-            }
-          }
-        }
-      }
       let env = ctx.env.borrow();
       let e = match env.pread_view(arg[k as usize].0, arg[k as usize].1, Locus::Mem) {
         Err(_) => panic!("bug"),
         Ok(e) => e
       };
+      let root = e.root();
+      for j in 0 .. k as usize {
+        match ctx.env.borrow()._lookup_view(arg[j].0) {
+          Err(_) => panic!("bug"),
+          Ok(e_j) => {
+            let root_j = e_j.root();
+            if root_j == root {
+              if _cfg_debug_mode(mode) {
+              println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: root[{}]={:?} root[{}]={:?}",
+                  j, root_j, k, root);
+              }
+              if &arg_ty_[j] == e.ty && arg[j].1 == arg[k as usize].1 {
+                arg_ty_.push(arg_ty_[j].clone());
+                let a = arg_arr[j].get_mut().clone();
+                arg_arr.push(a.into());
+              } else {
+                println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: root[{}]={:?} {:?} root[{}]={:?} {:?}",
+                    j, root_j, arg[j].1, k, root, arg[k as usize].1);
+                println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: aliased args: xty[{}]={:?} xty[{}]={:?}",
+                    j, &arg_ty_[j], k, e.ty);
+                unimplemented!();
+              }
+              continue 'for_k;
+            }
+          }
+        }
+      }
       let v_ty = match e.view().eval_contiguous(e.root_ty) {
         Err(_) => {
           println!("ERROR: FutharkThunkImpl::<MulticoreBackend>::_enter: arg is not a zero-copy (contiguous) view");
@@ -2550,7 +2544,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
     assert_eq!(genabi.arityout, rar);
     let mut out_ty_ = Vec::with_capacity(genabi.arityout as usize);
     let mut out_arr: Vec<UnsafeCell<FutArray>> = Vec::with_capacity(genabi.arityout as usize);
-    let mut out_org = None;
+    let mut out_org = Vec::with_capacity(genabi.arityout as usize);
     for k in 0 .. genabi.arityout {
       assert_eq!(k, 0);
       let ty_ = match mode {
@@ -2643,7 +2637,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                       let sz = e.ty.span_bytes() as usize;
                       assert!(UnsafeMemReg::_from_raw_parts(ptr, sz).is_subregion(&reg));
                       a.set_mem_parts(ptr, sz);
-                      out_org = Some((addr, ptr, sz));
+                      out_org.push(Some((addr, ptr, sz)));
                     }
                   }
                 }
@@ -2671,6 +2665,9 @@ impl FutharkThunkImpl<MulticoreBackend> {
       };
       out_ty_.push(ty_);
       out_arr.push(FutArray::null().into());
+      if out_org.len() < out_arr.len() {
+        out_org.push(None);
+      }
     }
     for (k, arr) in (&mut arg_arr[lar as usize ..]).iter_mut().enumerate() {
       if _cfg_debug_mode(mode) {
@@ -2740,12 +2737,12 @@ impl FutharkThunkImpl<MulticoreBackend> {
     /*TL_PCTX.with(|pctx| {
       // TODO: barrier?
     });*/
-    let t0 = Stopwatch::tl_stamp();
+    /*let t0 = Stopwatch::tl_stamp();*/
     obj.reset();
-    if _cfg_debug_mode(mode) {
+    /*if _cfg_debug_mode(mode) {
     let tmp_t1 = Stopwatch::tl_stamp();
     println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter:   reset elapsed: {:.09} s", tmp_t1 - t0);
-    }
+    }*/
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: enter kernel..."); }
     let eabi = genabi.to_eabi(FutAbiSpace::Default);
     let o_ret = obj.enter_kernel(eabi, &param_buf, &arg_arr, &out_arr);
@@ -2771,7 +2768,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
       }
     }
     obj.release();
-    let t1 = Stopwatch::tl_stamp();
+    /*let t1 = Stopwatch::tl_stamp();
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
     if cfg_debug_timing() {
     TL_CTX.with(|ctx| {
@@ -2783,7 +2780,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
         ctx.timing.futhark.borrow_mut().push(t1 - t0);
       }
     });
-    }
+    }*/
     drop(obj);
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: ret={:?}", o_ret); }
     //println!("DEBUG: FutharkThunkImpl::<MulticoreBackend>::_enter: out={:?} oclk={:?}", out, oclk);
@@ -2825,12 +2822,13 @@ impl FutharkThunkImpl<MulticoreBackend> {
     // TODO TODO
     let (out_ptr, out_size) = out_arr[0].get_mut().mem_parts().unwrap();
     match mode {
-      ThunkMode::Accumulate => {
-        assert!(out_org.is_some());
-        let (out_org_addr, out_org_ptr, out_org_size) = out_org.unwrap();
+      ThunkMode::Accumulate |
+      ThunkMode::Initialize => {
+        assert!(out_org[0].is_some());
+        let (out_org_addr, out_org_ptr, out_org_size) = out_org[0].unwrap();
         if out_org_ptr != out_ptr {
           if _cfg_debug_mode(mode) {
-          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out: Accumulate not in-place!");
+          println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out: {:?} not in-place!", mode);
           println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   org ptr =0x{:016x} sz={}",
               out_org_ptr as usize, out_org_size);
           println!("WARNING: FutharkThunkImpl::<MulticoreBackend>::_enter: out:   org addr={:?}",
@@ -2918,7 +2916,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                   &mut Cell_::Top(ref state, optr) => {
                     assert_eq!(e.root(), optr);
                     let state = state.clone();
-                    let clo = RefCell::new(CellClosure::default());
+                    let clo = CellClosure::default();
                     let mut pcel = PCell::new(optr, e.root_ty.clone());
                     pctx.retain(addr);
                     pcel.push_noroot(oclk, Locus::Mem, PMach::NvGpu, addr);
@@ -2972,7 +2970,7 @@ impl FutharkThunkImpl<MulticoreBackend> {
                   unimplemented!();
                 } else {
                   let state = state.clone();
-                  let clo = RefCell::new(CellClosure::default());
+                  let clo = CellClosure::default();
                   let mut pcel = PCell::new(optr, e.root_ty.clone());
                   pcel.push(optr, oclk, Locus::Mem, PMach::NvGpu, addr);
                   *cel_ = Cell_::Phy(state, clo, pcel);
@@ -3463,12 +3461,12 @@ impl FutharkThunkImpl<CudaBackend> {
       gpu.compute.sync().unwrap();
       obj.set_stream(gpu.compute.as_ptr() as *mut _);
     });
-    let t0 = Stopwatch::tl_stamp();
+    /*let t0 = Stopwatch::tl_stamp();*/
     obj.reset();
-    if _cfg_debug_mode(mode) {
+    /*if _cfg_debug_mode(mode) {
     let tmp_t1 = Stopwatch::tl_stamp();
     println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   reset elapsed: {:.09} s", tmp_t1 - t0);
-    }
+    }*/
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: enter kernel..."); }
     let pre_front_dptr = TL_PCTX.with(|pctx| {
       let gpu = pctx.nvgpu.as_ref().unwrap();
@@ -3530,7 +3528,7 @@ impl FutharkThunkImpl<CudaBackend> {
       }
       gpu.mem_pool.front_dptr()
     });
-    let t1 = Stopwatch::tl_stamp();
+    /*let t1 = Stopwatch::tl_stamp();
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter:   elapsed: {:.09} s", t1 - t0); }
     if cfg_debug_timing() {
     TL_CTX.with(|ctx| {
@@ -3542,7 +3540,7 @@ impl FutharkThunkImpl<CudaBackend> {
         ctx.timing.futhark.borrow_mut().push(t1 - t0);
       }
     });
-    }
+    }*/
     drop(obj);
     if _cfg_debug_mode(mode) { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: ret={:?}", o_ret); }
     //println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_enter: out={:?} oclk={:?}", out, oclk);
@@ -3713,7 +3711,7 @@ impl FutharkThunkImpl<CudaBackend> {
                       &mut Cell_::Top(ref state, optr) => {
                         assert_eq!(e.root(), optr);
                         let state = state.clone();
-                        let clo = RefCell::new(CellClosure::default());
+                        let clo = CellClosure::default();
                         let mut pcel = PCell::new(optr, e.root_ty.clone());
                         pctx.retain(addr);
                         pcel.push_noroot(oclk, Locus::VMem, PMach::NvGpu, addr);
@@ -3774,7 +3772,7 @@ impl FutharkThunkImpl<CudaBackend> {
                       unimplemented!();
                     } else {
                       let state = state.clone();
-                      let clo = RefCell::new(CellClosure::default());
+                      let clo = CellClosure::default();
                       let mut pcel = PCell::new(optr, e.root_ty.clone());
                       pcel.push(optr, oclk, Locus::VMem, PMach::NvGpu, addr);
                       *cel_ = Cell_::Phy(state, clo, pcel);

@@ -674,7 +674,7 @@ impl CellStoreTo for MmapFileSlice {
                 let addr = pctx.ctr.fresh_addr();
                 let icel = pctx.swap._try_alloc_cow(addr, &e.ty, self.clone()).unwrap();
                 let state = state.clone();
-                let clo = RefCell::new(CellClosure::default());
+                let clo = CellClosure::default();
                 let mut pcel = PCell::new(optr, e.root_ty.clone());
                 pcel.push(optr, oclk, Locus::Mem, PMach::Swap, addr);
                 *cel_ = Cell_::Phy(state, clo, pcel);
@@ -2202,23 +2202,16 @@ pub struct PCellReplica {
 pub struct PCell {
   pub optr: CellPtr,
   pub ogty: CellType,
-  //pub olay: CellLayout,
-  //pub pm_index: RevSortMap8<(PMach, Locus), RevSortKey8<(Locus, PMach)>>,
   pub replicas: RevSortMap8<(Locus, PMach), PCellReplica>,
 }
 
 impl PCell {
   pub fn new(ptr: CellPtr, ty: CellType) -> PCell {
     if cfg_debug() { println!("DEBUG: PCell::new: optr={:?} ogty={:?}", ptr, &ty); }
-    //let lay = CellLayout::new_packed(&ty);
-    //let pm_index = RevSortMap8::new();
     let replicas = RevSortMap8::new();
     PCell{
       optr: ptr,
-      //optr: Cell::new(ptr),
       ogty: ty,
-      //olay: lay,
-      //pm_index,
       replicas,
     }
   }
@@ -2241,7 +2234,6 @@ impl PCell {
   pub fn _push(&mut self, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
     let rep = PCellReplica{clk: Cell::new(clk), addr: Cell::new(addr)};
     let key = self.replicas.insert((locus, pmach), rep);
-    //self.pm_index.insert((pmach, locus), key);
   }
 
   pub fn push(&mut self, root: CellPtr, clk: Clock, locus: Locus, pmach: PMach, addr: PAddr) {
@@ -2401,7 +2393,10 @@ impl PCell {
       let mut unkey: Option<(Locus, PMach)> = None;
       for (key, rep) in self.replicas.iter() {
         let &(loc, pm) = key.as_ref();
-        if rep.clk.get() == q_clk {
+        let clk = rep.clk.get();
+        if clk > q_clk {
+          panic!("bug");
+        } else if clk == q_clk {
           let addr = rep.addr.get();
           if TL_PCTX.with(|pctx| {
             pctx.lookup_pm(pm, addr).is_some()
@@ -2426,7 +2421,10 @@ impl PCell {
       let mut unkey: Option<(Locus, PMach)> = None;
       for (key, rep) in self.replicas.iter() {
         let &(loc, pm) = key.as_ref();
-        if rep.clk.get() == q_clk && loc != neq_locus && pm != neq_pmach {
+        let clk = rep.clk.get();
+        if clk > q_clk {
+          panic!("bug");
+        } else if clk == q_clk && !(loc == neq_locus && pm == neq_pmach) {
           let addr = rep.addr.get();
           if TL_PCTX.with(|pctx| {
             pctx.lookup_pm(pm, addr).is_some()
@@ -2451,7 +2449,10 @@ impl PCell {
       let mut unkey: Option<(Locus, PMach)> = None;
       for (key, rep) in self.replicas.iter() {
         let &(loc, pm) = key.as_ref();
-        if rep.clk.get() == q_clk && loc == q_locus {
+        let clk = rep.clk.get();
+        if clk > q_clk {
+          panic!("bug");
+        } else if clk == q_clk && loc == q_locus {
           let addr = rep.addr.get();
           if TL_PCTX.with(|pctx| {
             pctx.lookup_pm(pm, addr).is_some()

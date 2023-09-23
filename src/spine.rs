@@ -1528,7 +1528,7 @@ impl Spine {
     println!("DEBUG: Spine::_step: ctr={:?} ctlp={} hltp={} curp={} retp={:?} entry={:?}",
         self.ctr.get(), self.ctlp.get(), self.hltp.get(), self.curp.get(), retp, entry.name());
     }
-    let t0 = Stopwatch::tl_stamp();
+    /*let t0 = Stopwatch::tl_stamp();*/
     match entry {
       SpineEntry::_Top => {}
       SpineEntry::Yield_ => {
@@ -1567,10 +1567,10 @@ impl Spine {
             } else if prev_clk < next_clk {
               e.clock_sync_rec(prev_clk, next_clk, &*env);
             }
-            let cel_ = e.cel_.borrow();
-            match &*cel_ {
-              &Cell_::Phy(_, ref clo, _) => {
-                clo.borrow_mut().init_once(next_clk, ThunkPtr::opaque());
+            let mut cel_ = e.cel_.borrow_mut();
+            match &mut *cel_ {
+              &mut Cell_::Phy(_, ref mut clo, _) => {
+                clo.init_once(next_clk, ThunkPtr::opaque());
               }
               _ => panic!("bug")
             }
@@ -1671,7 +1671,7 @@ impl Spine {
                   assert_eq!(e.ty, v_ty.as_ref());
                   let mut cel_ = e.cel_.borrow_mut();
                   match &mut *cel_ {
-                    &mut Cell_::Phy(_, ref clo, ref mut pcel) => {
+                    &mut Cell_::Phy(_, ref mut clo, ref mut pcel) => {
                       let optr = pcel.optr;
                       assert_eq!(root, optr);
                       let (pm, addr) = match pcel.find_loc_nocow(xclk, loc) {
@@ -1703,7 +1703,7 @@ impl Spine {
                           }
                         };
                       });
-                      clo.borrow_mut().init_once(xclk, ThunkPtr::opaque());
+                      clo.init_once(xclk, ThunkPtr::opaque());
                     }
                     _ => unreachable!()
                   }
@@ -1733,10 +1733,10 @@ impl Spine {
                 Err(CellDerefErr::View) => panic!("bug"),
                 Err(_) => panic!("bug"),
                 Ok(e) => {
-                  let cel_ = e.cel_.borrow();
-                  match &*cel_ {
-                    &Cell_::Phy(_, ref clo, _) => {
-                      clo.borrow_mut().init_once(xclk, ThunkPtr::opaque());
+                  let mut cel_ = e.cel_.borrow_mut();
+                  match &mut *cel_ {
+                    &mut Cell_::Phy(_, ref mut clo, _) => {
+                      clo.init_once(xclk, ThunkPtr::opaque());
                     }
                     _ => panic!("bug")
                   }
@@ -1812,10 +1812,10 @@ impl Spine {
           match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              let cel_ = e.cel_.borrow();
-              match &*cel_ {
-                &Cell_::Phy(_, ref clo, _) => {
-                  clo.borrow_mut().init_once(xclk, th);
+              let mut cel_ = e.cel_.borrow_mut();
+              match &mut *cel_ {
+                &mut Cell_::Phy(_, ref mut clo, _) => {
+                  clo.init_once(xclk, th);
                 }
                 _ => panic!("bug")
               }
@@ -1867,10 +1867,10 @@ impl Spine {
           match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              let cel_ = e.cel_.borrow();
-              match &*cel_ {
-                &Cell_::Phy(_, ref clo, _) => {
-                  clo.borrow_mut().init_once(xclk, th);
+              let mut cel_ = e.cel_.borrow_mut();
+              match &mut *cel_ {
+                &mut Cell_::Phy(_, ref mut clo, _) => {
+                  clo.init_once(xclk, th);
                 }
                 _ => panic!("bug: Spine::_step: Apply: cel={:?}", cel_.name())
               }
@@ -1918,10 +1918,10 @@ impl Spine {
           match ctx.env.borrow()._lookup_view(x) {
             Err(_) => panic!("bug"),
             Ok(e) => {
-              let cel_ = e.cel_.borrow();
-              match &*cel_ {
-                &Cell_::Phy(_, ref clo, _) => {
-                  clo.borrow_mut().update(xclk, th);
+              let mut cel_ = e.cel_.borrow_mut();
+              match &mut *cel_ {
+                &mut Cell_::Phy(_, ref mut clo, _) => {
+                  clo.update(xclk, th);
                 }
                 _ => panic!("bug")
               }
@@ -1983,10 +1983,10 @@ impl Spine {
       }
       e => panic!("bug: Spine::_step: unimplemented: {:?}", e)
     }
-    let t1 = Stopwatch::tl_stamp();
+    /*let t1 = Stopwatch::tl_stamp();
     let d = t1 - t0;
     //println!("DEBUG: Spine::_step:   t1={}.{:09} s", t1.s(), t1.sub_ns());
-    if cfg_debug() { println!("DEBUG: Spine::_step:   d={:.09} s", d); }
+    if cfg_debug() { println!("DEBUG: Spine::_step:   d={:.09} s", d); }*/
     ret
   }
 

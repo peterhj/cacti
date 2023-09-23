@@ -1136,7 +1136,7 @@ pub enum CellName {
 
 pub enum Cell_ {
   Top(CellState, CellPtr),
-  Phy(CellState, RefCell<CellClosure>, PCell),
+  Phy(CellState, CellClosure, PCell),
   Alias(CellAlias, CellPtr),
   Bot,
 }
@@ -1783,7 +1783,7 @@ impl CtxEnv {
             assert_eq!(root, optr);
             assert_eq!(next_clk, state.clk);
             let state = state.clone();
-            let clo = RefCell::new(CellClosure::default());
+            let clo = CellClosure::default();
             let mut pcel = PCell::new(optr, e.ty.clone());
             pcel.write_loc(root, next_clk, &e.ty, loc);
             *cel_ = Cell_::Phy(state, clo, pcel);
@@ -1900,7 +1900,7 @@ impl CtxEnv {
       ty,
       cel_: RefCell::new(Cell_::Phy(
                 CellState::default(),
-                RefCell::new(CellClosure::default()),
+                CellClosure::default(),
                 pcel,
             )),
     };
