@@ -2563,6 +2563,7 @@ pub struct NvGpuCopyKernels {
 
 impl NvGpuCopyKernels {
   pub fn new(capability: (i32, i32)) -> NvGpuCopyKernels {
+    assert!(TL_LIBNVRTC_BUILTINS_BARRIER.with(|&bar| bar));
     NvGpuCopyKernels{
       accumulate_1d_f32_idx32:  Some(NvGpuCopyKernel::from_source(
           capability,
