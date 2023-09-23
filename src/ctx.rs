@@ -1269,7 +1269,7 @@ pub struct CtxEnv {
 impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
-      celtab:   HashMap::new(),
+      celtab:   HashMap::default(),
       unlive:   RefCell::new(BTreeSet::new()),
       /*atomtab:  HashMap::new(),
       mceltab:  HashMap::new(),*/

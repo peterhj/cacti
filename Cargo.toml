@@ -47,6 +47,7 @@ cacti_cfg_env = { path = "cacti_cfg_env" }
 cacti_gpu_cu_ffi = { path = "cacti_gpu_cu_ffi", optional = true }
 cacti_smp_c_ffi = { path = "cacti_smp_c_ffi" }
 cell_split = { path = "../cell_split" }
+fxhash = { path = "../fxhash" }
 futhark_ffi = { path = "../futhark_ffi" }
 glob = { path = "../glob" }
 half = { path = "../half" }

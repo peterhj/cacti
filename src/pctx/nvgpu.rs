@@ -963,8 +963,8 @@ impl NvGpuPageMap {
     };
     NvGpuPageMap{
       alloc,
-      page_idx: RefCell::new(HashMap::new()),
-      page_tab: RefCell::new(HashMap::new()),
+      page_idx: RefCell::new(HashMap::default()),
+      page_tab: RefCell::new(HashMap::default()),
       extrabuf: Rc::new(mem),
       usage:    Cell::new(extra_sz),
       pg_usage: Cell::new(extra_sz),
@@ -1450,10 +1450,10 @@ impl NvGpuMemPool {
       tmp_pin_list: RefCell::new(Vec::new()),
       tmp_freelist: RefCell::new(Vec::new()),
       free_index:   RefCell::new(BTreeSet::new()),
-      size_index:   RefCell::new(HashMap::new()),
+      size_index:   RefCell::new(HashMap::default()),
       alloc_index:  RefCell::new(BTreeMap::new()),
-      alloc_map:    RefCell::new(HashMap::new()),
-      cel_map:      RefCell::new(HashMap::new()),
+      alloc_map:    RefCell::new(HashMap::default()),
+      cel_map:      RefCell::new(HashMap::default()),
       // TODO
     }
   }

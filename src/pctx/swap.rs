@@ -192,7 +192,7 @@ impl PCtxImpl for SwapPCtx {
 impl SwapPCtx {
   pub fn new() -> SwapPCtx {
     SwapPCtx{
-      page_tab: RefCell::new(HashMap::new()),
+      page_tab: RefCell::new(HashMap::default()),
       usage:    Cell::new(0),
     }
   }

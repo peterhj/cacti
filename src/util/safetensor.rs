@@ -48,8 +48,8 @@ impl TensorsDir {
       dir_path: p.into(),
       model_paths: Vec::new(),
       serial_key: Vec::new(),
-      tensor_key: HashSet::new(),
-      tensor_map: HashMap::new(),
+      tensor_key: HashSet::default(),
+      tensor_map: HashMap::default(),
       model_files: Vec::new(),
     };
     this._reopen()?;

@@ -2664,7 +2664,7 @@ pub struct MCellSet {
 impl Default for MCellSet {
   fn default() -> MCellSet {
     MCellSet{
-      idx:  HashMap::new(),
+      idx:  HashMap::default(),
       log:  Vec::new(),
     }
   }
@@ -2706,7 +2706,7 @@ pub struct MCellMap {
 impl Default for MCellMap {
   fn default() -> MCellMap {
     MCellMap{
-      kidx: HashMap::new(),
+      kidx: HashMap::default(),
       log:  Vec::new(),
     }
   }

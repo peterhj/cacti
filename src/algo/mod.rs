@@ -1,5 +1,8 @@
+pub use fxhash::{FxHashMap as HashMap, FxHashSet as HashSet};
+
 use std::cell::{Cell};
-pub use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+//pub use std::collections::{HashMap, HashSet};
+pub use std::collections::{BTreeMap, BTreeSet};
 use std::cmp::{Ordering};
 use std::fmt::{Debug};
 use std::mem::{swap};

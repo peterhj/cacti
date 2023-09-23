@@ -47,7 +47,7 @@ impl CellMatcher {
   pub fn new() -> CellMatcher {
     CellMatcher{
       rule: Vec::new(),
-      map:  HashMap::new(),
+      map:  HashMap::default(),
     }
   }
 
@@ -57,7 +57,7 @@ impl CellMatcher {
 
   pub fn match_(&self, mut keys: HashSet<SmolStr>) -> CellMatches {
     let mut mat = Vec::new();
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
     for &(ref pat, ref cel) in self.rule.iter() {
       //println!("DEBUG: CellMatcher: pat={:?} cel={:?}", pat, cel);
       let mut kmat = None;
@@ -174,7 +174,7 @@ impl CellMatches {
 
   pub fn inv(&self) -> CellInvertedMatches {
     let mut mat = Vec::new();
-    let mut map = HashMap::new();
+    let mut map = HashMap::default();
     for &(ref key, ref cel) in self.mat.iter() {
       let cel = cel.clone();
       let key = key.clone();
