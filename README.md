@@ -74,9 +74,11 @@ support (the default configuration):
 - cmake
 - g++ or clang++
 
-GPU support:
+For `cacti` GPU support, the following CUDA configurations are
+known to work:
 
-- CUDA 11.x (tested with CUDA 11.5 and driver 495)
+- CUDA 11.6 update 2, driver 510
+- CUDA 11.5 update 2, driver 495
 
 Thus far `cacti` has also been built on the following system
 configurations:
