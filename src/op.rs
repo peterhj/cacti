@@ -1864,20 +1864,22 @@ pub fn inner_softmax_post_adj<Y: CellDeref, Dy: CellDeref>(y: Y, dy: Dy) -> Cell
   })
 }
 
-pub fn zeros<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+pub fn zeros<S: Into<Box<[i64]>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   panick_wrap(|| {
+    let shape = shape.into();
     let dtype = dtype.into();
-    let ty = CellType{shape: shape.into(), dtype};
+    let ty = CellType{shape, dtype};
     assert!(ctx_clean_arg());
     let val = ScalarVal_::zero(dtype);
     ctx_pop_thunk_(SetScalarFutThunkSpec{val}, ty)
   })
 }
 
-pub fn ones<S: Into<Vec<i64>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
+pub fn ones<S: Into<Box<[i64]>>, D: Into<Dtype>>(shape: S, dtype: D) -> CellPtr {
   panick_wrap(|| {
+    let shape = shape.into();
     let dtype = dtype.into();
-    let ty = CellType{shape: shape.into(), dtype};
+    let ty = CellType{shape, dtype};
     assert!(ctx_clean_arg());
     let val = ScalarVal_::one(dtype);
     ctx_pop_thunk_(SetScalarFutThunkSpec{val}, ty)
@@ -1964,7 +1966,7 @@ pub trait ArrayOps: CellDeref {
   }
 
   #[track_caller]
-  fn shape(&self) -> Vec<i64> {
+  fn shape(&self) -> Box<[i64]> {
     panick_wrap(|| {
       self.type_().shape
     })
@@ -1985,14 +1987,14 @@ pub trait ArrayOps: CellDeref {
   }
 
   #[track_caller]
-  fn new_shape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr {
+  fn new_shape<S: Into<Box<[i64]>>>(&self, new_shape: S) -> CellPtr {
     panick_wrap(|| {
       ctx_alias_new_shape(self._deref(), new_shape.into())
     })
   }
 
   #[track_caller]
-  fn reshape<S: Into<Vec<i64>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
+  fn reshape<S: Into<Box<[i64]>>>(&self, new_shape: S) -> CellPtr { self.new_shape(new_shape) }
 }
 
 impl<L: CellDeref + ?Sized> ArrayOps for L {}

@@ -222,7 +222,7 @@ impl CellInvertedMatches {
 
 impl From<CellType> for ExtCellType {
   fn from(ty: CellType) -> ExtCellType {
-    ExtCellType{shape: ty.shape, dtype: ty.dtype.into()}
+    ExtCellType{shape: ty.shape.into(), dtype: ty.dtype.into()}
   }
 }
 

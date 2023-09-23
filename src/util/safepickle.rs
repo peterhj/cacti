@@ -126,7 +126,7 @@ impl PickleDir {
           Err(_) => Dtype::top(),
           Ok(tt) => Dtype::try_from(tt).unwrap()
         };
-        let shape = t.shape.clone();
+        let shape = t.shape.clone().into();
         let ty = CellType{shape, dtype};
         // FIXME: strided layout.
         //let span = ty.packed_span_bytes();

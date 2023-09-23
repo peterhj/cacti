@@ -498,7 +498,7 @@ pub fn ctx_fresh_mmap() -> MCellPtr {
   })
 }*/
 
-pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Vec<i64>) -> CellPtr {
+pub fn ctx_alias_new_shape(og: CellPtr, new_shape: Box<[i64]>) -> CellPtr {
   TL_CTX.with(|ctx| {
     let mut env = ctx.env.borrow_mut();
     match env._lookup_view(og) {

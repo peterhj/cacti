@@ -207,7 +207,7 @@ impl FutharkThunkSpec for IotaFutThunkSpec {
   }
 
   fn out_ty_(&self, _arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(CellType{shape: vec![self.len], dtype: Dtype::I64})
+    Ok(CellType{shape: Box::new([self.len]), dtype: Dtype::I64})
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ _arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -298,7 +298,7 @@ impl FutharkThunkSpec for NanCountFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(CellType{shape: vec![], dtype: Dtype::I64})
+    Ok(CellType{shape: Box::new([]), dtype: Dtype::I64})
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -379,7 +379,7 @@ impl FutharkThunkSpec for AbsLog2Hist8FutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(CellType{shape: vec![0x100], dtype: Dtype::I64})
+    Ok(CellType{shape: Box::new([0x100]), dtype: Dtype::I64})
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -468,7 +468,7 @@ impl FutharkThunkSpec for AbsLog2Hist16FutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(CellType{shape: vec![0x10000], dtype: Dtype::I64})
+    Ok(CellType{shape: Box::new([0x10000]), dtype: Dtype::I64})
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -762,8 +762,9 @@ impl FutharkThunkSpec for InnerArgMaxFutThunkSpec {
     if arg[0].ndim() < 1 {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     shape.pop();
+    let shape = shape.into();
     Ok(CellType{shape, dtype: Dtype::I64})
   }
 
@@ -851,8 +852,9 @@ impl FutharkThunkSpec for InnerOneHotFutThunkSpec {
     if !arg[0].dtype.is_uint() {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     shape.push(self.inner_len);
+    let shape = shape.into();
     Ok(CellType{shape, dtype: self.new_dtype})
   }
 
@@ -970,7 +972,7 @@ impl FutharkThunkSpec for InnerSelectFutThunkSpec {
       return Err(ThunkTypeErr::_Bot);
     }
     let shape = arg[1].shape.clone();
-    if &arg[0].shape[ .. shape.len()] != shape {
+    if &*shape != &arg[0].shape[ .. shape.len()] {
       return Err(ThunkTypeErr::_Bot);
     }
     Ok(CellType{shape, dtype: arg[0].dtype})
@@ -1091,8 +1093,9 @@ impl FutharkThunkSpec for InnerInvSelectFutThunkSpec {
     if &arg[0].shape != &arg[1].shape {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[1].shape.clone();
+    let mut shape = arg[1].shape.to_vec();
     shape.push(self.inner_len);
+    let shape = shape.into();
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
@@ -1198,8 +1201,9 @@ impl FutharkThunkSpec for OuterSelectFutThunkSpec {
     if arg[0].ndim() < 1 {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[1].shape.clone();
+    let mut shape = arg[1].shape.to_vec();
     shape.extend_from_slice(&arg[0].shape[1 .. ]);
+    let shape = shape.into();
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
@@ -1290,9 +1294,10 @@ impl FutharkThunkSpec for OuterMulFutThunkSpec {
     if arg[0].dtype != arg[1].dtype {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     shape.push(arg[1].shape[0]);
     assert_eq!(shape.len(), 2);
+    let shape = shape.into();
     let dtype = arg[0].dtype;
     Ok(CellType{shape, dtype})
   }
@@ -1523,6 +1528,7 @@ impl FutharkThunkSpec for BroadcastAddFutThunkSpec {
       }
       shape.push(max(arg[0].shape[d], arg[1].shape[d]));
     }
+    let shape = shape.into();
     Ok(CellType{shape, dtype})
   }
 
@@ -1824,6 +1830,7 @@ impl FutharkThunkSpec for BroadcastSubFutThunkSpec {
       }
       shape.push(max(arg[0].shape[d], arg[1].shape[d]));
     }
+    let shape = shape.into();
     Ok(CellType{shape, dtype})
   }
 
@@ -2041,6 +2048,7 @@ impl FutharkThunkSpec for BroadcastMulFutThunkSpec {
       }
       shape.push(max(arg[0].shape[d], arg[1].shape[d]));
     }
+    let shape = shape.into();
     Ok(CellType{shape, dtype})
   }
 
@@ -2340,6 +2348,7 @@ impl FutharkThunkSpec for BroadcastDivFutThunkSpec {
       }
       shape.push(max(arg[0].shape[d], arg[1].shape[d]));
     }
+    let shape = shape.into();
     Ok(CellType{shape, dtype})
   }
 
@@ -3014,7 +3023,7 @@ impl FutharkThunkSpec for FlatSumFutThunkSpec {
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    Ok(CellType{shape: Vec::new(), dtype: arg[0].dtype})
+    Ok(CellType{shape: Box::new([]), dtype: arg[0].dtype})
   }
 
   fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -3108,8 +3117,9 @@ impl FutharkThunkSpec for InnerMeanFutThunkSpec {
     if ndim <= 0 {
       return Err(ThunkTypeErr::_Bot);
     }
-    let mut shape = arg[0].shape.clone();
-    let _ = shape.pop();
+    let mut shape = arg[0].shape.to_vec();
+    shape.pop();
+    let shape = shape.into();
     let dtype = arg[0].dtype;
     Ok(CellType{shape, dtype})
   }
@@ -3534,12 +3544,13 @@ impl FutharkThunkSpec for InnerConcatFutThunkSpec {
       return Err(ThunkTypeErr::_Bot);
     }
     let nd = arg[0].ndim() as usize;
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     if nd == 0 {
       shape.push(2);
     } else {
       shape[nd - 1] += arg[1].shape[nd - 1];
     }
+    let shape = shape.into();
     let dtype = arg[0].dtype;
     Ok(CellType{shape, dtype})
   }
@@ -3613,8 +3624,9 @@ impl FutharkThunkSpec for InnerTransposeFutThunkSpec {
       return Err(ThunkTypeErr::_Bot);
     }
     let nd = arg[0].ndim() as usize;
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     shape.swap(nd - 2, nd - 1);
+    let shape = shape.into();
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
@@ -3920,11 +3932,12 @@ impl FutharkThunkSpec for BlockPadFutThunkSpec {
       return Err(ThunkTypeErr::_Bot);
     }
     let nd = arg[0].ndim() as usize;
-    let mut shape = arg[0].shape.clone();
+    let mut shape = arg[0].shape.to_vec();
     assert_eq!(shape[nd - 3], self.org_block[0]);
     assert_eq!(shape[nd - 1], self.org_block[1]);
     shape[nd - 3] = self.new_block[0];
     shape[nd - 1] = self.new_block[1];
+    let shape = shape.into();
     Ok(CellType{shape, dtype: arg[0].dtype})
   }
 
@@ -4205,7 +4218,7 @@ impl MatrixMulThunkSpec {
     }
     let m = l_blk_outer;
     let n = r_blk_outer;
-    let o_ty = CellType{shape: vec![m, n], dtype: self.o_dtype};
+    let o_ty = CellType{shape: Box::new([m, n]), dtype: self.o_dtype};
     if cfg_debug() {
     println!("DEBUG: MatrixMulThunkSpec::_calculate_out_ty: {:?}{} x {:?}{} = {:?}",
         &arg[0].shape, if self.l_t { "^T" } else { "" },
@@ -4806,9 +4819,9 @@ impl BlockMatrixMulThunkSpec {
     let o_ty = if arg[0].ndim() == 2 && arg[1].ndim() == 2 {
       let m = nrow * l_blk_outer;
       let n = ncol * r_blk_outer;
-      CellType{shape: vec![m, n], dtype: self.o_dtype}
+      CellType{shape: Box::new([m, n]), dtype: self.o_dtype}
     } else if arg[0].ndim() == 4 && arg[1].ndim() == 4 {
-      CellType{shape: vec![nrow, l_blk_outer, ncol, r_blk_outer], dtype: self.o_dtype}
+      CellType{shape: Box::new([nrow, l_blk_outer, ncol, r_blk_outer]), dtype: self.o_dtype}
     } else {
       unreachable!();
     };

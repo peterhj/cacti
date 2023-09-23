@@ -253,7 +253,7 @@ impl StableCell {
       Ok(d) => d,
       Err(_) => panic!("bug: StableCell::scalar: invalid dtype")
     };
-    let ty = CellType{shape: Vec::new(), dtype};
+    let ty = CellType{shape: Box::new([]), dtype};
     TL_CTX.with(|ctx| {
       let x = ctx.ctr.fresh_cel();
       ctx.env.borrow_mut().insert_top(x, ty);
@@ -265,8 +265,8 @@ impl StableCell {
     ctx_pop_thunk(SetScalarFutThunkSpec{val: value.into_scalar_val_()}).into()
   }
 
-  pub fn array<S: Into<Vec<i64>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
-    let shape: Vec<i64> = shape.into();
+  pub fn array<S: Into<Box<[i64]>>, D: TryInto<Dtype>>(shape: S, dtype: D) -> StableCell {
+    let shape: Box<[i64]> = shape.into();
     let dtype: Dtype = match dtype.try_into() {
       Ok(d) => d,
       Err(_) => panic!("bug: StableCell::array: invalid dtype")
@@ -796,15 +796,16 @@ impl CellView {
 
   pub fn type_eval(&self, root_ty: &CellType) -> Result<CellType, ()> {
     assert!(!root_ty.is_top());
-    let mut shape = root_ty.shape.clone();
+    let mut shape = root_ty.shape.to_vec();
     let mut dtype = root_ty.dtype;
     if self.vlog.is_empty() {
+      let shape = shape.into();
       return Ok(CellType{shape, dtype});
     }
     let mut offset = Vec::with_capacity(root_ty.shape.len());
     offset.resize(root_ty.shape.len(), 0);
-    let mut end_offset = root_ty.shape.clone();
-    let mut root_shape = root_ty.shape.clone();
+    let mut end_offset = root_ty.shape.to_vec();
+    let mut root_shape = root_ty.shape.to_vec();
     for vop in self.vlog.iter() {
       match vop {
         &CellViewOp::Nop => {}
@@ -866,6 +867,7 @@ impl CellView {
         _ => unimplemented!()
       }
     }
+    let shape = shape.into();
     Ok(CellType{shape, dtype})
   }
 
@@ -873,13 +875,14 @@ impl CellView {
     assert!(!root_ty.is_top());
     let mut offset = Vec::with_capacity(root_ty.shape.len());
     offset.resize(root_ty.shape.len(), 0);
-    let mut shape = root_ty.shape.clone();
+    let mut shape = root_ty.shape.to_vec();
     let mut dtype = root_ty.dtype;
     if self.vlog.is_empty() {
+      let shape = shape.into();
       return Ok(CellSliceType{offset, type_: CellType{shape, dtype}});
     }
-    let mut end_offset = root_ty.shape.clone();
-    let mut root_shape = root_ty.shape.clone();
+    let mut end_offset = root_ty.shape.to_vec();
+    let mut root_shape = root_ty.shape.to_vec();
     for vop in self.vlog.iter() {
       loop {
         match vop {
@@ -1014,6 +1017,7 @@ impl CellView {
       println!("DEBUG: CellView::eval_contiguous:   fin    ={:?}", fin);
     }
     assert_eq!(start + flat_len, fin + 1);
+    let shape = shape.into();
     Ok(CellSliceType{offset, type_: CellType{shape, dtype}})
   }
 
@@ -1023,13 +1027,14 @@ impl CellView {
     let nd = root_ty.shape.len() as i8;
     let mut offset = Vec::with_capacity(nd as usize);
     offset.resize(nd as usize, 0);
-    let mut shape = root_ty.shape.clone();
+    let mut shape = root_ty.shape.to_vec();
     let mut dtype = root_ty.dtype;
     if self.vlog.is_empty() {
+      let shape = shape.into();
       return Ok((CellSliceType{offset, type_: CellType{shape, dtype}}, CellIndexPerm::new(nd)));
     }
-    let mut end_offset = root_ty.shape.clone();
-    let mut root_shape = root_ty.shape.clone();
+    let mut end_offset = root_ty.shape.to_vec();
+    let mut root_shape = root_ty.shape.to_vec();
     let mut seal_slice = false;
     /*let mut idx_perm = Vec::with_capacity(nd as usize);
     for d in 0 .. nd {
@@ -1142,6 +1147,7 @@ impl CellView {
       stride *= root_ds as u64;
     }
     assert_eq!(start + flat_len, fin + 1);
+    let shape = shape.into();
     Ok((CellSliceType{offset, type_: CellType{shape, dtype}}, CellIndexPerm{perm: perm_state.perm, ndim: nd}))
   }
 
@@ -1482,8 +1488,6 @@ pub enum Dtype {
   _Top,
   F64,
   F32,
-  F16,
-  Bf16,
   I64,
   I32,
   I16,
@@ -1492,6 +1496,8 @@ pub enum Dtype {
   U32,
   U16,
   U8,
+  F16,
+  Bf16,
   _Bot,
 }
 
@@ -1775,14 +1781,14 @@ pub enum ShapeCompat {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct CellType {
-  pub shape:    Vec<i64>,
+  pub shape:    Box<[i64]>,
   pub dtype:    Dtype,
 }
 
 impl CellType {
   pub fn top() -> CellType {
     CellType{
-      shape:    Vec::new(),
+      shape:    Box::new([]),
       dtype:    Dtype::_Top,
     }
   }
@@ -1938,6 +1944,7 @@ impl CellType {
         shape.push(self.shape[d]);
       }
     }
+    let shape = shape.into();
     CellType{shape, dtype: self.dtype}
   }
 
@@ -2611,121 +2618,4 @@ impl PCell {
       }
     })
   }
-
-  /*pub fn hardcopy(&self) -> PCell {
-    // FIXME FIXME
-    unimplemented!();
-  }*/
 }
-
-/*pub struct MSet {
-  // TODO TODO
-  pub ptr_: MCellPtr,
-}
-
-pub struct MMap {
-  // TODO TODO
-  pub ptr_: MCellPtr,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum MValue {
-  Cell(CellPtr),
-  /*Atom(Atom),*/
-  // FIXME FIXME: recursive MCell.
-  /*MCel(MCellPtr),*/
-}
-
-#[derive(Clone, Copy)]
-pub enum MValueRef<'a> {
-  Cell(&'a CellPtr),
-}
-
-impl<'p, P: AsRef<CellPtr>> From<&'p P> for MValueRef<'p> {
-  fn from(p: &'p P) -> MValueRef<'p> {
-    MValueRef::Cell(p.as_ref())
-  }
-}
-
-#[derive(Clone, Debug)]
-pub struct MCellSetEntry {
-  pub item: MValue,
-  pub clk:  Clock,
-  pub rev_: Cell<bool>,
-}
-
-#[derive(Clone, Debug)]
-pub struct MCellSet {
-  // FIXME
-  pub idx:  HashMap<(MValue, Clock), u32>,
-  pub log:  Vec<MCellSetEntry>,
-}
-
-impl Default for MCellSet {
-  fn default() -> MCellSet {
-    MCellSet{
-      idx:  HashMap::default(),
-      log:  Vec::new(),
-    }
-  }
-}
-
-impl MCellSet {
-  pub fn add(&mut self, item: MValue, clk: Clock) {
-    match self.idx.get(&(item, clk)) {
-      None => {}
-      Some(&idx) => {
-        assert!((idx as usize) < self.log.len());
-        assert!(!self.log[idx as usize].rev_.get());
-        self.log[idx as usize].rev_.set(true);
-      }
-    }
-    assert!(self.log.len() < u32::max_value() as usize);
-    let idx = self.log.len() as u32;
-    self.idx.insert((item, clk), idx);
-    self.log.push(MCellSetEntry{item, clk, rev_: Cell::new(false)});
-  }
-}
-
-#[derive(Clone, Debug)]
-pub struct MCellMapEntry {
-  pub key:  MValue,
-  pub val:  MValue,
-  pub kclk: Clock,
-  pub vclk: Clock,
-  pub rev_: Cell<bool>,
-}
-
-#[derive(Clone, Debug)]
-pub struct MCellMap {
-  // FIXME
-  pub kidx: HashMap<(MValue, Clock), u32>,
-  pub log:  Vec<MCellMapEntry>,
-}
-
-impl Default for MCellMap {
-  fn default() -> MCellMap {
-    MCellMap{
-      kidx: HashMap::default(),
-      log:  Vec::new(),
-    }
-  }
-}
-
-impl MCellMap {
-  pub fn add(&mut self, key: MValue, kclk: Clock, val: MValue, vclk: Clock) {
-    match self.kidx.get(&(key, kclk)) {
-      None => {}
-      Some(&idx) => {
-        assert!((idx as usize) < self.log.len());
-        assert!(!self.log[idx as usize].rev_.get());
-        assert!(self.log[idx as usize].vclk <= vclk);
-        self.log[idx as usize].rev_.set(true);
-      }
-    }
-    assert!(self.log.len() < u32::max_value() as usize);
-    let idx = self.log.len() as u32;
-    self.kidx.insert((key, kclk), idx);
-    self.log.push(MCellMapEntry{key, val, kclk, vclk, rev_: Cell::new(false)});
-  }
-}*/

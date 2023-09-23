@@ -97,7 +97,7 @@ impl TensorsDir {
         }
         let off = dict.buf_start + entry.data_offsets[0];
         let eoff = dict.buf_start + entry.data_offsets[1];
-        let shape = entry.shape.clone();
+        let shape = entry.shape.clone().into();
         let dtype = Dtype::try_from(entry.dtype).unwrap();
         let ty = CellType{shape, dtype};
         let e = TensorEntry{ty, off, eoff};
