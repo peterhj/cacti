@@ -764,7 +764,7 @@ impl CellViewOp {
   }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CellView {
   // TODO
   pub root: CellPtr,

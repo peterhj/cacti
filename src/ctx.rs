@@ -167,6 +167,7 @@ impl Ctx {
         match env._lookup_view(x) {
           Err(_) => {
             let _ = env.celtab.remove(&x);
+            let _ = env.celroot.borrow_mut().remove(&x);
           }
           Ok(e) => {
             let xroot = e.root();
@@ -193,6 +194,7 @@ impl Ctx {
                 drop(e);
               }
               assert!(env.celtab.remove(&x).is_some());
+              let _ = env.celroot.borrow_mut().remove(&x);
               let _ = spine_env.state.remove(&x);
             }
           }
@@ -1247,6 +1249,7 @@ pub type CellDerefView<'a> = CellDerefResult<CellRef_<'a, CellView>>;
 
 #[derive(Clone, Copy, Debug)]
 pub enum CellDerefErr {
+  Nil,
   MissingRoot,
   Missing,
   Reentrant,
@@ -1259,6 +1262,7 @@ pub enum CellDerefErr {
 //#[derive(Default)]
 pub struct CtxEnv {
   pub celtab:   HashMap<CellPtr, CellEnvEntry>,
+  pub celroot:  RefCell<HashMap<CellPtr, (CellPtr, Option<CellView>)>>,
   pub unlive:   RefCell<BTreeSet<CellPtr>>,
   /*pub atomtab:  HashMap<Atom, ()>,
   pub mceltab:  HashMap<MCellPtr, MCellEnvEntry>,*/
@@ -1270,6 +1274,7 @@ impl Default for CtxEnv {
   fn default() -> CtxEnv {
     CtxEnv{
       celtab:   HashMap::default(),
+      celroot:  RefCell::new(HashMap::default()),
       unlive:   RefCell::new(BTreeSet::new()),
       /*atomtab:  HashMap::new(),
       mceltab:  HashMap::new(),*/
@@ -1351,6 +1356,15 @@ impl CtxEnv {
   }
 
   pub fn _try_probe_ref(&self, query: CellPtr) -> Option<CellProbePtr> {
+    if query.is_nil() {
+      return Some(Err(CellDerefErr::Nil));
+    }
+    match self.celroot.borrow().get(&query) {
+      None => panic!("bug"),
+      Some(&(root, _)) => {
+        return Some(Ok(root));
+      }
+    }
     let mut cursor = query;
     loop {
       match self.celtab.get(&cursor) {
@@ -1391,6 +1405,15 @@ impl CtxEnv {
   }
 
   pub fn _probe_ref(&self, query: CellPtr) -> CellProbePtr {
+    if query.is_nil() {
+      return Err(CellDerefErr::Nil);
+    }
+    match self.celroot.borrow().get(&query) {
+      None => panic!("bug"),
+      Some(&(root, _)) => {
+        return Ok(root);
+      }
+    }
     let mut cursor = query;
     loop {
       match self.celtab.get(&cursor) {
@@ -1428,6 +1451,18 @@ impl CtxEnv {
   }
 
   pub fn _probe_view(&self, query: CellPtr) -> CellProbeView {
+    if query.is_nil() {
+      return Err(CellDerefErr::Nil);
+    }
+    match self.celroot.borrow().get(&query) {
+      None => panic!("bug"),
+      Some(&(_, None)) => {}
+      Some(&(root, Some(ref view))) => {
+        assert_eq!(root, view.root);
+        let view = view.clone();
+        return Ok(view);
+      }
+    }
     let mut cursor = query;
     let mut view = CellView::default();
     loop {
@@ -1443,6 +1478,14 @@ impl CtxEnv {
               view.root = cursor;
               //view.r_ty = e.ty.clone();
               view.vlog.reverse();
+              match self.celroot.borrow_mut().get_mut(&query) {
+                None => panic!("bug"),
+                Some(&mut (root, ref mut view_)) => {
+                  assert_eq!(root, cursor);
+                  assert!(view_.is_none());
+                  *view_ = Some(view.clone());
+                }
+              }
               return Ok(view);
             }
             &Cell_::Alias(ref alias, next) => {
@@ -1459,6 +1502,36 @@ impl CtxEnv {
                 &CellAlias::Opaque |
                 &CellAlias::Const_ => {}
               }
+              cursor = next;
+            }
+            &Cell_::Bot => {
+              return Err(CellDerefErr::Bot);
+            }
+            _ => unimplemented!()
+          }
+        }
+      }
+    }
+  }
+
+  pub fn _probe_root(&self, query: CellPtr) -> CellProbePtr {
+    if query.is_nil() {
+      return Err(CellDerefErr::Nil);
+    }
+    let mut cursor = query;
+    loop {
+      match self.celtab.get(&cursor) {
+        None => {
+          return Err(CellDerefErr::Missing);
+        }
+        Some(e) => {
+          let cel_ = e.cel_.borrow();
+          match &*cel_ {
+            &Cell_::Top(..) |
+            &Cell_::Phy(..) => {
+              return Ok(cursor);
+            }
+            &Cell_::Alias(_, next) => {
               cursor = next;
             }
             &Cell_::Bot => {
@@ -1891,6 +1964,7 @@ impl CtxEnv {
       cel_: RefCell::new(Cell_::Top(CellState::default(), x)),
     };
     assert!(self.celtab.insert(x, e).is_none());
+    assert!(self.celroot.borrow_mut().insert(x, (x, None)).is_none());
   }
 
   pub fn insert_phy(&mut self, x: CellPtr, ty: CellType, pcel: PCell) {
@@ -1905,6 +1979,7 @@ impl CtxEnv {
             )),
     };
     assert!(self.celtab.insert(x, e).is_none());
+    assert!(self.celroot.borrow_mut().insert(x, (x, None)).is_none());
   }
 
   pub fn insert_alias(&mut self, x: CellPtr, alias: CellAlias, ty: CellType, og: CellPtr) {
@@ -1915,6 +1990,11 @@ impl CtxEnv {
       cel_: RefCell::new(Cell_::Alias(alias, og)),
     };
     assert!(self.celtab.insert(x, e).is_none());
+    let root = match self._probe_root(og) {
+      Err(_) => panic!("bug"),
+      Ok(root) => root
+    };
+    assert!(self.celroot.borrow_mut().insert(x, (root, None)).is_none());
   }
 
   pub fn insert_const_(&mut self, x: CellPtr, og: CellPtr) {
@@ -1928,5 +2008,10 @@ impl CtxEnv {
       cel_: RefCell::new(Cell_::Alias(CellAlias::Const_, og)),
     };
     assert!(self.celtab.insert(x, e).is_none());
+    let root = match self._probe_root(og) {
+      Err(_) => panic!("bug"),
+      Ok(root) => root
+    };
+    assert!(self.celroot.borrow_mut().insert(x, (root, None)).is_none());
   }
 }
