@@ -170,6 +170,8 @@ to control its run-time behavior.
   Then, the GPU subsystem will pretend as if that were the
   physical limit of GPU VRAM, and make garbage-collection/OOM
   decisions accordingly.
+  Note that setting `CACTI_VMEM_SOFT_LIMIT=1` will attempt to
+  reserve all of the available GPU VRAM.
 - `CACTI_NVGPU_MEM_ALLOC`: This specifies which CUDA-aware
   allocator is used for host CPU memory. Allowed values are
   `malloc` and `pagelocked` (the latter corresponding to

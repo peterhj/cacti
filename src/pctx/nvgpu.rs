@@ -1397,7 +1397,12 @@ impl NvGpuMemPool {
             }
             (_, Some(f)) => {
               if cfg_info() { println!("INFO:   NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT={} (fraction of total)", f); }
-              let unrounded_sz = (total_sz as f64 * f.max(0.0).min(1.0)) as u64;
+              // NB: Don't actually reserve 100% of the available vmem, as
+              // doing so causes surprising failures (e.g. cuModuleLoadData).
+              // The heuristic below sets aside 8 MiB, and reserves the rest.
+              let unrounded_sz = (total_sz as f64 * f.max(0.0).min(1.0))
+                                 .min(avail_sz as f64 - (8.0 * 1024.0 * 1024.0))
+                                 .max(0.0) as u64;
               reserve_sz = (unrounded_sz as usize >> 16) << 16;
             }
           }
@@ -1405,16 +1410,18 @@ impl NvGpuMemPool {
       }
     });
     if reserve_sz > avail_sz {
-      println!("ERROR:  NvGpuMemPool::new: Tried to reserve {} bytes on gpu {}, but only {} bytes available (out of {} bytes total).",
-          reserve_sz, dev, avail_sz, total_sz);
-      println!("ERROR:  NvGpuMemPool::new: To resolve this, try setting the env var CACTI_VMEM_SOFT_LIMIT to");
-      println!("ERROR:  NvGpuMemPool::new: a smaller value.");
+      println!("ERROR:  NvGpuMemPool::new: Tried to reserve {} bytes on GPU {},", reserve_sz, dev);
+      println!("ERROR:  NvGpuMemPool::new: buf only {} bytes available", avail_sz);
+      println!("ERROR:  NvGpuMemPool::new: (out of {} bytes total).", total_sz);
+      println!("ERROR:  NvGpuMemPool::new:");
+      println!("ERROR:  NvGpuMemPool::new: To resolve this, try setting the env var");
+      println!("ERROR:  NvGpuMemPool::new: CACTI_VMEM_SOFT_LIMIT to a smaller value.");
       panic!();
     }
     if cfg_info() { println!("INFO:   NvGpuMemPool::new: reserve size={}", reserve_sz); }
     let reserve_base = cuda_mem_alloc(reserve_sz).unwrap();
     CudartStream::null().sync().unwrap();
-    if _cfg_debug_mem_pool() { println!("DEBUG:  NvGpuMemPool::new: reserve base=0x{:016x}", reserve_base); }
+    if cfg_info() { println!("INFO:   NvGpuMemPool::new: reserve base=0x{:016x}", reserve_base); }
     let reserve_warp_offset = reserve_base & (ALLOC_ALIGN as u64 - 1);
     if reserve_warp_offset != 0 {
       panic!("ERROR: GpuPCtx::new: gpu bug: misaligned alloc, offset by {} bytes (expected alignment {} bytes)",
