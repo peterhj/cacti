@@ -39,6 +39,7 @@ gpu = ["nvgpu"]
 nvgpu = ["cacti_gpu_cu_ffi"]
 librarium = []
 sentencepiece = ["librarium", "sentencepiece_ffi"]
+nightly = ["cell_split/nightly"]
 
 [dependencies]
 aho_corasick = { path = "../aho_corasick", default-features = false, features = ["std"] }
