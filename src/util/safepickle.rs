@@ -93,10 +93,7 @@ impl PickleDir {
     for file_or_p in files.into_iter() {
       let (p, file) = file_or_p.try_open().map_err(|_| PickleDirErr::File)?;
       if cfg_debug() { println!("DEBUG: PickleDir::_reopen: open \"{}\"...", safe_ascii(p.to_str().unwrap().as_bytes())); }
-      let mut file = PickleFile::new(file).map_err(|_| PickleDirErr::PickleFile)?;
-      let mut iter = file.iter_tensors_data();
-      iter._fixup_offsets();
-      drop(iter);
+      let file = PickleFile::new(file).map_err(|_| PickleDirErr::PickleFile)?;
       let model_idx = self.model_paths.len();
       self.model_paths.push(p);
       self.model_files.push(RefCell::new(None));
@@ -122,9 +119,12 @@ impl PickleDir {
     match self.tensor_map.get(key) {
       None => panic!("bug"),
       Some(&(model_idx, ref t)) => {
-        let dtype = match t.tensor_type {
-          Err(_) => Dtype::top(),
-          Ok(tt) => Dtype::try_from(tt).unwrap()
+        let dtype = match t.type_.as_ref() {
+          Err(s) => {
+            println!("ERROR:  PickleDir::get: unknown tensor dtype: \"{}\"", safe_ascii(s.as_bytes()));
+            panic!();
+          }
+          Ok(&tt) => Dtype::try_from(tt).unwrap()
         };
         let shape = t.shape.clone().into();
         let ty = CellType{shape, dtype};
@@ -141,30 +141,42 @@ impl PickleDir {
               safe_ascii(key.as_bytes()), &ty.shape, &stride, &t.stride);
           panic!();
         }
-        let offset = t.absolute_offset;
-        let size = t.storage_len * dtype.size_bytes() as u64;
-        assert_eq!(span, size);
-        if cfg_debug() { println!("DEBUG: PickleDir::open: offset={} size={}", offset, size); }
-        // FIXME: mmap.
-        /*let mut file = File::open(&self.model_paths[model_idx]).unwrap();
-        file.seek(SeekFrom::Start(offset)).unwrap();
-        let slice = PickleSlice{
-          offset,
-          size,
-          file,
-          pos:    0,
-        };
-        (ty, slice)*/
+        let offset = t.storage_offset + t.storage_start * dtype.size_bytes() as u64;
+        let size = (t.storage_end - t.storage_start) * dtype.size_bytes() as u64;
+        if cfg_debug() {
+          println!("DEBUG:  PickleDir::open: key=\"{}\" ty={:?}", safe_ascii(key.as_bytes()), ty);
+          println!("DEBUG:  PickleDir::open: stride={:?} span={:?}", stride, span);
+          println!("DEBUG:  PickleDir::open: data offset={} start={} end={} dty sz={}",
+              t.storage_offset, t.storage_start, t.storage_end, dtype.size_bytes());
+          println!("DEBUG:  PickleDir::open: offset={:?} size={:?}", offset, size);
+        }
+        /*if span != size {
+          println!("WARNING:PickleDir::open: span != size, but continuing...");
+        }*/
+        assert!(span <= size);
+        assert_eq!((t.storage_end * dtype.size_bytes() as u64), t.storage_size);
+        let mut align = 1;
+        for shift in 1 ..= 12 {
+          let a = 1 << shift;
+          if offset & (a - 1) == 0 {
+            align = a;
+          } else {
+            break;
+          }
+        }
+        if cfg_debug() { println!("DEBUG:  PickleDir::open: align?={:?}", align); }
+        assert!(align >= 64);
         let file = if self.model_files[model_idx].borrow().is_none() {
           let f = Arc::new(File::open(&self.model_paths[model_idx]).unwrap());
           let file = MmapFile::from_file(&f).unwrap();
+          if cfg_debug() { println!("DEBUG:  PickleDir::open: file idx={} size={}", model_idx, file.size_bytes()); }
           *self.model_files[model_idx].borrow_mut() = Some(file.clone());
           file
         } else {
           self.model_files[model_idx].borrow().as_ref().unwrap().clone()
         };
         let off: usize = offset.try_into().unwrap();
-        let sz: usize = size.try_into().unwrap();
+        let sz: usize = span.try_into().unwrap();
         let mem = file.slice(off, off + sz);
         let slice = PickleSlice{mem};
         (ty, slice)
