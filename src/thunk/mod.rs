@@ -2387,7 +2387,7 @@ impl<B: FutBackend> FutharkThunkImpl<B> where FutharkThunkImpl<B>: FutharkThunkI
         println!("ERROR:  FutharkThunkImpl::_try_build: failed to resolve CACTI_CUDA_PREFIX");
         panic!();
       }
-      if cfg.debug >= 3 {
+      if cfg.debug >= 3 || cfg.cc_verbose {
         config.verbose = true;
       }
       if cfg.debug >= 1 {

@@ -25,6 +25,7 @@ pub struct CfgEnv {
   pub futhark_kcache: bool,
   pub futhark_pedantic: bool,
   pub futhark_trace: bool,
+  pub cc_verbose: bool,
   pub verbose:    bool,
   //pub verbose:    i8,
   pub silent:     bool,
@@ -121,6 +122,9 @@ impl CfgEnv {
     let futhark_trace = var("CACTI_FUTHARK_TRACE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
+    let cc_verbose = var("CACTI_CC_VERBOSE")
+      .map(|_| true)
+      .unwrap_or_else(|_| false);
     let verbose = var("CACTI_VERBOSE")
       .map(|_| true)
       .unwrap_or_else(|_| false);
@@ -211,6 +215,7 @@ impl CfgEnv {
       futhark_kcache,
       futhark_pedantic,
       futhark_trace,
+      cc_verbose,
       verbose,
       silent,
       report,
