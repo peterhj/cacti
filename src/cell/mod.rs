@@ -960,6 +960,7 @@ impl CellView {
               return Err(());
             }
             dtype = new_dtype;
+            break;
           }
           _ => unimplemented!()
         }
@@ -1518,10 +1519,7 @@ impl TryFrom<TensorDtype> for Dtype {
       TensorDtype::U8 => Dtype::U8,
       TensorDtype::Bool => Dtype::U8,
       TensorDtype::F16 => Dtype::F16,
-      TensorDtype::Bf16 => {
-        println!("ERROR:  <Dtype as TryFrom<TensorDtype>>::try_from: unimplemented: bfloat16 is not currently supported by Futhark");
-        panic!();
-      }
+      TensorDtype::Bf16 => Dtype::Bf16,
       _ => unimplemented!()
     })
   }
@@ -1610,6 +1608,25 @@ impl FromStr for Dtype {
 impl Dtype {
   pub fn top() -> Dtype {
     Dtype::_Top
+  }
+
+  pub fn _to_str(self) -> &'static str {
+    match self {
+      Dtype::_Top   => "top",
+      Dtype::F64    => "f64",
+      Dtype::F32    => "f32",
+      Dtype::F16    => "f16",
+      Dtype::Bf16   => "bf16",
+      Dtype::I64    => "i64",
+      Dtype::I32    => "i32",
+      Dtype::I16    => "i16",
+      Dtype::I8     => "i8",
+      Dtype::U64    => "u64",
+      Dtype::U32    => "u32",
+      Dtype::U16    => "u16",
+      Dtype::U8     => "u8",
+      Dtype::_Bot   => "bot",
+    }
   }
 
   pub fn format_futhark(self) -> &'static str {
@@ -1779,10 +1796,16 @@ pub enum ShapeCompat {
   Incompat,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct CellType {
   pub shape:    Box<[i64]>,
   pub dtype:    Dtype,
+}
+
+impl Debug for CellType {
+  fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    write!(f, "CellType({:?}{})", self.shape, self.dtype._to_str())
+  }
 }
 
 impl CellType {

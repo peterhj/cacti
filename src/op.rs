@@ -1049,9 +1049,9 @@ pub trait MathSetOps: CellDeref {
     panick_wrap(|| {
       let this = self._deref();
       let rhs = rhs._deref();
-      let ty = ctx_lookup_type(this);
+      //let org_dtype = ctx_lookup_dtype(rhs);
       // FIXME: this should do cast safety checks.
-      let new_dtype = ty.dtype;
+      let new_dtype = ctx_lookup_dtype(this);
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);
       ctx_pop_apply_thunk(CastFutThunkSpec{new_dtype}, this)
@@ -1063,11 +1063,24 @@ pub trait MathSetOps: CellDeref {
     panick_wrap(|| {
       let this = self._deref();
       let rhs = rhs._deref();
-      let ty = ctx_lookup_type(this);
-      let new_dtype = ty.dtype;
+      let org_dtype = ctx_lookup_dtype(rhs);
+      let new_dtype = ctx_lookup_dtype(this);
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(rhs);
-      ctx_pop_apply_thunk(CastFutThunkSpec{new_dtype}, this)
+      match (org_dtype, new_dtype) {
+        (Dtype::Bf16, Dtype::F16) => {
+          ctx_push_cell_arg(rhs.bit_alias(Dtype::U16));
+          ctx_pop_apply_thunk(RawCastBf16F16FutThunkSpec, this)
+        }
+        (Dtype::Bf16, Dtype::F32) => {
+          ctx_push_cell_arg(rhs.bit_alias(Dtype::U16));
+          ctx_pop_apply_thunk(RawCastBf16F32FutThunkSpec, this)
+        }
+        // FIXME: other bf16 special cases.
+        _ => {
+          ctx_push_cell_arg(rhs);
+          ctx_pop_apply_thunk(CastFutThunkSpec{new_dtype}, this)
+        }
+      }
     })
   }
 
@@ -1533,6 +1546,22 @@ pub trait MathUnaryOps: CellDeref {
   }
 
   #[track_caller]
+  fn abs_log2_hist9(&self) -> CellPtr {
+    panick_wrap(|| {
+      let x = self._deref();
+      let org_dtype = ctx_lookup_dtype(x);
+      assert!(ctx_clean_arg());
+      match org_dtype {
+        Dtype::Bf16 => {
+          ctx_push_cell_arg(x.bit_alias(Dtype::U16));
+          ctx_pop_thunk(Bf16RawAbsLog2Hist9FutThunkSpec)
+        }
+        _ => unimplemented!()
+      }
+    })
+  }
+
+  /*#[track_caller]
   fn abs_log2_hist16(&self) -> CellPtr {
     panick_wrap(|| {
       let x = self._deref();
@@ -1540,7 +1569,7 @@ pub trait MathUnaryOps: CellDeref {
       ctx_push_cell_arg(x);
       ctx_pop_thunk(AbsLog2Hist16FutThunkSpec)
     })
-  }
+  }*/
 
   #[track_caller]
   fn square(&self) -> CellPtr {
@@ -1759,6 +1788,15 @@ pub trait MathUnaryOps: CellDeref {
   }
 
   #[track_caller]
+  fn inner_tile(&self, rep_ct: i64) -> CellPtr {
+    panick_wrap(|| {
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(self._deref());
+      ctx_pop_thunk(InnerTileFutThunkSpec{rep_ct})
+    })
+  }
+
+  #[track_caller]
   fn flat_sum(&self) -> CellPtr {
     panick_wrap(|| {
       let op = FlatSumFutThunkSpec;
@@ -1909,13 +1947,14 @@ pub trait CastOps: CellDeref {
         panic!();
       }
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(x);
       match (org_dtype, new_dtype) {
         (Dtype::Bf16, Dtype::F32) => {
-          ctx_pop_thunk(CastBf16F32FutThunkSpec)
+          ctx_push_cell_arg(x.bit_alias(Dtype::U16));
+          ctx_pop_thunk(RawCastBf16F32FutThunkSpec)
         }
         // FIXME: other bf16 special cases.
         _ => {
+          ctx_push_cell_arg(x);
           ctx_pop_thunk(CastFutThunkSpec{new_dtype})
         }
       }
@@ -1931,22 +1970,26 @@ pub trait CastOps: CellDeref {
         return x;
       }
       assert!(ctx_clean_arg());
-      ctx_push_cell_arg(x);
       match (org_dtype, new_dtype) {
         (Dtype::F32, Dtype::Bf16) => {
-          ctx_pop_thunk(CastF32Bf16FutThunkSpec)
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(RawCastF32Bf16FutThunkSpec).bit_alias(Dtype::Bf16)
         }
         (Dtype::F16, Dtype::Bf16) => {
-          ctx_pop_thunk(CastF16Bf16FutThunkSpec)
+          ctx_push_cell_arg(x);
+          ctx_pop_thunk(RawCastF16Bf16FutThunkSpec).bit_alias(Dtype::Bf16)
         }
         (Dtype::Bf16, Dtype::F16) => {
-          ctx_pop_thunk(CastBf16F16FutThunkSpec)
+          ctx_push_cell_arg(x.bit_alias(Dtype::U16));
+          ctx_pop_thunk(RawCastBf16F16FutThunkSpec)
         }
         (Dtype::Bf16, Dtype::F32) => {
-          ctx_pop_thunk(CastBf16F32FutThunkSpec)
+          ctx_push_cell_arg(x.bit_alias(Dtype::U16));
+          ctx_pop_thunk(RawCastBf16F32FutThunkSpec)
         }
         // FIXME: other bf16 special cases.
         _ => {
+          ctx_push_cell_arg(x);
           ctx_pop_thunk(CastFutThunkSpec{new_dtype})
         }
         //_ => unimplemented!()

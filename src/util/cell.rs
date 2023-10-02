@@ -212,7 +212,10 @@ impl CellInvertedMatches {
 
   pub fn get(&self, cel: &StableCell) -> &SmolStr {
     match self.map.get(cel) {
-      None => panic!("bug"),
+      None => {
+        println!("ERROR:  CellInvertedMatches: missing key for {:?}", cel);
+        panic!();
+      }
       Some(&idx) => {
         &self.mat[idx].1
       }

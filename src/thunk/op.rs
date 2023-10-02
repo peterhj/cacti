@@ -441,6 +441,94 @@ impl FutharkThunkSpec for AbsLog2Hist8FutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Bf16RawAbsLog2Hist9FutThunkSpec;
+
+impl FutharkThunkSpec for Bf16RawAbsLog2Hist9FutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.bf16.raw_abs_log2_hist9")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(Dim{ndim: 1, dtype: Dtype::I64})
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    Ok(CellType{shape: Box::new([0x200]), dtype: Dtype::I64})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    let mut code = FutharkThunkGenCode::default();
+    code.abi.arityout = 1;
+    code.abi.set_out(0, FutharkArrayRepr::Nd);
+    code.abi.arityin = 1;
+    code.abi.set_arg(0, FutharkArrayRepr::Nd);
+    match arg[0].dtype {
+      // TODO
+      Dtype::Bf16 => {
+        println!("ERROR:  Bf16RawAbsLog2Hist9FutThunkSpec::gen_futhark:");
+        println!("ERROR:      arg[0].dtype=Bf16 but should bit alias to U16");
+        panic!("bug");
+      }
+      Dtype::U16 => {
+        // FIXME FIXME
+        code.pre_append(format!(r"def u16_nz_log2 (x: u16): i8 ="));
+        code.pre_append(format!(r"{}let v_tab = [0, 7, 1, 13, 8, 10, 2, 14, 6, 12, 9, 5, 11, 4, 3, 15] in", "\t", ));
+        code.pre_append(format!(r"{}let c = 0xf2d_u16 in", "\t", ));
+        code.pre_append(format!(r"{}let x = x | (x >> 1) in", "\t", ));
+        code.pre_append(format!(r"{}let x = x | (x >> 2) in", "\t", ));
+        code.pre_append(format!(r"{}let x = x | (x >> 4) in", "\t", ));
+        code.pre_append(format!(r"{}let x = x | (x >> 8) in", "\t", ));
+        code.pre_append(format!(r"{}v_tab[i64.u16 ((c * x) >> 12)]", "\t", ));
+        match arg[0].ndim() {
+          0 => {
+            code.append(format!(r"let t0 = [{{%0}}] in"));
+          }
+          1 => {
+            code.append(format!(r"let t0 = {{%0}} in"));
+          }
+          2 => {
+            code.append(format!(r"let t0 = flatten {{%0}} in"));
+          }
+          3 => {
+            code.append(format!(r"let t0 = flatten_3d {{%0}} in"));
+          }
+          4 => {
+            code.append(format!(r"let t0 = flatten_4d {{%0}} in"));
+          }
+          _ => unimplemented!()
+        }
+        code.append(format!(r"let n = length t0 in"));
+        code.append(format!(r"let t1 = map (\u ->"));
+        /*code.append(format!(r"let u = bf16.to_bits u in"));*/
+        // FIXME: double check constants below (converted f16 -> bf16).
+        code.append(format!(r"let b = (u >> 7) & 0xff in"));
+        code.append(format!(r"let e = (i16.u16 b) - 0x7f in"));
+        code.append(format!(r"let m = u & 0x7f in"));
+        code.append(format!(r"let v ="));
+        code.append(format!(r"{}if b == 0xff then 0x100", "\t", ));
+        code.append(format!(r"{}else if b == 0 then", "\t", ));
+        code.append(format!(r"{}if m == 0 then -0xff", "\t\t", ));
+        code.append(format!(r"{}else (-126 - 7 + i16.i8 (u16_nz_log2 m))", "\t\t", ));
+        code.append(format!(r"{}else e", "\t", ));
+        code.append(format!(r"in i64.u16 (u16.i16 (v + 0xff))"));
+        code.append(format!(r") (t0 :> [n]{}) in", arg[0].dtype.format_futhark()));
+        code.append(format!(r"let {{%1}} = hist (+) 0 0x200 t1 (replicate n 1) in"));
+      }
+      _ => unimplemented!()
+    }
+    code.into()
+  }
+}
+
+/*#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct AbsLog2Hist16FutThunkSpec;
 
 impl FutharkThunkSpec for AbsLog2Hist16FutThunkSpec {
@@ -527,7 +615,7 @@ impl FutharkThunkSpec for AbsLog2Hist16FutThunkSpec {
     }
     code.into()
   }
-}
+}*/
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct CastFutThunkSpec { pub new_dtype: Dtype }
@@ -575,11 +663,11 @@ impl FutharkThunkSpec for CastFutThunkSpec {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CastBf16F16FutThunkSpec;
+pub struct RawCastBf16F16FutThunkSpec;
 
-impl FutharkThunkSpec for CastBf16F16FutThunkSpec {
+impl FutharkThunkSpec for RawCastBf16F16FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.f16.bf16_cast")
+    Some("futhark.f16.bf16_raw_cast")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -590,38 +678,31 @@ impl FutharkThunkSpec for CastBf16F16FutThunkSpec {
     Some((1, 1))
   }
 
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].dtype != Dtype::Bf16 {
+    if arg[0].dtype != Dtype::U16 {
       return Err(ThunkDimErr::_Bot);
     }
     Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::F16})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].dtype != Dtype::Bf16 {
+    if arg[0].dtype != Dtype::U16 {
       return Err(ThunkTypeErr::_Bot);
     }
     Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::F16})
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     FutharkThunkGenCode::flat_map(arg[0], r"\u -> f16.f32 (f32.from_bits ((u32.u16 u) << 16))")
   }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CastBf16F32FutThunkSpec;
+pub struct RawCastBf16F32FutThunkSpec;
 
-impl FutharkThunkSpec for CastBf16F32FutThunkSpec {
+impl FutharkThunkSpec for RawCastBf16F32FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.f32.bf16_cast")
+    Some("futhark.f32.bf16_raw_cast")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -632,38 +713,31 @@ impl FutharkThunkSpec for CastBf16F32FutThunkSpec {
     Some((1, 1))
   }
 
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
-    if arg[0].dtype != Dtype::Bf16 {
+    if arg[0].dtype != Dtype::U16 {
       return Err(ThunkDimErr::_Bot);
     }
     Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::F32})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
-    if arg[0].dtype != Dtype::Bf16 {
+    if arg[0].dtype != Dtype::U16 {
       return Err(ThunkTypeErr::_Bot);
     }
     Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::F32})
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     FutharkThunkGenCode::flat_map(arg[0], r"\u -> f32.from_bits ((u32.u16 u) << 16)")
   }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CastF32Bf16FutThunkSpec;
+pub struct RawCastF32Bf16FutThunkSpec;
 
-impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
+impl FutharkThunkSpec for RawCastF32Bf16FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.bf16.f32_cast")
+    Some("futhark.bf16_raw.f32_cast")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -674,38 +748,31 @@ impl FutharkThunkSpec for CastF32Bf16FutThunkSpec {
     Some((1, 1))
   }
 
-  /*fn abi(&self) -> Abi {
-    let mut abi = Abi::default();
-    abi.arityin = 1;
-    abi.arityout = 1;
-    abi
-  }*/
-
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     if arg[0].dtype != Dtype::F32 {
       return Err(ThunkDimErr::_Bot);
     }
-    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::Bf16})
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::U16})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
     if arg[0].dtype != Dtype::F32 {
       return Err(ThunkTypeErr::_Bot);
     }
-    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Bf16})
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::U16})
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     FutharkThunkGenCode::flat_map(arg[0], r"\u -> u16.u32 ((f32.to_bits u) >> 16)")
   }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct CastF16Bf16FutThunkSpec;
+pub struct RawCastF16Bf16FutThunkSpec;
 
-impl FutharkThunkSpec for CastF16Bf16FutThunkSpec {
+impl FutharkThunkSpec for RawCastF16Bf16FutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
-    Some("futhark.bf16.f16_cast")
+    Some("futhark.bf16_raw.f16_cast")
   }
 
   fn cost_r0(&self) -> Option<ThunkCostR0> {
@@ -720,14 +787,14 @@ impl FutharkThunkSpec for CastF16Bf16FutThunkSpec {
     if arg[0].dtype != Dtype::F16 {
       return Err(ThunkDimErr::_Bot);
     }
-    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::Bf16})
+    Ok(Dim{ndim: arg[0].ndim, dtype: Dtype::U16})
   }
 
   fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
     if arg[0].dtype != Dtype::F16 {
       return Err(ThunkTypeErr::_Bot);
     }
-    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::Bf16})
+    Ok(CellType{shape: arg[0].shape.clone(), dtype: Dtype::U16})
   }
 
   fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
@@ -3498,6 +3565,67 @@ impl FutharkThunkSpec for InnerSoftmaxCategoricalNLLFutThunkSpec {
     let target = rank.inner_one_hot(inner_len, dtype);
     arg_adj[0] += out_adj.new_shape(dy_shape) * (y - target);
     Ok(FutharkThunkAdj::Spec)
+  }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct InnerTileFutThunkSpec { pub rep_ct: i64 }
+
+impl FutharkThunkSpec for InnerTileFutThunkSpec {
+  fn debug_name(&self) -> Option<&'static str> {
+    Some("futhark.inner_tile")
+  }
+
+  fn cost_r0(&self) -> Option<ThunkCostR0> {
+    Some(ThunkCostR0::Space)
+  }
+
+  fn arity(&self) -> Option<(u16, u16)> {
+    Some((1, 1))
+  }
+
+  fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
+    Ok(arg[0])
+  }
+
+  fn out_ty_(&self, arg: &[CellType]) -> Result<CellType, ThunkTypeErr> {
+    let nd = arg[0].ndim() as usize;
+    if nd == 0 {
+      return Err(ThunkTypeErr::_Bot);
+    }
+    let mut shape = arg[0].shape.clone();
+    shape[nd - 1] *= self.rep_ct;
+    let dtype = arg[0].dtype;
+    Ok(CellType{shape, dtype})
+  }
+
+  fn gen_futhark(&self, arg: &[Dim], _out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+    let mut code = FutharkThunkGenCode::default();
+    code.abi.arityout = 1;
+    code.abi.set_out(0, FutharkArrayRepr::Nd);
+    code.abi.arityin = 1;
+    code.abi.set_arg(0, FutharkArrayRepr::Nd);
+    match arg[0].ndim() {
+      0 => {
+        unimplemented!();
+      }
+      1 => {
+        code.append(format!(r"let {{%1}} = flatten (replicate {} {{%0}}) in", self.rep_ct));
+      }
+      2 => {
+        code.append(format!(r"let {{%1}} = map (\t1 -> flatten (replicate {} t1)) {{%0}} in", self.rep_ct));
+      }
+      3 => {
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> flatten (replicate {} t2)) t1) {{%0}} in", self.rep_ct));
+      }
+      4 => {
+        code.append(format!(r"let {{%1}} = map (\t1 -> map (\t2 -> map (\t3 -> flatten (replicate {} t3)) t2) t1) {{%0}} in", self.rep_ct));
+      }
+      _ => {
+        unimplemented!();
+      }
+    }
+    code.into()
   }
 }
 

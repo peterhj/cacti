@@ -46,6 +46,15 @@ pub struct LlamaConfig {
   /// The number of attention heads per multi-head attention layer.
   pub num_head: i64,
 
+  /// The number of query heads grouped together with a single
+  /// pair of key-value heads.
+  ///
+  /// `q_group == 1` is the usual multi-head attention.
+  ///
+  /// When `q_group > 1`, the key-value head pair is tiled across
+  /// the query group (i.e. multi-query attention).
+  pub q_group:  i64,
+
   /// The hidden unit size of the MLP layer.
   pub mlp_inner_dim: i64,
 
@@ -60,9 +69,6 @@ pub struct LlamaConfig {
 
   /// The pretraining tensor parallelism.
   pub ten_par: Option<i64>,
-
-  /// The attention group size.
-  pub group_sz: Option<i64>,
 
   /// The maximum sequence length; this should not be greater than
   /// the value of `pos_len`.
@@ -82,10 +88,10 @@ impl LlamaConfig {
       tok_dim:    32000,
       head_dim:   100,
       num_head:   32,
+      q_group:    1,
       mlp_inner_dim:  8640,
       pos_len:    2048,
       rms_norm_eps:   1.0e-6,
-      group_sz:   None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -106,10 +112,10 @@ impl LlamaConfig {
       tok_dim:    32000,
       head_dim:   128,
       num_head:   32,
+      q_group:    1,
       mlp_inner_dim:  11008,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
-      group_sz:   None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -130,10 +136,10 @@ impl LlamaConfig {
       tok_dim:    32000,
       head_dim:   128,
       num_head:   40,
+      q_group:    1,
       mlp_inner_dim:  13824,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
-      group_sz:   None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -148,10 +154,10 @@ impl LlamaConfig {
       tok_dim:    32000,
       head_dim:   128,
       num_head:   52,
+      q_group:    1,
       mlp_inner_dim:  17920,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
-      group_sz:   None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -166,10 +172,10 @@ impl LlamaConfig {
       tok_dim:    32000,
       head_dim:   128,
       num_head:   64,
+      q_group:    1,
       mlp_inner_dim:  22016,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
-      group_sz:   None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -213,12 +219,18 @@ impl From<LlamaConfig> for Llama {
     let num_head = cfg.num_head;
     let head_dim = cfg.head_dim;
     let inner_dim = num_head * head_dim;
+    let q_group = cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  Llama::from: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
+    let num_kv_head = num_head / q_group;
+    let kv_inner_dim = num_kv_head * head_dim;
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
     let dtype = cfg.dtype;
-    if !(cfg.group_sz.unwrap_or(1) == 1 &&
-         cfg.ten_par.unwrap_or(1) == 1 &&
+    if !(cfg.ten_par.unwrap_or(1) == 1 &&
          cfg.rope_lin_scale.unwrap_or(1.0) == 1.0)
     {
       println!("ERROR:  Llama::from: llama 2 config is not yet implemented");
@@ -232,8 +244,8 @@ impl From<LlamaConfig> for Llama {
     for _ in 0 .. num_layers {
       let pre_norm = StableCell::array([inner_dim], dtype);
       let q = StableCell::array([inner_dim, inner_dim], dtype);
-      let k = StableCell::array([inner_dim, inner_dim], dtype);
-      let v = StableCell::array([inner_dim, inner_dim], dtype);
+      let k = StableCell::array([kv_inner_dim, inner_dim], dtype);
+      let v = StableCell::array([kv_inner_dim, inner_dim], dtype);
       let o = StableCell::array([inner_dim, inner_dim], dtype);
       let post_norm = StableCell::array([inner_dim], dtype);
       let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
@@ -355,7 +367,13 @@ impl Llama {
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
     let head_dim = self.cfg.head_dim;
-    let inner_dim = num_head * head_dim;
+    //let inner_dim = num_head * head_dim;
+    let q_group = self.cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  Llama::apply: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
+    let num_kv_head = num_head / q_group;
     let mlp_inner_dim = self.cfg.mlp_inner_dim;
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
@@ -402,17 +420,21 @@ impl Llama {
       let k_proj = symplectic_embed(
                    pre_nrm
                   .matmul(false, &self.layers[ell].k, true)
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim])
+                  .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim])
                    );
       let v_proj = pre_nrm
                   .matmul(false, &self.layers[ell].v, true)
+                  .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim]);
+      let k_attn = if q_group > 1 { k_proj.inner_tile(q_group) } else { k_proj }
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let attn = q_proj.block_matmul_scale(false, k_proj, true, 1.0 / (head_dim as f32).sqrt())
+      let v_attn = if q_group > 1 { v_proj.inner_tile(q_group) } else { v_proj }
+                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      let attn = q_proj.block_matmul_scale(false, k_attn, true, 1.0 / (head_dim as f32).sqrt())
                 .cast(f32::dtype_());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
                 .lossy_cast(dtype);
-      let v_attn = attn.block_matmul(false, v_proj, false)
+      let v_attn = attn.block_matmul(false, v_attn, false)
                   .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
@@ -474,7 +496,7 @@ impl From<LlamaConfig> for LlamaCached {
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
     let dtype = cfg.dtype;
-    if !(cfg.group_sz.unwrap_or(1) == 1 &&
+    if !(cfg.q_group == 1 &&
          cfg.ten_par.unwrap_or(1) == 1 &&
          cfg.rope_lin_scale.unwrap_or(1.0) == 1.0)
     {
