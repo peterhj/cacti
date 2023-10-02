@@ -142,18 +142,18 @@ impl PickleDir {
           panic!();
         }
         let offset = t.storage_offset + t.storage_start * dtype.size_bytes() as u64;
-        let size = (t.storage_end - t.storage_start) * dtype.size_bytes() as u64;
+        let rem_size = (t.storage_end - t.storage_start) * dtype.size_bytes() as u64;
         if cfg_debug() {
           println!("DEBUG:  PickleDir::open: key=\"{}\" ty={:?}", safe_ascii(key.as_bytes()), ty);
           println!("DEBUG:  PickleDir::open: stride={:?} span={:?}", stride, span);
           println!("DEBUG:  PickleDir::open: data offset={} start={} end={} dty sz={}",
               t.storage_offset, t.storage_start, t.storage_end, dtype.size_bytes());
-          println!("DEBUG:  PickleDir::open: offset={:?} size={:?}", offset, size);
+          println!("DEBUG:  PickleDir::open: offset={:?} rem size={:?}", offset, rem_size);
         }
-        /*if span != size {
-          println!("WARNING:PickleDir::open: span != size, but continuing...");
+        /*if span != rem_size {
+          println!("WARNING:PickleDir::open: span != rem_size, but continuing...");
         }*/
-        assert!(span <= size);
+        assert!(span <= rem_size);
         assert_eq!((t.storage_end * dtype.size_bytes() as u64), t.storage_size);
         let mut align = 1;
         for shift in 1 ..= 12 {
