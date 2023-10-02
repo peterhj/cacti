@@ -154,7 +154,8 @@ impl PickleDir {
           println!("WARNING:PickleDir::open: span != rem_size, but continuing...");
         }*/
         assert!(span <= rem_size);
-        assert_eq!((t.storage_end * dtype.size_bytes() as u64), t.storage_size);
+        assert!(offset <= t.storage_offset + t.storage_size);
+        assert_eq!(offset + rem_size, t.storage_offset + t.storage_size);
         let mut align = 1;
         for shift in 1 ..= 12 {
           let a = 1 << shift;
