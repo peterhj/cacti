@@ -532,6 +532,7 @@ impl PCtx {
       match self.swap.yeet(addr) {
         None => {}
         Some((loc, icel)) => {
+          //assert!(icel.invalid());
           return Some((loc, pm, icel));
         }
       }
@@ -542,6 +543,7 @@ impl PCtx {
       match gpu.yeet(addr) {
         None => {}
         Some((loc, icel)) => {
+          //assert!(icel.invalid());
           return Some((loc, pm, icel));
         }
       }
@@ -556,6 +558,7 @@ impl PCtx {
       match self.swap.lookup(addr) {
         None => {}
         Some((loc, icel)) => {
+          assert!(!InnerCell_::invalid(&*icel));
           return Some((loc, pm, icel));
         }
       }
@@ -566,6 +569,7 @@ impl PCtx {
       match gpu.lookup(addr) {
         None => {}
         Some((loc, icel)) => {
+          assert!(!InnerCell_::invalid(&*icel));
           return Some((loc, pm, icel));
         }
       }
@@ -580,6 +584,7 @@ impl PCtx {
         match self.swap.lookup(addr) {
           None => {}
           Some((loc, icel)) => {
+            assert!(!InnerCell_::invalid(&*icel));
             return Some((loc, icel));
           }
         }
@@ -595,6 +600,7 @@ impl PCtx {
           match gpu.lookup(addr) {
             None => {}
             Some((loc, icel)) => {
+              assert!(!InnerCell_::invalid(&*icel));
               return Some((loc, icel));
             }
           }
@@ -604,6 +610,32 @@ impl PCtx {
         unimplemented!();
       }
     }
+    None
+  }
+
+  pub fn lookup_mem_reg_(&self, addr: PAddr) -> Option<(MemReg, PMach, Rc<dyn InnerCell_>)> {
+    {
+      let pm = PMach::Swap;
+      match self.swap.lookup_mem_reg_(addr) {
+        None => {}
+        Some((reg, icel)) => {
+          assert!(!InnerCell_::invalid(&*icel));
+          return Some((reg, pm, icel));
+        }
+      }
+    }
+    #[cfg(feature = "nvgpu")]
+    if let Some(gpu) = self.nvgpu.as_ref() {
+      let pm = PMach::NvGpu;
+      match gpu.lookup_mem_reg_(addr) {
+        None => {}
+        Some((reg, icel)) => {
+          assert!(!InnerCell_::invalid(&*icel));
+          return Some((reg, pm, icel));
+        }
+      }
+    }
+    // TODO
     None
   }
 
@@ -667,7 +699,11 @@ impl PCtx {
   pub fn unset_root(&self, addr: PAddr) -> Option<CellPtr> {
     // FIXME
     match self.lookup(addr) {
-      None => panic!("bug"),
+      None => {
+        println!("WARNING:PCtx::unset_root: failed to lookup addr={:?}", addr);
+        //panic!("bug");
+        None
+      }
       Some((_, _, icel)) => {
         let oroot = InnerCell_::root(&*icel);
         InnerCell_::set_root(&*icel, None);
@@ -951,6 +987,8 @@ impl UnsafeMemReg {
 
 pub trait InnerCell {
   // TODO
+  fn invalid(&self) -> bool { unimplemented!(); }
+  fn invalidate(&self) { unimplemented!(); }
   //fn try_borrow(&self) -> () { unimplemented!(); }
   //fn try_borrow_mut(&self) -> () { unimplemented!(); }
   unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> { None }
@@ -964,14 +1002,17 @@ pub trait InnerCell {
   //fn set_pin(&self, _flag: bool) { unimplemented!(); }
   fn tag(&self) -> Option<u32> { unimplemented!(); }
   fn set_tag(&self, _tag: Option<u32>) { unimplemented!(); }
-  fn live(&self) -> bool { unimplemented!(); }
   fn get_ref(&self) -> u32 { unimplemented!(); }
+  fn live(&self) -> bool { unimplemented!(); }
   fn retain(&self) { unimplemented!(); }
   fn release(&self) { unimplemented!(); }
   fn get_pin(&self) -> u16 { unimplemented!(); }
   fn pinned(&self) -> bool { unimplemented!(); }
   fn pin(&self) { unimplemented!(); }
   fn unpin(&self) { unimplemented!(); }
+  fn locked(&self) -> bool { unimplemented!(); }
+  fn lock(&self) { unimplemented!(); }
+  fn unlock(&self) { unimplemented!(); }
   fn _try_borrow(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
   fn _try_borrow_unsafe(&self) -> Result<(), BorrowErr> { Err(BorrowErr::NotImpl) }
   fn _unborrow(&self) { unimplemented!(); }
@@ -984,6 +1025,8 @@ pub trait InnerCell {
 pub trait InnerCell_ {
   fn as_any(&self) -> &dyn Any;
   // TODO
+  fn invalid(&self) -> bool;
+  fn invalidate(&self);
   unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg>;
   //fn as_reg(&self) -> Option<MemReg> { self.as_mem_reg() }
   fn size(&self) -> usize;
@@ -1013,6 +1056,14 @@ pub trait InnerCell_ {
 impl<C: InnerCell + Any> InnerCell_ for C {
   fn as_any(&self) -> &dyn Any {
     self
+  }
+
+  fn invalid(&self) -> bool {
+    InnerCell::invalid(self)
+  }
+
+  fn invalidate(&self) {
+    InnerCell::invalidate(self)
   }
 
   unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> {

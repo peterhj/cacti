@@ -2036,8 +2036,8 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         let mut consts = Vec::new();
         let pstart = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
-          //gpu.mem_pool.borrow().set_back_alloc(true);
-          gpu.mem_pool.borrow().set_alloc_pin(true);
+          gpu.mem_pool.borrow().set_back_alloc(true);
+          //gpu.mem_pool.borrow().set_alloc_pin(true);
           pctx.ctr.next_addr()
         });
         unsafe { FutharkThunkImpl::<CudaBackend>::_setup_object(&mut obj); }
@@ -2056,8 +2056,8 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
         }*/
         let pfin = TL_PCTX.with(|pctx| {
           let gpu = pctx.nvgpu.as_ref().unwrap();
-          //gpu.mem_pool.borrow().set_back_alloc(false);
-          gpu.mem_pool.borrow().set_alloc_pin(false);
+          gpu.mem_pool.borrow().set_back_alloc(false);
+          //gpu.mem_pool.borrow().set_alloc_pin(false);
           pctx.ctr.peek_addr()
         });
         for p in (pstart.to_unchecked() ..= pfin.to_unchecked()) {
@@ -2065,7 +2065,8 @@ impl FutharkThunkImpl_<CudaBackend> for FutharkThunkImpl<CudaBackend> {
           let x = ctr.fresh_cel();
           if cfg_debug() { println!("DEBUG: FutharkThunkImpl::<CudaBackend>::_build_object: const: {:?} -> {:?}", x, p); }
           TL_PCTX.with(|pctx| {
-            pctx.pin(p);
+            // NB: the gpu alloc hook pins by default.
+            /*pctx.pin(p);*/
             // FIXME: the type of the constant could probably be inferred,
             // but easier to defer it until unification.
             let ty = CellType::top();
@@ -3885,12 +3886,18 @@ impl FutharkThunkImpl<CudaBackend> {
               _ => panic!("bug")
             }
             let mut tmp_pin_list = gpu.mem_pool.tmp_pin_list.borrow_mut();
+            if _cfg_debug_mode(mode) || _cfg_debug_mem_pool() {
+            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: tmp pin list={:?}", tmp_pin_list);
+            }
             for &p in tmp_pin_list.iter() {
               gpu.mem_pool.unpin(p);
             }
             tmp_pin_list.clear();
             drop(tmp_pin_list);
             let mut tmp_freelist = gpu.mem_pool.tmp_freelist.borrow_mut();
+            if _cfg_debug_mode(mode) || _cfg_debug_mem_pool() {
+            println!("DEBUG:  FutharkThunkImpl::<CudaBackend>::_enter: out: tmp freelist={:?}", tmp_freelist);
+            }
             tmp_freelist.sort();
             loop {
               let p = match tmp_freelist.pop() {
@@ -3914,6 +3921,10 @@ impl FutharkThunkImpl<CudaBackend> {
             panic!("bug");
           }
         }
+      }
+      if gpu.mem_pool.alloc_break.get() {
+        println!("BREAK:  FutharkThunkImpl::<CudaBackend>::_enter: alloc breakpoint!");
+        panic!();
       }
     });
     });

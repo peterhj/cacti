@@ -663,6 +663,29 @@ impl Mul<f32> for CellPtr {
   }
 }
 
+impl<'l> Mul<f16> for &'l CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn mul(self, rhs: f16) -> CellPtr {
+    panick_wrap(|| {
+      let op = MulScalarFutThunkSpec{val: rhs.into_scalar_val_()};
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(*self);
+      ctx_pop_thunk(op)
+    })
+  }
+}
+
+impl Mul<f16> for CellPtr {
+  type Output = CellPtr;
+
+  #[track_caller]
+  fn mul(self, rhs: f16) -> CellPtr {
+    panick_wrap(|| (&self).mul(rhs))
+  }
+}
+
 impl<'l, R: CellDeref> Mul<R> for &'l CellPtr {
   type Output = CellPtr;
 
@@ -1041,6 +1064,17 @@ pub trait MathSetOps: CellDeref {
       assert!(ctx_clean_arg());
       ctx_push_cell_arg(rhs);
       ctx_pop_apply_thunk(IdentityFutThunkSpec, this)
+    })
+  }
+
+  #[track_caller]
+  fn _set_memcpy<R: CellDeref>(&self, rhs: R) {
+    panick_wrap(|| {
+      let this = self._deref();
+      let rhs = rhs._deref();
+      assert!(ctx_clean_arg());
+      ctx_push_cell_arg(rhs);
+      ctx_pop_apply_thunk(MemcpyThunkSpec, this)
     })
   }
 

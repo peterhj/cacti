@@ -32,6 +32,14 @@ impl SwapCowMemCell {
 }
 
 impl InnerCell for SwapCowMemCell {
+  fn invalid(&self) -> bool {
+    self.flag.get() & 0x80 != 0
+  }
+
+  fn invalidate(&self) {
+    self.flag.set(self.flag.get() | 0x80)
+  }
+
   unsafe fn as_unsafe_mem_reg(&self) -> Option<UnsafeMemReg> {
     if self.mem.as_ptr().is_null() {
       return None;
@@ -68,18 +76,6 @@ impl InnerCell for SwapCowMemCell {
       self.flag.set(self.flag.get() & !0x10);
     }
   }
-
-  /*fn pin(&self) -> bool {
-    (self.flag.get() & 4) != 0
-  }
-
-  fn set_pin(&self, flag: bool) {
-    if flag {
-      self.flag.set(self.flag.get() | 4);
-    } else {
-      self.flag.set(self.flag.get() & !4);
-    }
-  }*/
 
   fn live(&self) -> bool {
     let c = self.refc.get();
@@ -220,6 +216,16 @@ impl SwapPCtx {
     }
   }
 
+  pub fn lookup_mem_reg_(&self, addr: PAddr) -> Option<(MemReg, Rc<SwapCowMemCell>)> {
+    match self.page_tab.borrow().get(&addr) {
+      None => None,
+      Some(icel) => Some((MemReg{
+        ptr:  icel.mem.as_ptr(),
+        sz:   icel.mem.size_bytes(),
+      }, icel.clone()))
+    }
+  }
+
   pub fn _try_alloc_cow(&self, addr: PAddr, ty: &CellType, mem: MmapFileSlice) -> Result<Rc<SwapCowMemCell>, PMemErr> {
     if cfg_debug() {
       println!("DEBUG: SwapPCtx::_try_alloc: addr={:?} ty={:?} mem sz={}",
@@ -296,6 +302,8 @@ impl SwapPCtx {
     match self.page_tab.borrow_mut().remove(&addr) {
       None => None,
       Some(icel) => {
+        assert!(!InnerCell::invalid(&*icel));
+        InnerCell::invalidate(&*icel);
         let sz = icel.mem.size_bytes();
         self.usage.fetch_sub(sz);
         Some((Locus::Mem, icel))

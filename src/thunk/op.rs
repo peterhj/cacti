@@ -5454,6 +5454,9 @@ impl ThunkSpec for MemcpyThunkSpec {
 
   fn gen_impl_(&self, spec_dim: Vec<Dim>, pmach: PMach) -> Option<Rc<dyn ThunkImpl_>> {
     match pmach {
+      PMach::Smp => {
+        Some(Rc::new(MemcpySmpThunkImpl::default()))
+      }
       #[cfg(feature = "nvgpu")]
       PMach::NvGpu => {
         Some(Rc::new(MemcpyNvGpuThunkImpl::default()))
@@ -5463,6 +5466,98 @@ impl ThunkSpec for MemcpyThunkSpec {
         None
       }
     }
+  }
+}
+
+#[derive(Default)]
+pub struct MemcpySmpThunkImpl;
+
+impl ThunkImpl for MemcpySmpThunkImpl {
+  fn apply(&self, ctr: &CtxCtr, spec_: &dyn ThunkSpec_, _param: &[ScalarVal_], arg: &[(CellPtr, Clock)], th: ThunkPtr, out: CellPtr, prev_oclk: Clock, oclk: Clock) -> ThunkResult {
+    if cfg_debug() { println!("DEBUG: MemcpySmpThunkImpl::apply: arg={:?} out={:?} oclk={:?}", arg, out, oclk); }
+    let spec = spec_.as_any().downcast_ref::<MemcpyThunkSpec>().unwrap();
+    TL_CTX.with(|ctx| {
+    let mut arg_ty_ = Vec::with_capacity(arg.len());
+    for &(x, _) in arg.iter() {
+      match ctx.env.borrow()._lookup_view(x) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          arg_ty_.push(e.ty.clone());
+        }
+      }
+    }
+    let out_ty_ = ThunkSpec::out_ty_(spec, &arg_ty_).unwrap();
+    let arg_sz = arg_ty_[0].packed_span_bytes();
+    let out_sz = out_ty_.packed_span_bytes();
+    assert_eq!(arg_sz, out_sz);
+    let sz = out_sz as usize;
+    TL_PCTX.with(|pctx| {
+      let loc = Locus::Mem;
+      let src_ptr = match ctx.env.borrow().pread_view(arg[0].0, arg[0].1, loc) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          assert_eq!(e.ty, &arg_ty_[0]);
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: MemcpySmpThunkImpl::_enter: arg is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
+            &mut Cell_::Phy(.., ref mut pcel) => {
+              let pcel_addr = match pcel.lookup_loc(loc) {
+                None => panic!("bug"),
+                Some((_, _, addr)) => addr
+              };
+              let (reg, _, _) = pctx.lookup_mem_reg_(pcel_addr).unwrap();
+              let base = reg.as_ptr() as *const u8;
+              let ptr = unsafe { base.offset(v_ty.pointer_offset() as _) };
+              // FIXME: size check.
+              ptr
+            }
+            _ => panic!("bug")
+          }
+        }
+      };
+      let dst_ptr = match ctx.env.borrow().pwrite_view(out, oclk, loc) {
+        Err(_) => panic!("bug"),
+        Ok(e) => {
+          assert_eq!(e.ty, &out_ty_);
+          let v_ty = match e.view().eval_contiguous(e.root_ty) {
+            Err(_) => {
+              println!("ERROR: MemcpySmpThunkImpl::_enter: output is not a zero-copy (contiguous) view");
+              panic!();
+            }
+            Ok(ty) => ty
+          };
+          assert_eq!(e.ty, v_ty.as_ref());
+          let mut cel_ = e.cel_.borrow_mut();
+          match &mut *cel_ {
+            &mut Cell_::Phy(.., ref mut pcel) => {
+              let pcel_addr = match pcel.lookup_loc(loc) {
+                None => panic!("bug"),
+                Some((_, _, addr)) => addr
+              };
+              let (reg, _, _) = pctx.lookup_mem_reg_(pcel_addr).unwrap();
+              let base = reg.as_ptr() as *mut u8;
+              let ptr = unsafe { base.offset(v_ty.pointer_offset() as _) };
+              // FIXME: size check.
+              ptr
+            }
+            _ => panic!("bug")
+          }
+        }
+      };
+      // FIXME: check that we can do non-overlapping copy.
+      pctx.smp.th_pool.memcpy(dst_ptr, src_ptr, sz);
+      //let t1 = Stopwatch::tl_stamp();
+      //println!("DEBUG: MemcpySmpThunkImpl::apply: OK elapsed: {:.06} s", t1 - t0);
+      Ok(())
+    })
+    })
   }
 }
 
@@ -5580,7 +5675,7 @@ impl ThunkImpl for MemcpyNvGpuThunkImpl {
         Ok(_) => Ok(())
       }?;
       //let t1 = Stopwatch::tl_stamp();
-      //println!("DEBUG: MemcpyNvpuThunkImpl::apply: OK elapsed: {:.06} s", t1 - t0);
+      //println!("DEBUG: MemcpyNvGpuThunkImpl::apply: OK elapsed: {:.06} s", t1 - t0);
       Ok(())
     })
     })

@@ -160,6 +160,8 @@ impl Ctx {
       pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
+        gpu._dump_sizes();
+        gpu._dump_free();
       }
       }
       for &x in self.ctr.celfront.borrow().iter() {
@@ -193,6 +195,9 @@ impl Ctx {
                 }
                 drop(e);
               }
+              if x.to_unchecked() == 726 {
+                println!("WARNING:Ctx::reset: gc: x={:?}", x);
+              }
               assert!(env.celtab.remove(&x).is_some());
               let _ = env.celroot.borrow_mut().remove(&x);
               let _ = spine_env.state.remove(&x);
@@ -207,6 +212,8 @@ impl Ctx {
       pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
+        gpu._dump_sizes();
+        gpu._dump_free();
       }
       }
     });
@@ -219,7 +226,8 @@ impl Ctx {
     env._reset();
     drop(env);
     self.thunkenv.borrow_mut()._reset();
-    self.spine._reset()
+    let rst = self.spine._reset();
+    rst
   }
 }
 
@@ -1590,7 +1598,10 @@ impl CtxEnv {
     match self.celtab.get(&root) {
       None => return Some(Err(CellDerefErr::MissingRoot)),
       Some(e) => {
-        let cel_ = e.cel_.borrow();
+        let cel_ = match e.cel_.try_borrow() {
+          Err(_) => return None,
+          Ok(cel_) => cel_
+        };
         match &*cel_ {
           &Cell_::Top(.., optr) => {
             assert_eq!(root, optr);

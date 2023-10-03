@@ -64,6 +64,8 @@ pub struct LlamaConfig {
   /// The RMS-norm variance epsilon.
   pub rms_norm_eps: f32,
 
+  pub param_scale: Option<f32>,
+
   /// Linear RoPE scaling.
   pub rope_lin_scale: Option<f32>,
 
@@ -92,6 +94,7 @@ impl LlamaConfig {
       mlp_inner_dim:  8640,
       pos_len:    2048,
       rms_norm_eps:   1.0e-6,
+      param_scale:    None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -116,6 +119,7 @@ impl LlamaConfig {
       mlp_inner_dim:  11008,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
+      param_scale:    None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -140,6 +144,7 @@ impl LlamaConfig {
       mlp_inner_dim:  13824,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
+      param_scale:    None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -158,6 +163,7 @@ impl LlamaConfig {
       mlp_inner_dim:  17920,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
+      param_scale:    None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -176,6 +182,7 @@ impl LlamaConfig {
       mlp_inner_dim:  22016,
       pos_len:    2048,
       rms_norm_eps:   1.0e-5,
+      param_scale:    None,
       ten_par:    None,
       rope_lin_scale: None,
       seq_cap:    2048,
@@ -378,6 +385,10 @@ impl Llama {
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
+    // FIXME
+    //let param_inv_scale: Option<f32> = None;
+    //let param_inv_scale: Option<f32> = self.cfg.param_scale.map(|c| 1.0 / c);
+    let param_inv_scale: Option<f16> = self.cfg.param_scale.map(|c| f16::from_f32(1.0 / c));
     let dtype = self.cfg.dtype;
     let in_tok = in_tok._deref().const_();
     let rms_norm = |x: &CellPtr, weight: &StableCell, eps: f32, dtype: Dtype| {
@@ -410,51 +421,76 @@ impl Llama {
     let mut stream = in_tok;
     stream = self.embed.outer_select(stream)
             .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+    if let Some(inv_scale) = param_inv_scale {
+      stream = stream * inv_scale;
+    }
     for ell in 0 .. num_layer as usize {
       let pre_nrm = rms_norm(&stream, &self.layers[ell].pre_norm, rms_norm_eps, dtype);
-      let q_proj = symplectic_embed(
-                   pre_nrm
-                  .matmul(false, &self.layers[ell].q, true)
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim])
-                   );
-      let k_proj = symplectic_embed(
-                   pre_nrm
-                  .matmul(false, &self.layers[ell].k, true)
-                  .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim])
-                   );
-      let v_proj = pre_nrm
-                  .matmul(false, &self.layers[ell].v, true)
-                  .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim]);
-      let k_attn = if q_group > 1 { k_proj.inner_tile(q_group) } else { k_proj }
+      let mut q_stream = pre_nrm;
+      q_stream = q_stream.matmul(false, &self.layers[ell].q, true)
+                .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        q_stream = q_stream * inv_scale;
+      }
+      q_stream = symplectic_embed(q_stream);
+      let mut k_stream = pre_nrm;
+      k_stream = k_stream.matmul(false, &self.layers[ell].k, true)
+                .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        k_stream = k_stream * inv_scale;
+      }
+      k_stream = symplectic_embed(k_stream);
+      let mut v_stream = pre_nrm;
+      v_stream = v_stream.matmul(false, &self.layers[ell].v, true)
+                .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        v_stream = v_stream * inv_scale;
+      }
+      let k_attn = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let v_attn = if q_group > 1 { v_proj.inner_tile(q_group) } else { v_proj }
+      let v_attn = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let attn = q_proj.block_matmul_scale(false, k_attn, true, 1.0 / (head_dim as f32).sqrt())
+      let attn = q_stream.block_matmul_scale(false, k_attn, true, 1.0 / (head_dim as f32).sqrt())
                 .cast(f32::dtype_());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
                 .lossy_cast(dtype);
-      let v_attn = attn.block_matmul(false, v_attn, false)
-                  .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
-      let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      stream = stream + o_proj;
+      let attn = attn.block_matmul(false, v_attn, false)
+                .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
+      let mut o_stream = attn;
+      o_stream = o_stream.matmul(false, &self.layers[ell].o, true)
+                .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        o_stream = o_stream * inv_scale;
+      }
+      stream = stream + o_stream;
       let post_nrm = rms_norm(&stream, &self.layers[ell].post_norm, rms_norm_eps, dtype);
-      let up_proj = post_nrm
-                   .matmul(false, &self.layers[ell].up, true);
-      let gate_proj = post_nrm
-                     .matmul(false, &self.layers[ell].gate, true);
-      let gate_proj = gate_proj.standard_silu();
-      let gate_up = gate_proj * up_proj;
-      let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
-                     .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      stream = stream + down_proj;
+      let mut up_stream = post_nrm;
+      up_stream = up_stream.matmul(false, &self.layers[ell].up, true);
+      if let Some(inv_scale) = param_inv_scale {
+        up_stream = up_stream * inv_scale;
+      }
+      let mut gate_stream = post_nrm;
+      gate_stream = gate_stream.matmul(false, &self.layers[ell].gate, true);
+      if let Some(inv_scale) = param_inv_scale {
+        gate_stream = gate_stream * inv_scale;
+      }
+      gate_stream = gate_stream.standard_silu();
+      let mut down_stream = gate_stream * up_stream;
+      down_stream = down_stream.matmul(false, &self.layers[ell].down, true)
+                   .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        down_stream = down_stream * inv_scale;
+      }
+      stream = stream + down_stream;
     }
-    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
-    let out_lm_logit = stream
-                      .matmul(false, &self.lm_head, true)
-                      .new_shape([ubat_sz, seq_cap, tok_dim])
-                      .keep();
+    stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
+    stream = stream.matmul(false, &self.lm_head, true)
+                   .new_shape([ubat_sz, seq_cap, tok_dim]);
+    if let Some(inv_scale) = param_inv_scale {
+      stream = stream * inv_scale;
+    }
+    let out_lm_logit = stream.keep();
     let logit32 = out_lm_logit.cast(f32::dtype_());
     let out_lm_prob = logit32.inner_softmax().keep();
     let in_lm_tok = in_lm_tok.const_();

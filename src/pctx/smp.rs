@@ -316,6 +316,8 @@ impl SmpThreadPool {
   }
 
   pub fn memcpy(&self, dst_ptr: *mut u8, src_ptr: *const u8, sz: usize) {
+    assert!((dst_ptr as usize + sz <= src_ptr as usize) ||
+            (src_ptr as usize + sz <= dst_ptr as usize));
     let thsz = self.num_threads();
     let mut chunks = Vec::with_capacity(thsz);
     for r in 0 .. thsz {
