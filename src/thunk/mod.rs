@@ -3902,9 +3902,12 @@ impl FutharkThunkImpl<CudaBackend> {
             loop {
               let p = match tmp_freelist.pop() {
                 None => break,
-                Some(p) => p
+                Some((p, _)) => p
               };
               assert!(p != oaddr);
+              if p.is_nil() {
+                continue;
+              }
               let icel = gpu.mem_pool.release(p).unwrap();
               assert!(InnerCell::root(&*icel).is_none());
             }

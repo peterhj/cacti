@@ -172,6 +172,10 @@ impl PAddr {
   pub fn to_unchecked(&self) -> u64 {
     self.bits
   }
+
+  pub fn is_nil(&self) -> bool {
+    self.bits == 0
+  }
 }
 
 /*#[derive(Clone, Copy)]

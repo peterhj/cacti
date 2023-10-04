@@ -1395,7 +1395,7 @@ pub struct NvGpuMemPool {
   pub soft_oom_scan: Cell<usize>,
   pub front_tag:    RefCell<Option<u32>>,
   pub tmp_pin_list: RefCell<Vec<PAddr>>,
-  pub tmp_freelist: RefCell<Vec<PAddr>>,
+  pub tmp_freelist: RefCell<Vec<(PAddr, usize)>>,
   pub free_index:   RefCell<BTreeSet<Region>>,
   pub size_index:   RefCell<BTreeMap<usize, BTreeSet<PAddr>>>,
   pub alloc_index:  RefCell<BTreeMap<Region, PAddr>>,
@@ -1550,6 +1550,13 @@ impl NvGpuMemPool {
     }
   }
 
+  pub fn lookup(&self, addr: PAddr) -> Option<Rc<NvGpuInnerCell>> {
+    match self.cel_map.borrow().get(&addr) {
+      None => None,
+      Some(icel) => Some(icel.clone())
+    }
+  }
+
   pub fn rev_lookup(&self, query_dptr: u64) -> Option<(Region, Option<PAddr>)> {
     //println!("DEBUG: NvGpuMemPool::lookup_dptr: query dptr=0x{:016x}", query_dptr);
     //println!("DEBUG: NvGpuMemPool::lookup_dptr: front base=0x{:016x}", self.front_base);
@@ -1580,6 +1587,7 @@ impl NvGpuMemPool {
   }
 
   pub fn try_pre_alloc_with_tag(&self, query_sz: usize, query_tag: u32, unify: &mut TagUnifier) -> NvGpuMemPoolReq {
+    assert!(query_sz > 0);
     if let Some(&tag) = self.front_tag.borrow().as_ref() {
       if unify.find(query_tag) == unify.find(tag) {
         //return self._try_front_pre_alloc(query_sz);
@@ -1589,6 +1597,7 @@ impl NvGpuMemPool {
   }
 
   pub fn try_pre_alloc(&self, query_sz: usize) -> NvGpuMemPoolReq {
+    assert!(query_sz > 0);
     if self.back_alloc.get() {
       self._try_back_pre_alloc(query_sz)
     } else {
@@ -2358,20 +2367,27 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
   assert!(!dptr.is_null());
   TL_PCTX.with(|pctx| {
     let gpu = pctx.nvgpu.as_ref().unwrap();
+    // NB: futhark may emit zero-sized certificates, "allocate" those specially.
+    if sz == 0 {
+      let tmp_dptr = gpu.mem_pool.front_base + gpu.mem_pool.front_sz as u64;
+      unsafe {
+        write(dptr, tmp_dptr);
+      }
+      return 0;
+    }
     let mut retry = false;
     'retry: loop {
       let (req, tag) = if raw_tag.is_null() {
-        if cfg_debug() { println!("DEBUG:  tl_pctx_nvgpu_alloc_hook: sz={} ctag=(null)",
-            sz,
-        ); }
+        if cfg_debug() {
+          println!("DEBUG:  tl_pctx_nvgpu_alloc_hook: sz={} ctag=(null)", sz);
+        }
         let req = gpu.mem_pool.try_pre_alloc(sz);
         (req, None)
       } else {
         let ctag = ctag.unwrap();
-        if cfg_debug() { println!("DEBUG:  tl_pctx_nvgpu_alloc_hook: sz={} ctag=\"{}\"",
-            sz,
-            safe_ascii(ctag.to_bytes()),
-        ); }
+        if cfg_debug() {
+          println!("DEBUG:  tl_pctx_nvgpu_alloc_hook: sz={} ctag=\"{}\"", sz, safe_ascii(ctag.to_bytes()));
+        }
         let tag = TagUnifier::parse_tag(ctag.to_bytes()).unwrap();
         let mut unify = &mut *pctx.tagunify.borrow_mut();
         unify.find(tag);
@@ -2402,6 +2418,27 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
           continue 'retry;
         }
         _ => {
+          if gpu.mem_pool.tmp_freelist.borrow().len() > 0 {
+            let req_sz = req.size();
+            let mut freelist = gpu.mem_pool.tmp_freelist.borrow_mut();
+            for (idx, &(p, free_sz)) in freelist.iter().enumerate() {
+              if p.is_nil() {
+                continue;
+              }
+              if req_sz == free_sz {
+                freelist[idx] = (PAddr::nil(), 0);
+                let cel = gpu.mem_pool.lookup(p).unwrap();
+                unsafe {
+                  write(dptr, cel.dptr.get());
+                }
+                if cfg_debug() {
+                  println!("DEBUG:  tl_pctx_nvgpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?} freelist",
+                      p, cel.dptr.get(), req_sz, tag);
+                }
+                return 0;
+              }
+            }
+          }
           let p = pctx.ctr.fresh_addr();
           let cel = gpu.mem_pool.alloc(p, req);
           //if gpu.mem_pool.alloc_pin.get() {
@@ -2412,9 +2449,10 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
           unsafe {
             write(dptr, cel.dptr.get());
           }
-          if cfg_debug() { println!("DEBUG:  tl_pctx_nvgpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
-              p, cel.dptr.get(), req.size(), tag,
-          ); }
+          if cfg_debug() {
+            println!("DEBUG:  tl_pctx_nvgpu_alloc_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?} fresh",
+                p, cel.dptr.get(), req.size(), tag);
+          }
         }
       }
       return 0;
@@ -2424,10 +2462,15 @@ pub extern "C" fn tl_pctx_nvgpu_alloc_hook(dptr: *mut u64, sz: usize, raw_tag: *
 
 pub extern "C" fn tl_pctx_nvgpu_free_hook(dptr: u64) -> c_int {
   TL_PCTX.try_with(|pctx| {
-    if cfg_debug() { println!("DEBUG:  tl_pctx_nvgpu_free_hook: dptr=0x{:016x}",
-        dptr,
-    ); }
+    if cfg_debug() {
+      println!("DEBUG:  tl_pctx_nvgpu_free_hook: dptr=0x{:016x}", dptr);
+    }
     let gpu = pctx.nvgpu.as_ref().unwrap();
+    // NB: futhark may emit zero-sized certificates, "free" those specially.
+    let tmp_dptr = gpu.mem_pool.front_base + gpu.mem_pool.front_sz as u64;
+    if dptr == tmp_dptr {
+      return 0;
+    }
     let p = match gpu.mem_pool.rev_lookup(dptr) {
       Some((_, Some(p))) => p,
       _ => {
@@ -2435,20 +2478,22 @@ pub extern "C" fn tl_pctx_nvgpu_free_hook(dptr: u64) -> c_int {
         panic!("bug");
       }
     };
-    gpu.mem_pool.tmp_freelist.borrow_mut().push(p);
-    match gpu.mem_pool.cel_map.borrow().get(&p) {
+    let sz = match gpu.mem_pool.cel_map.borrow().get(&p) {
       None => panic!("bug"),
       Some(cel) => {
-        if cfg_debug() { println!("DEBUG:  tl_pctx_nvgpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
-            p, cel.dptr.get(), InnerCell::size(&**cel), InnerCell::tag(&**cel),
-        ); }
+        if cfg_debug() {
+          println!("DEBUG:  tl_pctx_nvgpu_free_hook:   addr={:?} dptr=0x{:016x} size={} tag={:?}",
+              p, cel.dptr.get(), InnerCell::size(&**cel), InnerCell::tag(&**cel));
+        }
+        InnerCell::size(&**cel)
       }
-    }
+    };
+    gpu.mem_pool.tmp_freelist.borrow_mut().push((p, sz));
     0
   }).unwrap_or_else(|_| {
-    if cfg_debug() { println!("DEBUG: tl_pctx_nvgpu_free_hook: dptr=0x{:016x} (pctx deinit)",
-        dptr,
-    ); }
+    if cfg_debug() {
+      println!("DEBUG: tl_pctx_nvgpu_free_hook: dptr=0x{:016x} (pctx deinit)", dptr);
+    }
     0
   })
 }
