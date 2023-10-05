@@ -484,13 +484,13 @@ impl Llama {
       }
       stream = stream + down_stream;
     }
-    stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
-    stream = stream.matmul(false, &self.lm_head, true)
-                   .new_shape([ubat_sz, seq_cap, tok_dim]);
+    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
+    let mut lm_head_stream = stream.matmul(false, &self.lm_head, true)
+                            .new_shape([ubat_sz, seq_cap, tok_dim]);
     if let Some(inv_scale) = param_inv_scale {
-      stream = stream * inv_scale;
+      lm_head_stream = lm_head_stream * inv_scale;
     }
-    let out_lm_logit = stream.keep();
+    let out_lm_logit = lm_head_stream.keep();
     let logit32 = out_lm_logit.cast(f32::dtype_());
     let out_lm_prob = logit32.inner_softmax().keep();
     let in_lm_tok = in_lm_tok.const_();

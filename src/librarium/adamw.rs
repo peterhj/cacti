@@ -6,7 +6,8 @@ pub struct AdamW32 {
   /// A multiplicative un-scaling factor to apply to the
   /// gradients _before_ adding them to the exponential
   /// moving average moments.
-  pub grad_unscale: f32,
+  //pub grad_unscale: f32,
+  pub grad_scale: Option<f32>,
 
   /// The learning rate.
   pub lr: f32,
@@ -29,7 +30,8 @@ pub struct AdamW32 {
 impl Default for AdamW32 {
   fn default() -> AdamW32 {
     AdamW32{
-      grad_unscale: 1.0,
+      //grad_unscale: 1.0,
+      grad_scale: None,
       lr: 1.0e-3,
       wd: 0.0,
       a1: 1.0e-1,
@@ -42,8 +44,9 @@ impl Default for AdamW32 {
 
 impl AdamW32 {
   pub fn step(&self, iter_nr: i32, grad: &StableCell, grad1_avg: &StableCell, grad2_avg: &StableCell, master: &StableCell) {
-    grad1_avg.init_online_average_scale(grad, self.grad_unscale, self.a1);
-    grad2_avg.init_online_average_square_scale(grad, self.grad_unscale, self.a2);
+    let grad_unscale = self.grad_scale.map(|c| 1.0 / c).unwrap_or(1.0);
+    grad1_avg.init_online_average_scale(grad, grad_unscale, self.a1);
+    grad2_avg.init_online_average_square_scale(grad, grad_unscale, self.a2);
     master.init_online_adamw_update32(
         grad1_avg,
         grad2_avg,
