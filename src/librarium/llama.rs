@@ -32,7 +32,7 @@ limitations under the License. */
 // distributed according to the Apache 2.0 license.
 
 /// Hyperparameters for specifying a LLaMA-style language model.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, RustcDecodable, RustcEncodable)]
 pub struct LlamaConfig {
   /// The number of layers.
   pub num_layer: i64,
@@ -64,6 +64,7 @@ pub struct LlamaConfig {
   /// The RMS-norm variance epsilon.
   pub rms_norm_eps: f32,
 
+  /// Optional implicit parameter scaling that needs to be undone.
   pub param_scale: Option<f32>,
 
   /// Linear RoPE scaling.
@@ -300,6 +301,51 @@ impl Llama {
     matches.inv()
   }
 
+  pub fn match_cell_split_fp16(&self, split: &CellSplitMmap) -> CellInvMatches {
+    assert_eq!(self.cfg.dtype, Dtype::F16);
+    let mut matcher = CellMatcher::new();
+    matcher.insert(("embed", "fp16"), self.embed.clone());
+    for i in 0 .. self.layers.len() {
+      matcher.insert((i, "input_layernorm", "fp16"), self.layers[i].pre_norm.clone());
+      matcher.insert((i, "attn", "q_proj", "fp16"), self.layers[i].q.clone());
+      matcher.insert((i, "attn", "k_proj", "fp16"), self.layers[i].k.clone());
+      matcher.insert((i, "attn", "v_proj", "fp16"), self.layers[i].v.clone());
+      matcher.insert((i, "attn", "o_proj", "fp16"), self.layers[i].o.clone());
+      matcher.insert((i, "post_attention_layernorm", "fp16"), self.layers[i].post_norm.clone());
+      matcher.insert((i, "mlp", "gate", "fp16"), self.layers[i].gate.clone());
+      matcher.insert((i, "mlp", "up", "fp16"), self.layers[i].up.clone());
+      matcher.insert((i, "mlp", "down", "fp16"), self.layers[i].down.clone());
+    }
+    matcher.insert(("norm", "fp16"), self.head_norm.clone());
+    matcher.insert(("lm_head", "fp16"), self.lm_head.clone());
+    let matches = matcher.match_(split.clone_keys());
+    matches.inv()
+  }
+
+  pub fn match_cell_split(&self, split: &CellSplitMmap) -> CellInvMatches {
+    let fp = match self.cfg.dtype {
+      Dtype::F16 => "fp16",
+      _ => unimplemented!()
+    };
+    let mut matcher = CellMatcher::new();
+    matcher.insert(("embed", "param", fp), self.embed.clone());
+    for i in 0 .. self.layers.len() {
+      matcher.insert((i, "input_layernorm", "param", fp), self.layers[i].pre_norm.clone());
+      matcher.insert((i, "attn", "q_proj", "param", fp), self.layers[i].q.clone());
+      matcher.insert((i, "attn", "k_proj", "param", fp), self.layers[i].k.clone());
+      matcher.insert((i, "attn", "v_proj", "param", fp), self.layers[i].v.clone());
+      matcher.insert((i, "attn", "o_proj", "param", fp), self.layers[i].o.clone());
+      matcher.insert((i, "post_attention_layernorm", "param", fp), self.layers[i].post_norm.clone());
+      matcher.insert((i, "mlp", "gate", "param", fp), self.layers[i].gate.clone());
+      matcher.insert((i, "mlp", "up", "param", fp), self.layers[i].up.clone());
+      matcher.insert((i, "mlp", "down", "param", fp), self.layers[i].down.clone());
+    }
+    matcher.insert(("norm", "param", fp), self.head_norm.clone());
+    matcher.insert(("lm_head", "param", fp), self.lm_head.clone());
+    let matches = matcher.match_(split.clone_keys());
+    matches.inv()
+  }
+
   pub fn clone_param(&self) -> Vec<StableCell> {
     let mut param = Vec::new();
     param.push(self.embed.clone());
@@ -440,22 +486,22 @@ impl Llama {
         k_stream = k_stream * inv_scale;
       }
       k_stream = symplectic_embed(k_stream);
+      k_stream = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
+                .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
       let mut v_stream = pre_nrm;
       v_stream = v_stream.matmul(false, &self.layers[ell].v, true)
                 .new_shape([ubat_sz, seq_cap, num_kv_head, head_dim]);
       if let Some(inv_scale) = param_inv_scale {
         v_stream = v_stream * inv_scale;
       }
-      let k_attn = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let v_attn = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
-                  .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-      let attn = q_stream.block_matmul_scale(false, k_attn, true, 1.0 / (head_dim as f32).sqrt())
+      v_stream = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
+                .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+      let attn = q_stream.block_matmul_scale(false, k_stream, true, 1.0 / (head_dim as f32).sqrt())
                 .cast(f32::dtype_());
       let attn = block_causal_attention_mask(attn)
                 .inner_softmax()
                 .lossy_cast(dtype);
-      let attn = attn.block_matmul(false, v_attn, false)
+      let attn = attn.block_matmul(false, v_stream, false)
                 .new_shape([ubat_sz * seq_cap, num_head * head_dim]);
       let mut o_stream = attn;
       o_stream = o_stream.matmul(false, &self.layers[ell].o, true)
@@ -802,6 +848,13 @@ impl LlamaCached {
               .new_shape([diff_seq_len, num_head * head_dim])
               .matmul(false, &self.layers[ell].v, true)
               .new_shape([1, diff_seq_len, num_head, head_dim]);
+        // FIXME: query group.
+        /*
+        let k_attn = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
+                    .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+        let v_attn = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
+                    .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
+        */
         let attn =
                q_proj
               .block_matmul_scale(

@@ -13,6 +13,7 @@ use std::convert::{TryInto};
 use std::ffi::{c_void};
 use std::fs::{File};
 use std::mem::{swap};
+use std::ops::{RangeBounds, Bound};
 #[cfg(unix)] use std::os::unix::fs::{MetadataExt};
 #[cfg(unix)] use std::os::unix::io::{AsRawFd};
 use std::ptr::{null_mut};
@@ -44,6 +45,10 @@ impl MmapFileSlice {
   }
 
   pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    self.as_bytes_unsafe()
+  }
+
+  pub unsafe fn as_bytes_unsafe(&self) -> &[u8] {
     let ptr = self.as_ptr();
     from_raw_parts(ptr as *mut u8 as *const u8, self.sz)
   }
@@ -104,6 +109,10 @@ impl MmapFile {
   }
 
   pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    self.as_bytes_unsafe()
+  }
+
+  pub unsafe fn as_bytes_unsafe(&self) -> &[u8] {
     from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 
@@ -114,7 +123,18 @@ impl MmapFile {
     }
   }
 
-  pub fn slice(&self, start: usize, end: usize) -> MmapFileSlice {
+  //pub fn slice(&self, start: usize, end: usize) -> MmapFileSlice {}
+  pub fn slice<R: RangeBounds<usize>>(&self, r: R) -> MmapFileSlice {
+    let start = match r.start_bound() {
+      Bound::Included(&lb) => lb,
+      Bound::Excluded(&lb) => lb + 1,
+      Bound::Unbounded => 0
+    };
+    let end = match r.end_bound() {
+      Bound::Included(&lb) => lb + 1,
+      Bound::Excluded(&lb) => lb,
+      Bound::Unbounded => self.size
+    };
     let off = start;
     let sz = end - start;
     MmapFileSlice{file: self.clone(), off, sz}
@@ -216,6 +236,10 @@ impl MmapBuf {
   }
 
   pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    self.as_bytes_unsafe()
+  }
+
+  pub unsafe fn as_bytes_unsafe(&self) -> &[u8] {
     from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 
@@ -243,6 +267,10 @@ impl UnsafeMmapRef {
   }
 
   pub unsafe fn as_unsafe_bytes(&self) -> &[u8] {
+    self.as_bytes_unsafe()
+  }
+
+  pub unsafe fn as_bytes_unsafe(&self) -> &[u8] {
     from_raw_parts(self.ptr as *mut u8 as *const u8, self.size)
   }
 }

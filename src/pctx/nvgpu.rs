@@ -1704,10 +1704,13 @@ impl NvGpuMemPool {
   }
 
   pub fn _front_alloc(&self, addr: PAddr, offset: usize, req_sz: usize, next_offset: usize) -> Rc<NvGpuInnerCell> {
-    if offset < self.front_cursor.get() {
+    if offset == self.front_cursor.get() {
+      self.front_cursor.set(next_offset);
+    } else if offset < self.front_cursor.get() {
       assert!(offset + req_sz <= self.front_cursor.get());
       let mut free_index = self.free_index.borrow_mut();
       let mut free_idx_iter = free_index.iter();
+      let mut f = false;
       for &old_reg in &mut free_idx_iter {
         if old_reg.off == offset {
           drop(free_idx_iter);
@@ -1727,11 +1730,13 @@ impl NvGpuMemPool {
           } else {
             unreachable!();
           }
+          f = true;
           break;
         }
       }
+      assert!(f);
     } else {
-      self.front_cursor.set(next_offset);
+      unreachable!();
     }
     let dptr = self.front_base + offset as u64;
     //let write = GpuSnapshot::fresh(self.dev());

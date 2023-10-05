@@ -1373,7 +1373,7 @@ impl CtxEnv {
         return Some(Ok(root));
       }
     }
-    let mut cursor = query;
+    /*let mut cursor = query;
     loop {
       match self.celtab.get(&cursor) {
         None => {
@@ -1409,7 +1409,7 @@ impl CtxEnv {
           }
         }
       }
-    }
+    }*/
   }
 
   pub fn _probe_ref(&self, query: CellPtr) -> CellProbePtr {
@@ -1422,7 +1422,7 @@ impl CtxEnv {
         return Ok(root);
       }
     }
-    let mut cursor = query;
+    /*let mut cursor = query;
     loop {
       match self.celtab.get(&cursor) {
         None => {
@@ -1455,7 +1455,7 @@ impl CtxEnv {
           }
         }
       }
-    }
+    }*/
   }
 
   pub fn _probe_view(&self, query: CellPtr) -> CellProbeView {

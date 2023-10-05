@@ -14,6 +14,7 @@ use crate::util::safetensor::{TensorDtype};
 use cacti_cfg_env::*;
 
 use futhark_ffi::{AbiScalar as FutAbiScalar};
+use rustc_serialize::*;
 use smol_str::{SmolStr};
 
 use std::borrow::{Borrow};
@@ -1329,6 +1330,11 @@ impl ScalarVal_ {
     }
   }
 
+  pub fn cast_to(&self, dtype: Dtype) -> ScalarVal_ {
+    // TODO
+    unimplemented!();
+  }
+
   pub fn is_bot(self) -> bool {
     match self {
       ScalarVal_::Bot => true,
@@ -1376,7 +1382,9 @@ impl ScalarVal_ {
     // FIXME: use the formatter.
     match self {
       ScalarVal_::F64(x) => {
-        if x.0.is_infinite() {
+        if x.0.is_nan() {
+          unimplemented!();
+        } else if x.0.is_infinite() {
           if x.0 < 0.0 {
             format!("-f64.inf").into()
           } else {
@@ -1387,7 +1395,9 @@ impl ScalarVal_ {
         }
       }
       ScalarVal_::F32(x) => {
-        if x.0.is_infinite() {
+        if x.0.is_nan() {
+          unimplemented!();
+        } else if x.0.is_infinite() {
           if x.0 < 0.0 {
             format!("-f32.inf").into()
           } else {
@@ -1500,6 +1510,18 @@ pub enum Dtype {
   F16,
   Bf16,
   _Bot,
+}
+
+impl Decodable for Dtype {
+  fn decode<D: Decoder>(d: &mut D) -> Result<Dtype, D::Error> {
+    Dtype::from_str(d.read_str()?.as_str()).map_err(|_| d.error("invalid dtype"))
+  }
+}
+
+impl Encodable for Dtype {
+  fn encode<E: Encoder>(&self, e: &mut E) -> Result<(), E::Error> {
+    e.emit_str(self._to_str())
+  }
 }
 
 impl TryFrom<TensorDtype> for Dtype {

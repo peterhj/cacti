@@ -1,12 +1,12 @@
 use crate::prelude::*;
 
 /// An implementation of AdamW for 32-bit floating point.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, RustcDecodable, RustcEncodable)]
 pub struct AdamW32 {
-  /// A multiplicative un-scaling factor to apply to the
-  /// gradients _before_ adding them to the exponential
-  /// moving average moments.
-  //pub grad_unscale: f32,
+  /// A multiplicative scaling factor applied to the
+  /// gradients that then needs to be undone _before_
+  /// accumulating them into the exponential moving
+  /// average moments.
   pub grad_scale: Option<f32>,
 
   /// The learning rate.

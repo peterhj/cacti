@@ -1,4 +1,4 @@
-use crate::algo::{HashMap, HashSet};
+use crate::algo::{BTreeMap, BTreeSet};
 use crate::algo::str::*;
 use crate::cell::{CellType, Dtype};
 use crate::util::{FileOrPath};
@@ -37,8 +37,8 @@ pub struct PickleDir {
   pub dir_path: PathBuf,
   pub model_paths: Vec<PathBuf>,
   pub serial_key: Vec<SmolStr>,
-  pub tensor_key: HashSet<SmolStr>,
-  pub tensor_map: HashMap<SmolStr, (usize, PickleTensor)>,
+  pub tensor_key: BTreeSet<SmolStr>,
+  pub tensor_map: BTreeMap<SmolStr, (usize, PickleTensor)>,
   pub model_files: Vec<RefCell<Option<MmapFile>>>,
 }
 
@@ -54,8 +54,8 @@ impl PickleDir {
       dir_path: p.into(),
       model_paths: Vec::new(),
       serial_key: Vec::new(),
-      tensor_key: HashSet::default(),
-      tensor_map: HashMap::default(),
+      tensor_key: BTreeSet::default(),
+      tensor_map: BTreeMap::default(),
       model_files: Vec::new(),
     };
     this._reopen()?;
@@ -111,11 +111,12 @@ impl PickleDir {
     Ok(())
   }
 
-  pub fn clone_keys(&self) -> HashSet<SmolStr> {
+  pub fn clone_keys(&self) -> BTreeSet<SmolStr> {
     self.tensor_key.clone()
   }
 
-  pub fn get(&self, key: &SmolStr) -> (CellType, PickleSlice) {
+  pub fn get<K: AsRef<str>>(&self, key: K) -> (CellType, PickleSlice) {
+    let key = key.as_ref();
     match self.tensor_map.get(key) {
       None => panic!("bug"),
       Some(&(model_idx, ref t)) => {
@@ -178,7 +179,8 @@ impl PickleDir {
         };
         let off: usize = offset.try_into().unwrap();
         let sz: usize = span.try_into().unwrap();
-        let mem = file.slice(off, off + sz);
+        let eoff = off + sz;
+        let mem = file.slice(off .. eoff);
         let slice = PickleSlice{mem};
         (ty, slice)
       }
