@@ -160,8 +160,10 @@ impl Ctx {
       pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
+        if cfg_verbose_report() {
         gpu._dump_sizes();
         gpu._dump_free();
+        }
       }
       }
       for &x in self.ctr.celfront.borrow().iter() {
@@ -208,12 +210,17 @@ impl Ctx {
           free_ct += 1;
         }
       }
+      if let Some(gpu) = pctx.nvgpu.as_ref() {
+        gpu.mem_pool.reset_peak_size();
+      }
       if cfg_verbose_info() {
       pctx.swap._dump_usage();
       if let Some(gpu) = pctx.nvgpu.as_ref() {
         gpu._dump_usage();
+        if cfg_verbose_report() {
         gpu._dump_sizes();
         gpu._dump_free();
+        }
       }
       }
     });

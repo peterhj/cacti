@@ -177,8 +177,10 @@ impl Drop for NvGpuPCtx {
   fn drop(&mut self) {
     if cfg_info() {
       self._dump_usage();
+      if cfg_report() {
       self._dump_sizes();
       self._dump_free();
+      }
     }
   }
 }
@@ -691,10 +693,9 @@ impl NvGpuPCtx {
         self.page_map.usage.get(),
         //self.page_map.pg_usage.get(),
     );
-    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool: vmem used={}",
-        self.mem_pool.front_cursor.get()
-          - self.mem_pool.free_size.get()
-          + self.mem_pool.back_cursor.get()
+    println!("INFO:   NvGpuPCtx::_dump_usage: mem pool: vmem used={} peak={}",
+        self.mem_pool.used_size(),
+        self.mem_pool.peak_size.get(),
     );
     println!("INFO:   NvGpuPCtx::_dump_usage: mem pool:     front={} free={} back={} total={}",
         self.mem_pool.front_cursor.get(),
@@ -1384,8 +1385,9 @@ pub struct NvGpuMemPool {
   pub extra_base:   u64,
   pub extra_sz:     usize,
   pub extra_pad:    usize,
-  pub front_cursor: Cell<usize>,
+  pub peak_size:    Cell<usize>,
   pub free_size:    Cell<usize>,
+  pub front_cursor: Cell<usize>,
   pub back_cursor:  Cell<usize>,
   pub back_alloc:   Cell<bool>,
   pub alloc_pin:    Cell<bool>,
@@ -1433,7 +1435,6 @@ impl NvGpuMemPool {
     let unrounded_reserve_sz = (total_sz * reserve_bp as usize + 10000 - 1) / 10000;
     let mut reserve_sz = (unrounded_reserve_sz >> 16) << 16;
     assert!(reserve_sz <= unrounded_reserve_sz);
-    // FIXME
     TL_CFG_ENV.with(|cfg| {
       match cfg.vmem_soft_limit.as_ref() {
         None => {}
@@ -1498,8 +1499,9 @@ impl NvGpuMemPool {
       extra_base,
       extra_sz,
       extra_pad,
-      front_cursor: Cell::new(0),
+      peak_size:    Cell::new(0),
       free_size:    Cell::new(0),
+      front_cursor: Cell::new(0),
       back_cursor:  Cell::new(0),
       back_alloc:   Cell::new(false),
       alloc_pin:    Cell::new(false),
@@ -1521,6 +1523,16 @@ impl NvGpuMemPool {
 
   pub fn front_dptr(&self) -> u64 {
     self.front_base + self.front_cursor.get() as u64
+  }
+
+  pub fn used_size(&self) -> usize {
+    self.front_cursor.get()
+      - self.free_size.get()
+      + self.back_cursor.get()
+  }
+
+  pub fn reset_peak_size(&self) {
+    self.peak_size.set(self.used_size());
   }
 
   pub fn set_back_alloc(&self, flag: bool) {
@@ -1700,6 +1712,10 @@ impl NvGpuMemPool {
       println!("DEBUG:  NvGpuMemPool::_back_alloc:   back  suffix=0x{:016x}", self.back_cursor.get());
       println!("DEBUG:  NvGpuMemPool::_back_alloc:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
     }
+    let used_sz = self.used_size();
+    if self.peak_size.get() < used_sz {
+      self.peak_size.set(used_sz);
+    }
     cel
   }
 
@@ -1780,6 +1796,10 @@ impl NvGpuMemPool {
           addr, offset, req_sz);
       println!("DEBUG:  NvGpuMemPool::_front_alloc:   front prefix=0x{:016x}", self.front_cursor.get());
       println!("DEBUG:  NvGpuMemPool::_front_alloc:   total       =0x{:016x} = {}", self.front_sz, self.front_sz);
+    }
+    let used_sz = self.used_size();
+    if self.peak_size.get() < used_sz {
+      self.peak_size.set(used_sz);
     }
     cel
   }
