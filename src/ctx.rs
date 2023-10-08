@@ -197,9 +197,6 @@ impl Ctx {
                 }
                 drop(e);
               }
-              if x.to_unchecked() == 726 {
-                println!("WARNING:Ctx::reset: gc: x={:?}", x);
-              }
               assert!(env.celtab.remove(&x).is_some());
               let _ = env.celroot.borrow_mut().remove(&x);
               let _ = spine_env.state.remove(&x);

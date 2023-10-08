@@ -530,9 +530,9 @@ impl Llama {
       }
       stream = stream + down_stream;
     }
-    let stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
-    let mut lm_head_stream = stream.matmul(false, &self.lm_head, true)
-                            .new_shape([ubat_sz, seq_cap, tok_dim]);
+    let mut lm_head_stream = rms_norm(&stream, &self.head_norm, rms_norm_eps, dtype);
+    lm_head_stream = lm_head_stream.matmul(false, &self.lm_head, true)
+                    .new_shape([ubat_sz, seq_cap, tok_dim]);
     if let Some(inv_scale) = param_inv_scale {
       lm_head_stream = lm_head_stream * inv_scale;
     }
@@ -574,12 +574,18 @@ impl From<LlamaConfig> for LlamaCached {
     let num_head = cfg.num_head;
     let head_dim = cfg.head_dim;
     let inner_dim = num_head * head_dim;
+    let q_group = cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  LlamaCached::from: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
+    let num_kv_head = num_head / q_group;
+    let kv_inner_dim = num_kv_head * head_dim;
     let mlp_inner_dim = cfg.mlp_inner_dim;
     let tok_dim = cfg.tok_dim;
     let num_layers = cfg.num_layer as usize;
     let dtype = cfg.dtype;
-    if !(cfg.q_group == 1 &&
-         cfg.ten_par.unwrap_or(1) == 1 &&
+    if !(cfg.ten_par.unwrap_or(1) == 1 &&
          cfg.rope_lin_scale.unwrap_or(1.0) == 1.0)
     {
       println!("ERROR:  LlamaCached::from: llama 2 config is not yet implemented");
@@ -594,8 +600,8 @@ impl From<LlamaConfig> for LlamaCached {
     for _ in 0 .. num_layers {
       let pre_norm = StableCell::array([inner_dim], dtype);
       let q = StableCell::array([inner_dim, inner_dim], dtype);
-      let k = StableCell::array([inner_dim, inner_dim], dtype);
-      let v = StableCell::array([inner_dim, inner_dim], dtype);
+      let k = StableCell::array([kv_inner_dim, inner_dim], dtype);
+      let v = StableCell::array([kv_inner_dim, inner_dim], dtype);
       let o = StableCell::array([inner_dim, inner_dim], dtype);
       let post_norm = StableCell::array([inner_dim], dtype);
       let gate = StableCell::array([mlp_inner_dim, inner_dim], dtype);
@@ -619,6 +625,11 @@ impl From<Llama> for LlamaCached {
     let seq_cap = cfg.seq_cap;
     let num_head = cfg.num_head;
     let head_dim = cfg.head_dim;
+    let q_group = cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  LlamaCached::from: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
     let num_layers = cfg.num_layer as usize;
     let dtype = cfg.dtype;
     let cos = model.cos;
@@ -644,6 +655,11 @@ impl LlamaCached {
     cfg.seq_cap = seq_cap;
     let num_head = cfg.num_head;
     let head_dim = cfg.head_dim;
+    let q_group = cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  LlamaCached::from: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
     let num_layers = cfg.num_layer as usize;
     let dtype = cfg.dtype;
     let cos = model.cos;
@@ -751,6 +767,11 @@ impl LlamaCached {
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
     let head_dim = self.cfg.head_dim;
+    let q_group = self.cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  LlamaCached::apply: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
     let dtype = self.cfg.dtype;
     self.states.clear();
     for _ in 0 .. self.cfg.num_layer as usize {
@@ -784,11 +805,19 @@ impl LlamaCached {
     let seq_cap = self.cfg.seq_cap;
     let num_head = self.cfg.num_head;
     let head_dim = self.cfg.head_dim;
-    let inner_dim = num_head * head_dim;
+    //let inner_dim = num_head * head_dim;
+    let q_group = self.cfg.q_group;
+    if num_head % q_group != 0 {
+      println!("ERROR:  LlamaCached::apply: num_head={} is incompatible with q_group={}", num_head, q_group);
+      panic!();
+    }
+    let num_kv_head = num_head / q_group;
     let mlp_inner_dim = self.cfg.mlp_inner_dim;
     let tok_dim = self.cfg.tok_dim;
     let num_layer = self.cfg.num_layer;
     let rms_norm_eps = self.cfg.rms_norm_eps;
+    // FIXME
+    let param_inv_scale: Option<f16> = self.cfg.param_scale.map(|c| f16::from_f32(1.0 / c));
     let dtype = self.cfg.dtype;
     let diff_seq_len = next_seq_len - prev_seq_len;
     assert_eq!(ubat_sz as usize, in_.len());
@@ -819,85 +848,103 @@ impl LlamaCached {
     };
     let mut stream = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
-      let in_tok = &in_[i as usize].in_tok._deref()[(.., prev_seq_len .. next_seq_len)];
+      let idx = i as usize;
+      let in_tok = &in_[idx].in_tok._deref()[(.., prev_seq_len .. next_seq_len)];
       stream.push(self.embed.outer_select(in_tok)
                  .new_shape([1, diff_seq_len, num_head, head_dim]));
+      if let Some(inv_scale) = param_inv_scale {
+        stream[idx] = stream[idx] * inv_scale;
+      }
     }
     for ell in 0 .. num_layer as usize {
       for i in 0 .. ubat_sz {
         let idx = i as usize;
-        let pre_nrm =
-               rms_norm(&stream[idx], &self.layers[ell].pre_norm, rms_norm_eps, dtype)
-              .new_shape([1, diff_seq_len, num_head, head_dim]);
-        let q_proj =
-               symplectic_embed(
-               pre_nrm
-              .new_shape([diff_seq_len, num_head * head_dim])
-              .matmul(false, &self.layers[ell].q, true)
-              .new_shape([1, diff_seq_len, num_head, head_dim])
-               );
+        let pre_nrm = rms_norm(&stream[idx], &self.layers[ell].pre_norm, rms_norm_eps, dtype);
+        let mut q_stream = pre_nrm;
+        q_stream = q_stream.matmul(false, &self.layers[ell].q, true)
+                  .new_shape([1, diff_seq_len, num_head, head_dim]);
+        if let Some(inv_scale) = param_inv_scale {
+          q_stream = q_stream * inv_scale;
+        }
+        q_stream = symplectic_embed(q_stream);
+        let mut k_stream = pre_nrm;
+        k_stream = k_stream.matmul(false, &self.layers[ell].k, true)
+                  .new_shape([1, diff_seq_len, num_kv_head, head_dim]);
+        if let Some(inv_scale) = param_inv_scale {
+          k_stream = k_stream * inv_scale;
+        }
+        k_stream = symplectic_embed(k_stream);
+        k_stream = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
+                  .new_shape([1, diff_seq_len, num_head, head_dim]);
         self.states[ell].k_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
-            += symplectic_embed(
-               pre_nrm
-              .new_shape([diff_seq_len, num_head * head_dim])
-              .matmul(false, &self.layers[ell].k, true)
-              .new_shape([1, diff_seq_len, num_head, head_dim])
-               );
+            += k_stream;
+        let mut v_stream = pre_nrm;
+        v_stream = v_stream.matmul(false, &self.layers[ell].v, true)
+                  .new_shape([1, diff_seq_len, num_kv_head, head_dim]);
+        if let Some(inv_scale) = param_inv_scale {
+          v_stream = v_stream * inv_scale;
+        }
+        v_stream = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
+                  .new_shape([1, diff_seq_len, num_head, head_dim]);
         self.states[ell].v_cache[(i .. i + 1, prev_seq_len .. next_seq_len, .., ..)]
-            += pre_nrm
-              .new_shape([diff_seq_len, num_head * head_dim])
-              .matmul(false, &self.layers[ell].v, true)
-              .new_shape([1, diff_seq_len, num_head, head_dim]);
-        // FIXME: query group.
-        /*
-        let k_attn = if q_group > 1 { k_stream.inner_tile(q_group) } else { k_stream }
-                    .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-        let v_attn = if q_group > 1 { v_stream.inner_tile(q_group) } else { v_stream }
-                    .new_shape([ubat_sz, seq_cap, num_head, head_dim]);
-        */
+            += v_stream;
         let attn =
-               q_proj
-              .block_matmul_scale(
-                   false,
-                   &self.states[ell].k_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
-                   true,
-                   1.0 / (head_dim as f32).sqrt()
-               )
-              .cast(f32::dtype_());
+                q_stream
+               .block_matmul_scale(
+                    false,
+                    &self.states[ell].k_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
+                    true,
+                    1.0 / (head_dim as f32).sqrt()
+                )
+               .cast(f32::dtype_());
         let attn = row_causal_attention_mask(attn, prev_seq_len)
                   .inner_softmax()
                   .lossy_cast(dtype);
-        let v_attn =
-               attn
-              .block_matmul(
-                   false,
-                   &self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
-                   false
-               )
-              .new_shape([diff_seq_len, num_head * head_dim]);
-        let o_proj = v_attn.matmul(false, &self.layers[ell].o, true)
-                    .new_shape([1, diff_seq_len, num_head, head_dim]);
-        stream[idx] = stream[idx] + o_proj;
+        let attn =
+                attn
+               .block_matmul(
+                    false,
+                    &self.states[ell].v_cache[(i .. i + 1, .. /*next_seq_len*/, .., ..)],
+                    false
+                )
+               .new_shape([diff_seq_len, num_head * head_dim]);
+        let mut o_stream = attn.matmul(false, &self.layers[ell].o, true)
+                          .new_shape([1, diff_seq_len, num_head, head_dim]);
+        if let Some(inv_scale) = param_inv_scale {
+          o_stream = o_stream * inv_scale;
+        }
+        stream[idx] = stream[idx] + o_stream;
         let post_nrm = rms_norm(&stream[idx], &self.layers[ell].post_norm, rms_norm_eps, dtype);
-        let up_proj = post_nrm
-                     .matmul(false, &self.layers[ell].up, true);
-        let gate_proj = post_nrm
-                       .matmul(false, &self.layers[ell].gate, true);
-        let gate_proj = gate_proj.standard_silu();
-        let gate_up = gate_proj * up_proj;
-        let down_proj = gate_up.matmul(false, &self.layers[ell].down, true)
-                       .new_shape([1, diff_seq_len, num_head, head_dim]);
-        stream[idx] = stream[idx] + down_proj;
+        let mut up_stream = post_nrm;
+        up_stream = up_stream.matmul(false, &self.layers[ell].up, true);
+        if let Some(inv_scale) = param_inv_scale {
+          up_stream = up_stream * inv_scale;
+        }
+        let mut gate_stream = post_nrm;
+        gate_stream = gate_stream.matmul(false, &self.layers[ell].gate, true);
+        if let Some(inv_scale) = param_inv_scale {
+          gate_stream = gate_stream * inv_scale;
+        }
+        gate_stream = gate_stream.standard_silu();
+        let mut down_stream = gate_stream * up_stream;
+        down_stream = down_stream.matmul(false, &self.layers[ell].down, true)
+                     .new_shape([1, diff_seq_len, num_head, head_dim]);
+        if let Some(inv_scale) = param_inv_scale {
+          down_stream = down_stream * inv_scale;
+        }
+        stream[idx] = stream[idx] + down_stream;
       }
     }
     let mut out = Vec::with_capacity(ubat_sz as usize);
     for i in 0 .. ubat_sz {
       let idx = i as usize;
-      stream[idx] = rms_norm(&stream[idx], &self.head_norm, rms_norm_eps, dtype);
-      let out_lm_logit = stream[idx]
-                        .matmul(false, &self.lm_head, true)
-                        .new_shape([1, diff_seq_len, tok_dim])
-                        .keep();
+      let mut lm_head_stream = rms_norm(&stream[idx], &self.head_norm, rms_norm_eps, dtype);
+      lm_head_stream = lm_head_stream.matmul(false, &self.lm_head, true)
+                      .new_shape([1, diff_seq_len, tok_dim]);
+      if let Some(inv_scale) = param_inv_scale {
+        lm_head_stream = lm_head_stream * inv_scale;
+      }
+      let out_lm_logit = lm_head_stream.keep();
       let out_lm_prob = out_lm_logit
                        .cast(f32::dtype_())
                        .inner_softmax()
