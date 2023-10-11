@@ -1266,6 +1266,7 @@ impl CellIndexPermState {
 pub type ScalarVal = ScalarVal_;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[non_exhaustive]
 pub enum ScalarVal_ {
   F64(TotalOrd<f64>),
   F32(TotalOrd<f32>),
@@ -1487,6 +1488,7 @@ impl IntoScalarValExt for i64 {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[non_exhaustive]
 pub enum DtypeKind_ {
   Fp(u8, u8),
   Int,
@@ -1495,6 +1497,7 @@ pub enum DtypeKind_ {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum Dtype {
   _Top,
   F64,
