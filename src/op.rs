@@ -955,8 +955,11 @@ pub trait MathInitOps: CellDeref {
       let rate = rate.into_scalar_val_();
       let ty = ctx_lookup_type(this);
       assert!(ctx_clean_arg());
+      ctx_push_scalar_param(src_scale);
+      ctx_push_scalar_param(rate);
       ctx_push_cell_arg(val);
-      ctx_pop_initialize_thunk_(OnlineAverageScaleInitFutThunkSpec{src_scale, rate}, this, ty)
+      /*ctx_pop_initialize_thunk_(OnlineAverageScaleInitFutThunkSpec{src_scale, rate}, this, ty)*/
+      ctx_pop_initialize_thunk_(OnlineAverageScaleInitFutThunkSpec, this, ty)
     })
   }
 
@@ -969,8 +972,11 @@ pub trait MathInitOps: CellDeref {
       let rate = rate.into_scalar_val_();
       let ty = ctx_lookup_type(this);
       assert!(ctx_clean_arg());
+      ctx_push_scalar_param(src_scale);
+      ctx_push_scalar_param(rate);
       ctx_push_cell_arg(val);
-      ctx_pop_initialize_thunk_(OnlineAverageSquareScaleInitFutThunkSpec{src_scale, rate}, this, ty)
+      /*ctx_pop_initialize_thunk_(OnlineAverageSquareScaleInitFutThunkSpec{src_scale, rate}, this, ty)*/
+      ctx_pop_initialize_thunk_(OnlineAverageSquareScaleInitFutThunkSpec, this, ty)
     })
   }
 

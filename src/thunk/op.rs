@@ -3881,11 +3881,11 @@ impl FutharkThunkSpec for OnlineAddSquareScale2InitFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct OnlineAverageScaleInitFutThunkSpec {
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct OnlineAverageScaleInitFutThunkSpec;/* {
   pub src_scale: ScalarVal_,
   pub rate: ScalarVal_,
-}
+}*/
 
 impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -3900,6 +3900,10 @@ impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
     Some((1, 1))
   }
 
+  fn param_count(&self) -> u16 {
+    2
+  }
+
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     //Ok(arg[0])
     Err(ThunkDimErr::Nondeterm)
@@ -3910,26 +3914,37 @@ impl FutharkThunkSpec for OnlineAverageScaleInitFutThunkSpec {
     Err(ThunkTypeErr::Nondeterm)
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     if arg[0].ndim() != out[0].ndim() {
       return Err(ThunkDimErr::_Bot.into_gen());
     }
-    FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+    /*FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> v + {} * ({} * ({}.{} u) - v)",
             self.rate.format_futhark(),
             self.src_scale.format_futhark(),
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         )
-    )
+    )*/
+    let mut code = FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+        format!(r"\u v -> v + {{%param[1]}} * ({{%param[0]}} * ({}.{} u) - v)",
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
+    )?;
+    code.abi.param_ct = 2;
+    for k in 0 .. 2 {
+      code.abi.set_param(k, FutharkParam::Spec, FutAbiScalarType::F32);
+    }
+    code.into()
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct OnlineAverageSquareScaleInitFutThunkSpec {
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct OnlineAverageSquareScaleInitFutThunkSpec;/* {
   pub src_scale: ScalarVal_,
   pub rate: ScalarVal_,
-}
+}*/
 
 impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -3944,6 +3959,10 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
     Some((1, 1))
   }
 
+  fn param_count(&self) -> u16 {
+    2
+  }
+
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     //Ok(arg[0])
     Err(ThunkDimErr::Nondeterm)
@@ -3954,11 +3973,11 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
     Err(ThunkTypeErr::Nondeterm)
   }
 
-  fn gen_futhark(&self, /*abi: &mut FutAbi,*/ arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
+  fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     if arg[0].ndim() != out[0].ndim() {
       return Err(ThunkDimErr::_Bot.into_gen());
     }
-    FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+    /*FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
         format!(r"\u v -> v + {} * (({} * ({}.{} u)) * ({} * ({}.{} u)) - v)",
             self.rate.format_futhark(),
             self.src_scale.format_futhark(),
@@ -3968,7 +3987,20 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
             out[0].dtype.format_futhark(),
             arg[0].dtype.format_futhark(),
         )
-    )
+    )*/
+    let mut code = FutharkThunkGenCode::flat_map2_(r"{%0}", arg[0], r"{%1}", out[0], r"{%1}",
+        format!(r"\u v -> v + {{%param[1]}} * (({{%param[0]}} * ({}.{} u)) * ({{%param[0]}} * ({}.{} u)) - v)",
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+            out[0].dtype.format_futhark(),
+            arg[0].dtype.format_futhark(),
+        )
+    )?;
+    code.abi.param_ct = 2;
+    for k in 0 .. 2 {
+      code.abi.set_param(k, FutharkParam::Spec, FutAbiScalarType::F32);
+    }
+    code.into()
   }
 }
 
