@@ -1566,14 +1566,6 @@ impl FutharkThunkGenCode {
       let dim = spec_dim[k as usize];
       write!(&mut s, " (x_{}: {})", k, genabi._to_futhark_entry_arg_type(k, dim, cfg.emit_arg_shapes)).unwrap();
     }
-    for k in 0 .. param_ct {
-      match genabi.get_param(k) {
-        (FutharkParam::Spec, sty) => {
-          write!(&mut s, " (param_{}: {})", k, sty.format_futhark()).unwrap();
-        }
-        _ => unimplemented!()
-      }
-    }
     if rar == 1 {
       match mode {
         ThunkMode::Apply => {
@@ -1593,6 +1585,14 @@ impl FutharkThunkGenCode {
             // FIXME
             //abi.set_emit_out0_shape_param(true);
           }
+          for k in 0 .. param_ct {
+            match genabi.get_param(k) {
+              (FutharkParam::Spec, sty) => {
+                write!(&mut s, " (param_{}: {})", k, sty.format_futhark()).unwrap();
+              }
+              _ => unimplemented!()
+            }
+          }
           if cfg.emit_out0_shape {
             write!(&mut s, " : {}", genabi._to_futhark_entry_out0_type(0, dim)).unwrap();
           } else {
@@ -1611,11 +1611,28 @@ impl FutharkThunkGenCode {
           } else {
             genabi._to_futhark_entry_out_type(0, dim)
           };
-          write!(&mut s, " (oy_{}: *{}) : *{}", 0, fty, fty).unwrap();
+          write!(&mut s, " (oy_{}: *{})", 0, fty).unwrap();
+          for k in 0 .. param_ct {
+            match genabi.get_param(k) {
+              (FutharkParam::Spec, sty) => {
+                write!(&mut s, " (param_{}: {})", k, sty.format_futhark()).unwrap();
+              }
+              _ => unimplemented!()
+            }
+          }
+          write!(&mut s, " : *{}", fty).unwrap();
         }
         _ => unimplemented!()
       }
     } else if mode == ThunkMode::Apply {
+      for k in 0 .. param_ct {
+        match genabi.get_param(k) {
+          (FutharkParam::Spec, sty) => {
+            write!(&mut s, " (param_{}: {})", k, sty.format_futhark()).unwrap();
+          }
+          _ => unimplemented!()
+        }
+      }
       write!(&mut s, " : (").unwrap();
       for k in 0 .. rar {
         let dim = spec_dim[(lar + k) as usize];

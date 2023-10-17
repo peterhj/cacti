@@ -1005,9 +1005,14 @@ pub trait MathInitOps: CellDeref {
           signed_lr, lamda, eps);
       }
       assert!(ctx_clean_arg());
+      ctx_push_scalar_param(signed_lr);
+      ctx_push_scalar_param(lr_unbias);
+      ctx_push_scalar_param(lamda);
+      ctx_push_scalar_param(eps);
       ctx_push_cell_arg(grad1_avg);
       ctx_push_cell_arg(grad2_avg);
-      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)
+      /*ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)*/
+      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec, this)
     })
   }
 
@@ -1046,9 +1051,14 @@ pub trait MathInitOps: CellDeref {
           signed_lr, lamda, eps);
       }
       assert!(ctx_clean_arg());
+      ctx_push_scalar_param(signed_lr);
+      ctx_push_scalar_param(lr_unbias);
+      ctx_push_scalar_param(lamda);
+      ctx_push_scalar_param(eps);
       ctx_push_cell_arg(grad1_avg);
       ctx_push_cell_arg(grad2_avg);
-      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)
+      /*ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec{signed_lr, lr_unbias, lamda, eps}, this)*/
+      ctx_pop_initialize_thunk(OnlineAdamWUpdateInitFutThunkSpec, this)
     })
   }
 }

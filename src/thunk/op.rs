@@ -3972,13 +3972,13 @@ impl FutharkThunkSpec for OnlineAverageSquareScaleInitFutThunkSpec {
   }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct OnlineAdamWUpdateInitFutThunkSpec {
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct OnlineAdamWUpdateInitFutThunkSpec;/* {
   pub signed_lr: ScalarVal_,
   pub lr_unbias: ScalarVal_,
   pub lamda: ScalarVal_,
   pub eps: ScalarVal_,
-}
+}*/
 
 impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
   fn debug_name(&self) -> Option<&'static str> {
@@ -3993,6 +3993,10 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
     Some((2, 1))
   }
 
+  fn param_count(&self) -> u16 {
+    4
+  }
+
   fn out_dim(&self, arg: &[Dim]) -> Result<Dim, ThunkDimErr> {
     Ok(arg[0])
   }
@@ -4003,7 +4007,7 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
 
   fn gen_futhark(&self, arg: &[Dim], out: &[Dim]) -> Result<FutharkThunkGenCode, FutharkGenErr> {
     // FIXME: params.
-    FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
+    /*FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
         format!(r"\u v w -> w + {} * ({} * (u / (({}.sqrt v) + {})) + {} * w)",
             self.signed_lr.format_futhark(),
             self.lr_unbias.format_futhark(),
@@ -4011,7 +4015,17 @@ impl FutharkThunkSpec for OnlineAdamWUpdateInitFutThunkSpec {
             self.eps.format_futhark(),
             self.lamda.format_futhark(),
         )
-    )
+    )*/
+    let mut code = FutharkThunkGenCode::flat_map3_(r"{%0}", arg[0], r"{%1}", arg[1], r"{%2}", out[0], r"{%2}",
+        format!(r"\u v w -> w + {{%param[0]}} * ({{%param[1]}} * (u / (({}.sqrt v) + {{%param[3]}})) + {{%param[2]}} * w)",
+            arg[1].dtype.format_futhark(),
+        )
+    )?;
+    code.abi.param_ct = 4;
+    for k in 0 .. 4 {
+      code.abi.set_param(k, FutharkParam::Spec, FutAbiScalarType::F32);
+    }
+    code.into()
   }
 }
 
