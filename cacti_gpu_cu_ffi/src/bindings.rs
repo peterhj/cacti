@@ -68,6 +68,7 @@ pub struct Libcuda {
   pub cuModuleUnload:           Option<Symbol<extern "C" fn (CUmodule) -> CUresult>>,
   pub cuModuleGetFunction:      Option<Symbol<extern "C" fn (*mut CUfunction, CUmodule, *const c_char) -> CUresult>>,
   pub cuFuncGetAttribute:       Option<Symbol<extern "C" fn (*mut c_int, CUfunction_attribute, CUfunction) -> CUresult>>,
+  pub cuFuncSetAttribute:       Option<Symbol<extern "C" fn (CUfunction, CUfunction_attribute, c_int) -> CUresult>>,
   pub cuLaunchKernel:           Option<Symbol<extern "C" fn (CUfunction, c_uint, c_uint, c_uint, c_uint, c_uint, c_uint, c_uint, CUstream, *mut *mut c_void, *mut *mut c_void) -> CUresult>>,
   // TODO
 }
@@ -129,6 +130,7 @@ impl Libcuda {
     self.cuModuleUnload = library.get(b"cuModuleUnload").ok();
     self.cuModuleGetFunction = library.get(b"cuModuleGetFunction").ok();
     self.cuFuncGetAttribute = library.get(b"cuFuncGetAttribute").ok();
+    self.cuFuncSetAttribute = library.get(b"cuFuncSetAttribute").ok();
     self.cuLaunchKernel = library.get(b"cuLaunchKernel").ok();
     // TODO
     self._check_required()?;
@@ -161,6 +163,7 @@ impl Libcuda {
     i += 1; self.cuModuleUnload.as_ref().ok_or(i)?;
     i += 1; self.cuModuleGetFunction.as_ref().ok_or(i)?;
     i += 1; self.cuFuncGetAttribute.as_ref().ok_or(i)?;
+    i += 1; self.cuFuncSetAttribute.as_ref().ok_or(i)?;
     i += 1; self.cuLaunchKernel.as_ref().ok_or(i)?;
     Ok(())
   }
