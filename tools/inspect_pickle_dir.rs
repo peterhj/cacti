@@ -18,7 +18,6 @@ fn main() {
   } else {
     PickleDir::open(dir).unwrap()
   };
-  let pickdir = PickleDir::open(dir).unwrap();
   for (i, k) in pickdir.serial_key.iter().enumerate() {
     let (ty, _) = pickdir.get(k);
     println!("INFO:   tensor i={} dtype={:?} shape={:?} name=\"{}\"",
