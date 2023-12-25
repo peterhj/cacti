@@ -34,6 +34,7 @@ pub enum PickleDirErr {
 }
 
 pub struct PickleDir {
+  pub prefix: String,
   pub dir_path: PathBuf,
   pub model_paths: Vec<PathBuf>,
   pub serial_key: Vec<SmolStr>,
@@ -50,7 +51,13 @@ impl AsRef<Path> for PickleDir {
 
 impl PickleDir {
   pub fn open<P: Into<PathBuf>>(p: P) -> Result<PickleDir, PickleDirErr> {
+    PickleDir::open_with_prefix(p, "pytorch_model")
+  }
+
+  pub fn open_with_prefix<P: Into<PathBuf>, S: Into<String>>(p: P, prefix: S) -> Result<PickleDir, PickleDirErr> {
+    let prefix = prefix.into();
     let mut this = PickleDir{
+      prefix,
       dir_path: p.into(),
       model_paths: Vec::new(),
       serial_key: Vec::new(),
@@ -68,12 +75,12 @@ impl PickleDir {
     self.tensor_key.clear();
     self.tensor_map.clear();
     let mut p = self.dir_path.clone();
-    p.push("pytorch_model.bin");
+    p.push(&format!("{}.bin", self.prefix));
     let files: Vec<FileOrPath> = match File::open(&p) {
       Ok(f) => vec![(p, f).into()],
       Err(_) => {
         let mut p = self.dir_path.clone();
-        p.push("pytorch_model-*-of-*.bin");
+        p.push(&format!("{}-*-of-*.bin", self.prefix));
         let mut files: Vec<FileOrPath> = Vec::new();
         for e in glob(p.to_str().unwrap()).map_err(|_| PickleDirErr::Glob)? {
           match e {
