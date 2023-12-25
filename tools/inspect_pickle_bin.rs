@@ -19,7 +19,7 @@ fn main() {
   for (i, t) in ckpt.tensors().iter().enumerate() {
     println!("INFO:   tensor i={} dtype={:?} shape={:?} stride={:?} name=\"{}\"",
         i,
-        t.tensor_type.clone()
+        t.type_.clone()
           .and_then(|t| Dtype::try_from(t))
           .map_err(|s| safe_ascii(s.as_str().as_bytes())),
         &t.shape,

@@ -70,7 +70,7 @@ fn main() {
   // Note that `grad_unscale` should be the reciprocal of
   // `grad_scale` (see above).
   let adamw = AdamW32{
-    grad_unscale: 1.0 / grad_scale,
+    grad_scale: Some(grad_scale),
     //lr: 1.0e-5,
     lr: 2.0e-5,
     wd: 0.1,
