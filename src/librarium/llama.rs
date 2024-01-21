@@ -301,6 +301,7 @@ impl Llama {
     matches.inv()
   }
 
+  #[cfg(feature = "nightly")]
   pub fn match_cell_split_fp16(&self, split: &CellSplitMmap) -> CellInvMatches {
     assert_eq!(self.cfg.dtype, Dtype::F16);
     let mut matcher = CellMatcher::new();
@@ -322,6 +323,7 @@ impl Llama {
     matches.inv()
   }
 
+  #[cfg(feature = "nightly")]
   pub fn match_cell_split(&self, split: &CellSplitMmap) -> CellInvMatches {
     let fp = match self.cfg.dtype {
       Dtype::F16 => "fp16",

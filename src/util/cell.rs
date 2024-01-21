@@ -2,6 +2,7 @@ use crate::algo::{BTreeMap, BTreeSet, HashMap};
 use crate::cell::{StableCell, CellType, Dtype};
 use crate::util::mmap::{MmapFile, MmapFileSlice};
 
+#[cfg(feature = "nightly")]
 pub use cell_split::{CellSplit, CellRepr};
 use cell_split::{CellType as ExtCellType, Dtype as ExtDtype};
 use smol_str::{SmolStr};
@@ -299,11 +300,13 @@ impl From<Dtype> for ExtDtype {
   }
 }
 
+#[cfg(feature = "nightly")]
 pub struct CellSplitMmap {
   pub inner: RefCell<CellSplit>,
   pub data_files: Vec<MmapFile>,
 }
 
+#[cfg(feature = "nightly")]
 impl CellSplitMmap {
   pub fn open<P: AsRef<Path>>(paths: &[P]) -> CellSplitMmap {
     let inner = CellSplit::new_(paths);

@@ -21,6 +21,7 @@ git clone -b patch "${cacti_remote_prefix}/crc32fast" ../crc32fast
 git clone -b patch-0.26 "${cacti_remote_prefix}/futhark" ../futhark
 git clone "${cacti_remote_prefix}/futhark_ffi" ../futhark_ffi
 git clone -b patch "${cacti_remote_prefix}/futhark_syntax" ../futhark_syntax
+git clone -b patch "${cacti_remote_prefix}/fxhash" ../fxhash
 git clone "${cacti_remote_prefix}/glob" ../glob
 git clone -b patch "${cacti_remote_prefix}/half" ../half
 git clone -b patch "${cacti_remote_prefix}/home" ../home
@@ -43,7 +44,7 @@ set -x
 make -C ../futhark configure
 { set +x;} 2>&-
 
-echo "- cacti: Building and installing cacti-futhark to cabal bin path..."
+echo "- cacti: Building and installing cacti-futhark to cabal bin path (this will take a while)..."
 set -x
 make -C ../futhark install
 { set +x;} 2>&-
